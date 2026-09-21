@@ -40,19 +40,27 @@ function searchLink(G) {
    site uses underscores and carries the fixture GUID. Built by hand rather than with URLSearchParams,
    because that would percent-encode the ":" and "~" their format depends on. */
 function selToken(sel) {
-  return [sel.fixtureId, sel.fixtureGuid, sel.marketId, sel.optionId, 'false']
-    .filter((x) => x != null && x !== '').join('_');
+  // Outlier's production hand-off uses the short documented form: fixtureId-marketId-optionId, no GUID.
+  // The Affiliate Helper's longer fixtureId_guid_marketId_optionId_false form also works, so use that
+  // only when a guid is actually on hand. Both were seen working in a signed-in NV slip.
+  return sel.fixtureGuid
+    ? [sel.fixtureId, sel.fixtureGuid, sel.marketId, sel.optionId, 'false'].join('_')
+    : [sel.fixtureId, sel.marketId, sel.optionId].join('-');
 }
 function slipLink(sels, stake) {
   const list = (Array.isArray(sels) ? sels : [sels]).filter(Boolean);
   if (!list.length) return `${BASE}/en/sports`;
+  const anyGuid = list.some((s) => s.fixtureGuid);
   const sameGame = list.length > 1 && list.every((s) => s.fixtureId === list[0].fixtureId);
-  const q = [`options=${list.map(selToken).join(sameGame ? '~' : ',')}`,
-             `type=${list.length > 1 ? 'COMBO' : 'Single'}`];
+  // Same-game legs of the long form chain with "~"; everything else with ",".
+  const sep = anyGuid && sameGame ? '~' : ',';
+  // Land on the event page for a single, the way Outlier's hand-off does, so the slip opens in context.
+  const path = list.length === 1 ? `/en/sports/events/${list[0].fixtureId}` : '/en/sports';
+  const q = [`options=${list.map(selToken).join(sep)}`];
+  if (list.length > 1) q.push('type=COMBO');
   if (stake > 0) q.push(`stake=${encodeURIComponent(stake)}`);
   if (WM) q.push(`wm=${encodeURIComponent(WM)}`);
-  q.push('source=board');
-  return `${BASE}/en/sports?${q.join('&')}`;
+  return `${BASE}${path}?${q.join('&')}`;
 }
 
 /* ---------- their Sports API (only used when an access id is configured) ---------- */
