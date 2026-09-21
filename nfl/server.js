@@ -1112,7 +1112,7 @@ const server = http.createServer(async (req, res) => {
   }
   // `self` records the owner's own phone so it is visible in the Admin Center. Only on a board with an
   // access code: without one everybody is the owner, and every passer-by would become a row.
-  Group.note(uid, Group.byToken(cookieOf(req).ps_key || '')?.id || null, { ua: req.headers['user-agent'], addr: clientIp(req), self: role === 'owner' && !!ACCESS_CODE });
+  Group.note(uid, Group.byToken(cookieOf(req).ps_key || '')?.id || null, { ua: req.headers['user-agent'], addr: clientIp(req), self: role === 'owner' && !!ACCESS_CODE, guest: role === 'guest' });
   // First-party telemetry ingest. Any authenticated device may report its OWN activity, so it sits ahead
   // of the bet-mutation write budget (telemetry is frequent and cheap) but keeps a light budget of its
   // own. The server supplies the trusted identity; the client only says what it did.

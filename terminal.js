@@ -57,6 +57,8 @@ const LOGO = // a terminal caret — the wordmark's icon, favicon and PWA icon
   + '<rect width="64" height="64" rx="15" fill="#0B0B0D"/>'
   + '<path d="M21 21 L33 32 L21 43" fill="none" stroke="#EE3A2E" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>'
   + '<rect x="34" y="38.5" width="15" height="5" rx="2.5" fill="#F5F5F7"/></svg>';
+// The owner's Admin Center: captures every request at the door, owner and guests kept apart (see board.js).
+const Board = require('./board')({ dataDir: DATA_DIR, sports: SPORTS, ownerName: OWNER_NAME, brand: BRAND, logo: LOGO });
 const MANIFEST = JSON.stringify({
   name: BRAND, short_name: BRAND, start_url: '/', scope: '/', display: 'standalone',
   background_color: '#0B0B0D', theme_color: '#0B0B0D',
@@ -112,11 +114,16 @@ function setAuth(res, kind, isHttps) {
   const name = kind === 'owner' ? 'code' : 'guest';
   // Set the credential for ALL THREE sports at Path=/, so one entry authenticates the whole board.
   const bbl = kind === 'owner' ? `bbl_access=${BBL_OWNER}` : `bbl_guest=${BBL_GUEST}`;
-  res.setHeader('set-cookie', [`ps_${name}=${val}; ${opt}`, `hl_${name}=${val}; ${opt}`, `${bbl}; ${opt}`]);
+  addCookies(res, [`ps_${name}=${val}; ${opt}`, `hl_${name}=${val}; ${opt}`, `${bbl}; ${opt}`]);
 }
 function clearAuth(res, isHttps) {
   const gone = `Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isHttps ? '; Secure' : ''}`;
-  res.setHeader('set-cookie', ['ps_code=', 'hl_code=', 'ps_guest=', 'hl_guest=', 'bbl_access=', 'bbl_guest='].map((k) => `${k}; ${gone}`));
+  addCookies(res, ['ps_code=', 'hl_code=', 'ps_guest=', 'hl_guest=', 'bbl_access=', 'bbl_guest='].map((k) => `${k}; ${gone}`));
+}
+// Append, never replace: the board's device cookie may already be on this response.
+function addCookies(res, list) {
+  const had = res.getHeader('set-cookie');
+  res.setHeader('set-cookie', [].concat(had || [], list));
 }
 
 // ---- login page -----------------------------------------------------------
@@ -155,7 +162,9 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 const fails = new Map();
 function locked(ip) { const a = (fails.get(ip) || []).filter((t) => t > Date.now() - 15 * 60e3); fails.set(ip, a); return a.length >= 10; }
 function bad(ip) { const a = fails.get(ip) || []; a.push(Date.now()); fails.set(ip, a); }
-const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '';
+// Railway appends the real client address LAST; earlier entries can be typed by the client (and would let
+// anyone dodge the login rate limit). Same rule the engines use.
+const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || '';
 const isHttps = (req) => (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
 
 // Assets that must load even before sign-in (PWA install + uptime checks).
@@ -173,7 +182,12 @@ const server = http.createServer((req, res) => {
   if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"ok":true,"app":"nfl.ncaaf"}'); }
   if (pathname === '/icon.svg' || pathname === '/favicon.ico') { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' }); return res.end(LOGO); }
   if (pathname === '/manifest.webmanifest') { res.writeHead(200, { 'content-type': 'application/manifest+json; charset=utf-8' }); return res.end(MANIFEST); }
-  if (pathname === '/logout') { clearAuth(res, isHttps(req)); res.writeHead(303, { location: '/' }); return res.end(); }
+
+  // One device id for the whole board, minted silently on first sight (no prompt, no sign-out).
+  const who = Board.identify(req, isHttps(req));
+  if (who.cookie) res.setHeader('set-cookie', [who.cookie]);
+
+  if (pathname === '/logout') { Board.entrance(who, role(req), 'logout'); clearAuth(res, isHttps(req)); res.writeHead(303, { location: '/' }); return res.end(); }
 
   if (pathname === '/login' && req.method === 'POST') {
     const ip = clientIp(req);
@@ -184,8 +198,9 @@ const server = http.createServer((req, res) => {
       let kind = null;
       if (OWNER_HASH && safeEq(hashCode(code), OWNER_HASH)) kind = 'owner';
       else if (GUEST_HASH && safeEq(hashCode('guest:' + code), GUEST_HASH)) kind = 'guest';
-      if (!kind) { bad(ip); return page(res, 401, { wrong: true }); }
+      if (!kind) { bad(ip); Board.entrance(who, null, 'wrong'); return page(res, 401, { wrong: true }); }
       fails.delete(ip);
+      Board.entrance(who, kind, kind === 'owner' ? 'code' : 'guest-code');
       setAuth(res, kind, isHttps(req));
       res.writeHead(303, { location: `/${lastSport(req)}/`, 'cache-control': 'no-store' });
       res.end();
@@ -196,14 +211,18 @@ const server = http.createServer((req, res) => {
   // one-tap guest link: /g/<token>
   const gm = /^\/g\/([a-f0-9]{16,32})$/.exec(pathname);
   if (gm && req.method === 'GET') {
-    if (GUEST_LINK && safeEq(gm[1], GUEST_LINK)) { setAuth(res, 'guest', isHttps(req)); res.writeHead(303, { location: '/nfl/', 'cache-control': 'no-store' }); return res.end(); }
+    if (GUEST_LINK && safeEq(gm[1], GUEST_LINK)) { Board.entrance(who, 'guest', 'guest-link'); setAuth(res, 'guest', isHttps(req)); res.writeHead(303, { location: '/nfl/', 'cache-control': 'no-store' }); return res.end(); }
+    Board.entrance(who, null, 'bad-link');
     return page(res, 401, { wrong: true });
   }
 
   const r = role(req);
+  if (Board.handle(req, res, pathname, qs, r)) return;
 
   if (pathname === '/') {
-    if (GATED && !r) return page(res, 200, {});
+    // A device we already know landing on the sign-in screen is worth a line; a stranger's first hit is not
+    // (scanners would fill the list).
+    if (GATED && !r) { if (!who.cookie) Board.entrance(who, null, 'gate'); return page(res, 200, {}); }
     res.writeHead(302, { location: `/${lastSport(req)}/`, 'cache-control': 'no-store' });
     return res.end();
   }
@@ -220,21 +239,65 @@ const server = http.createServer((req, res) => {
   }
 
   // proxy to the engine (prefix stripped)
-  const forwardPath = (m[2] || '/') + qs;
+  const sp = m[1];
+  const enginePath = m[2] || '/';
+  const forwardPath = enginePath + qs;
   const headers = { ...req.headers, host: `127.0.0.1:${s.port}` };
-  const pr = http.request({ host: '127.0.0.1', port: s.port, method: req.method, path: forwardPath, headers }, (pres) => {
-    const h = { ...pres.headers };
-    if ((h['content-type'] || '').includes('text/html')) {
-      const sc = h['set-cookie'] ? (Array.isArray(h['set-cookie']) ? h['set-cookie'].slice() : [h['set-cookie']]) : [];
-      sc.push(`sport=${m[1]}; Path=/; Max-Age=31536000; SameSite=Lax${isHttps(req) ? '; Secure' : ''}`);
-      h['set-cookie'] = sc;
-    }
-    res.writeHead(pres.statusCode || 502, h);
-    pres.pipe(res);
-  });
-  pr.on('error', () => { if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' }); res.end('Upstream not ready'); });
-  req.pipe(pr);
+  const t0 = Date.now();
+  const isStream = enginePath === '/api/stream';
+  // The owner's copy of a board page gets an Admin Center link in the sport bar; ask for it uncompressed so
+  // it can be edited in flight. Guests' pages pass through untouched.
+  const adminLink = r === 'owner' && req.method === 'GET' && (enginePath === '/' || enginePath === '/index.html');
+  if (adminLink) headers['accept-encoding'] = 'identity';
+  const send = (body) => {
+    const pr = http.request({ host: '127.0.0.1', port: s.port, method: req.method, path: forwardPath, headers }, (pres) => {
+      const h = { ...pres.headers };
+      const sc = [].concat(res.getHeader('set-cookie') || [], h['set-cookie'] || []);
+      if ((h['content-type'] || '').includes('text/html')) sc.push(`sport=${sp}; Path=/; Max-Age=31536000; SameSite=Lax${isHttps(req) ? '; Secure' : ''}`);
+      if (sc.length) h['set-cookie'] = sc;
+      Board.request(who, r, sp, req.method, enginePath, pres.statusCode, Date.now() - t0);
+      if (isStream && pres.statusCode === 200) { Board.streamOpen(who.dev); res.on('close', () => Board.streamClose(who.dev)); }
+      if (adminLink && (h['content-type'] || '').includes('text/html') && !h['content-encoding']) {
+        const parts = [];
+        pres.on('data', (c) => parts.push(c));
+        pres.on('end', () => {
+          const html = Buffer.concat(parts).toString('utf8').replace('</nav></div><style>', `</nav>${ADMIN_PILL}</div><style>`);
+          const buf = Buffer.from(html);
+          h['content-length'] = String(buf.length);
+          res.writeHead(pres.statusCode || 200, h);
+          res.end(buf);
+        });
+        return;
+      }
+      res.writeHead(pres.statusCode || 502, h);
+      pres.pipe(res);
+    });
+    pr.on('error', () => { if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' }); res.end('Upstream not ready'); });
+    if (body) pr.end(body); else req.pipe(pr);
+  };
+
+  // The board's own screen/tap log (js/tel.js) passes through here: read it for the Admin Center, then hand
+  // it on unchanged. MLB's engine has no endpoint for it, so the terminal answers that one itself.
+  if (enginePath === '/api/telemetry' && req.method === 'POST' && r) {
+    const parts = []; let n = 0;
+    req.on('data', (c) => { n += c.length; if (n <= 65536) parts.push(c); });
+    req.on('end', () => {
+      const body = Buffer.concat(parts);
+      Board.client(who, r, sp, body.toString('utf8'));
+      if (sp === 'mlb') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{"ok":true}'); }
+      headers['content-length'] = String(body.length);
+      send(body);
+    });
+    return;
+  }
+  send(null);
 });
+
+// The owner-only way in, placed at the end of the sport bar. Styled from the board's own tokens.
+const ADMIN_PILL = '<a class="xadm" href="/admin" aria-label="Admin Center">Admin</a>'
+  + '<style>#xsport .xadm{margin-left:auto;display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line);'
+  + 'font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;background:var(--fill)}#xsport .xadm:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}'
+  + '#xsport .xadm:hover{border-color:var(--ink-3,var(--line))}@media (max-width:560px){#xsport .xadm{padding:0 10px}}</style>';
 
 server.requestTimeout = 0;
 server.headersTimeout = 0;
@@ -244,5 +307,5 @@ server.listen(PORT, () => {
 });
 
 let down = false;
-function shutdown() { if (down) return; down = true; for (const k of Object.keys(children)) { const c = children[k]; if (c) { c.removeAllListeners('exit'); try { c.kill('SIGTERM'); } catch {} } } server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); }
+function shutdown() { if (down) return; down = true; Board.close(); for (const k of Object.keys(children)) { const c = children[k]; if (c) { c.removeAllListeners('exit'); try { c.kill('SIGTERM'); } catch {} } } server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); }
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, shutdown);

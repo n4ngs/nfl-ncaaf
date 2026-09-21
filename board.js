@@ -1,0 +1,487 @@
+/*
+ * THE.BOARD — the owner's Admin Center.
+ *
+ * Why this lives in the terminal and not in the engines. Every request to every sport passes through the
+ * terminal, and the terminal is the one place that knows, at the door, whether a request carries the
+ * owner's code or a guest's. The per-sport admin screens could only see their own sport, keyed each
+ * device by a per-sport cookie, and decided "is this the owner" by "is this the device I am looking
+ * from" — so the owner's own laptop showed up as an "Unnamed device" among the guests, and guests who
+ * came in on the shared /g/ link were never listed at all. Here:
+ *
+ *   - one device id for the whole board (`tb_dev`, Path=/), so one phone is one row across NFL/NCAAF/MLB;
+ *   - the role is stamped on every event at the door, and the owner can pin a device as "me" or "guest",
+ *     so the owner's own traffic is a separate lane, never mixed into the guests;
+ *   - the capture is the raw truth: full user agent, real IP (owner-approved, owner-only), every page
+ *     load, API call, screen view, tap and bet, with timestamps — readable, and downloadable as CSV/JSON.
+ *
+ * Capture is silent. Nobody is signed out, asked for a name or shown anything. Nothing here is visible
+ * to a guest: every read and write is owner-only.
+ *
+ * Storage: DATA_DIR/board/events-YYYY-MM-DD.jsonl (append-only) + DATA_DIR/board/devices.json. Bets and
+ * guest names are read straight from each engine's own files on the same volume (read-only).
+ */
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+
+const RING_MAX = 80000;            // events held in memory for the views; the files keep everything
+const WARM_DAYS = 21;              // how far back a boot re-reads into memory
+const RETAIN_DAYS = 120;           // day-files older than this are removed
+const SESSION_GAP = 30 * 60e3;     // a quiet gap this long starts a new session
+const LIVE_MS = 5 * 60e3;          // "here now" if anything happened this recently or a live feed is open
+const DEV_RE = /^[a-f0-9]{24}$/;
+const ENGINE_UID_RE = /^[a-f0-9]{32}$/;
+// Files a page pulls in by itself. Recording them would bury the log in noise without saying anything.
+const STATIC_RE = /\.(js|css|png|svg|ico|woff2?|ttf|webmanifest|map|jpe?g|gif|webp|txt|json)$/i;
+
+module.exports = function createBoard({ dataDir, sports, ownerName = '', brand = 'THE.BOARD', logo = '' }) {
+  const DIR = path.join(dataDir, 'board');
+  fs.mkdirSync(DIR, { recursive: true });
+  const DEV_FILE = path.join(DIR, 'devices.json');
+  const SPORT_KEYS = Object.keys(sports);
+
+  // ------------------------------------------------------------------ state
+  let state = { v: 1, devices: {}, cleared: {} };
+  try { const s = JSON.parse(fs.readFileSync(DEV_FILE, 'utf8')); if (s && s.v === 1) state = { cleared: {}, ...s }; } catch { /* first boot */ }
+  let dirty = false;
+  const save = () => {
+    try { const tmp = `${DEV_FILE}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(state)); fs.renameSync(tmp, DEV_FILE); dirty = false; } catch (e) { console.log('[board] save failed', e.message); }
+  };
+  setInterval(() => { if (dirty) save(); }, 10000).unref();
+
+  const ring = [];                   // newest last
+  const byDev = new Map();           // dev -> events (same objects as ring), oldest first
+  const engineToDev = new Map();     // `${sport}:${engineUid}` -> dev
+  const streams = new Map();         // dev -> open live-feed connections
+  for (const [id, d] of Object.entries(state.devices)) for (const sp of SPORT_KEYS) for (const u of d.links?.[sp] || []) engineToDev.set(`${sp}:${u}`, id);
+
+  // ------------------------------------------------------------------ the log
+  let day = '', stream = null;
+  const dayOf = (t) => new Date(t).toISOString().slice(0, 10);
+  function out(ev) {
+    const d = dayOf(ev.t);
+    if (d !== day) { try { stream && stream.end(); } catch {} day = d; stream = fs.createWriteStream(path.join(DIR, `events-${d}.jsonl`), { flags: 'a' }); stream.on('error', () => {}); }
+    try { stream.write(JSON.stringify(ev) + '\n'); } catch { /* the board never breaks over its own log */ }
+  }
+  function keep(ev) {
+    ring.push(ev);
+    let l = byDev.get(ev.dev); if (!l) byDev.set(ev.dev, (l = [])); l.push(ev);
+    while (ring.length > RING_MAX) {
+      const old = ring.shift();
+      const ol = byDev.get(old.dev);
+      if (ol && ol[0] === old) ol.shift(); else if (ol) { const i = ol.indexOf(old); if (i >= 0) ol.splice(i, 1); }
+    }
+  }
+  function record(ev) { if (!ev.dev) return; ev.id = crypto.randomBytes(5).toString('hex'); out(ev); keep(ev); }
+
+  // Boot: read recent day-files back into memory, skipping anything the owner cleared.
+  (function warm() {
+    let files = [];
+    try { files = fs.readdirSync(DIR).filter((f) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort(); } catch {}
+    const cutoff = dayOf(Date.now() - WARM_DAYS * 86400e3), drop = dayOf(Date.now() - RETAIN_DAYS * 86400e3);
+    for (const f of files) {
+      const d = f.slice(7, 17);
+      if (d < drop) { try { fs.unlinkSync(path.join(DIR, f)); } catch {} continue; }
+      if (d < cutoff) continue;
+      let txt = ''; try { txt = fs.readFileSync(path.join(DIR, f), 'utf8'); } catch { continue; }
+      for (const line of txt.split('\n')) {
+        if (!line) continue;
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        if (!ev || !ev.dev || isCleared(ev)) continue;
+        keep(ev);
+      }
+    }
+    ring.sort((a, b) => a.t - b.t);
+    for (const l of byDev.values()) l.sort((a, b) => a.t - b.t);
+  })();
+  function isCleared(ev) { const c = state.cleared[ev.dev]; return !!c && ev.t <= c; }
+
+  // ------------------------------------------------------------------ who is this
+  const cookies = (req) => Object.fromEntries(String(req.headers.cookie || '').split(';').map((c) => c.trim()).filter(Boolean).map((c) => { const i = c.indexOf('='); return i < 0 ? [c, ''] : [c.slice(0, i), c.slice(i + 1)]; }));
+  // Railway appends the real client address last; anything before it can be typed by the client.
+  const ipOf = (req) => String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || '';
+
+  /* One id per browser for the whole board. A page loaded before this existed has no tb_dev yet but does
+     carry the engines' own device cookies, so reuse the device those already map to — otherwise a burst of
+     parallel requests from one phone would mint a row each. */
+  function identify(req, isHttps) {
+    const c = cookies(req);
+    let dev = DEV_RE.test(c.tb_dev || '') ? c.tb_dev : '';
+    let cookie = '';
+    const engine = [];
+    for (const sp of SPORT_KEYS) { const v = c[`${sports[sp].ck}_uid`]; if (ENGINE_UID_RE.test(v || '')) engine.push([sp, v]); }
+    if (!dev) {
+      for (const [sp, v] of engine) { const k = engineToDev.get(`${sp}:${v}`); if (k) { dev = k; break; } }
+      if (!dev) dev = crypto.randomBytes(12).toString('hex');
+      cookie = `tb_dev=${dev}; Path=/; Max-Age=63072000; HttpOnly; SameSite=Lax${isHttps ? '; Secure' : ''}`;
+    }
+    for (const [sp, v] of engine) link(dev, sp, v);
+    return { dev, cookie, ip: ipOf(req), ua: String(req.headers['user-agent'] || '').slice(0, 400) };
+  }
+  function link(dev, sp, uid) {
+    const k = `${sp}:${uid}`;
+    if (engineToDev.get(k) === dev) return;
+    engineToDev.set(k, dev);
+    const d = state.devices[dev];
+    if (d) { const l = ((d.links ||= {})[sp] ||= []); if (!l.includes(uid)) { l.push(uid); dirty = true; } }
+    else pendingLinks.push([dev, sp, uid]);
+  }
+  const pendingLinks = [];
+
+  function touch(who, role, sport) {
+    const t = Date.now();
+    let d = state.devices[who.dev];
+    if (!d) { d = state.devices[who.dev] = { first: t, last: t, role: role || null, roleSet: null, label: '', ua: '', ips: {}, links: {}, sports: {} }; dirty = true; }
+    for (let i = pendingLinks.length - 1; i >= 0; i--) {
+      const [dv, sp, u] = pendingLinks[i];
+      if (dv === who.dev) { const l = (d.links[sp] ||= []); if (!l.includes(u)) l.push(u); pendingLinks.splice(i, 1); dirty = true; }
+    }
+    if (t - d.last > 30e3) dirty = true;
+    d.last = t;
+    if (role && d.role !== role) { d.role = role; dirty = true; }
+    if (who.ua) {
+      if (d.ua !== who.ua) { d.ua = who.ua; dirty = true; }
+      // Every distinct browser string this device id has arrived with: a change is worth seeing.
+      const u = ((d.uas ||= {})[who.ua] ||= { first: t, last: t, n: 0 });
+      u.last = t; u.n++;
+      if (Object.keys(d.uas).length > 12) { const old = Object.entries(d.uas).sort((a, b) => a[1].last - b[1].last)[0][0]; delete d.uas[old]; }
+    }
+    if (who.ip) {
+      const h = d.ips[who.ip] || (d.ips[who.ip] = { first: t, last: t, n: 0 });
+      h.last = t; h.n++;
+      if (d.ipLast !== who.ip) { d.ipLast = who.ip; dirty = true; }
+    }
+    if (sport) d.sports[sport] = t;
+    return d;
+  }
+
+  // ------------------------------------------------------------------ capture (called by the terminal)
+  function request(who, role, sport, method, p, status, ms) {
+    if (STATIC_RE.test(p) || p === '/api/telemetry' || p === '/api/health') return;
+    touch(who, role, sport);
+    record({ t: Date.now(), dev: who.dev, role: role || 'none', ip: who.ip, sp: sport, k: 'req', m: method, p: p.slice(0, 160), s: status, ms });
+  }
+  function entrance(who, role, how) {
+    touch(who, role, null);
+    record({ t: Date.now(), dev: who.dev, role: role || 'none', ip: who.ip, sp: '', k: 'enter', how });
+  }
+  const clip = (v, n = 120) => String(v == null ? '' : v).slice(0, n);
+  function client(who, role, sport, body) {
+    let batch;
+    try { batch = JSON.parse(body).events; } catch { return; }
+    if (!Array.isArray(batch)) return;
+    const d = touch(who, role, sport);
+    const now = Date.now();
+    for (const it of batch.slice(0, 50)) {
+      if (!it || typeof it.kind !== 'string') continue;
+      const t = Number.isFinite(it.t) && Math.abs(it.t - now) < 10 * 60e3 ? it.t : now;
+      const data = it.data && typeof it.data === 'object' ? it.data : {};
+      const base = { t, dev: who.dev, role: role || 'none', ip: who.ip, sp: sport, r: clip(it.route, 40) };
+      if (it.kind === 'page_view') record({ ...base, k: 'view' });
+      else if (it.kind === 'click') record({ ...base, k: 'click', l: clip(data.label, 80), el: clip(data.el, 12), href: clip(data.href, 80) });
+      else if (it.kind === 'app_action') record({ ...base, k: 'act', a: clip(data.action, 40) });
+      else if (it.kind === 'client_error') record({ ...base, k: 'err', msg: clip(data.msg, 200) });
+      else if (it.kind === 'visit_open') {
+        const c = data.ctx && typeof data.ctx === 'object' ? data.ctx : {};
+        const ctx = {};
+        for (const k of ['vw', 'vh', 'sw', 'sh', 'dpr', 'tzo', 'touch', 'rtt', 'down']) if (Number.isFinite(c[k])) ctx[k] = c[k];
+        for (const k of ['tz', 'locale', 'langs', 'net']) if (c[k]) ctx[k] = clip(c[k], 60);
+        ctx.standalone = !!c.standalone; ctx.saver = !!c.saver;
+        d.ctx = ctx; dirty = true;
+        record({ ...base, k: 'visit', ctx, ref: clip(data.ref, 60) });
+      }
+    }
+  }
+  const streamOpen = (dev) => streams.set(dev, (streams.get(dev) || 0) + 1);
+  const streamClose = (dev) => { const n = (streams.get(dev) || 1) - 1; if (n > 0) streams.set(dev, n); else streams.delete(dev); };
+
+  // ------------------------------------------------------------------ reading it back
+  function uaInfo(raw, ctx) {
+    const u = String(raw || '');
+    let os = '', osVer = '', device = '', model = '', m;
+    if ((m = /iPhone OS (\d+[_\d]*)/.exec(u))) { os = 'iOS'; osVer = m[1].replace(/_/g, '.'); device = 'iPhone'; }
+    else if ((m = /iPad.*? OS (\d+[_\d]*)/.exec(u))) { os = 'iPadOS'; osVer = m[1].replace(/_/g, '.'); device = 'iPad'; }
+    else if ((m = /Android (\d+(?:\.\d+)*)(?:; ([^;)]+))?/.exec(u))) {
+      os = 'Android'; osVer = m[1]; device = 'Android phone';
+      const md = (m[2] || '').replace(/ Build.*/, '').trim();
+      if (md && !/^(K|wv|U|Linux|Mobile)$/.test(md)) model = md;
+      if (!/Mobile/.test(u)) device = 'Android tablet';
+    }
+    else if ((m = /Mac OS X (\d+[_.\d]*)/.exec(u))) { os = 'macOS'; osVer = m[1].replace(/_/g, '.'); device = ctx && ctx.touch > 1 ? 'iPad (desktop mode)' : 'Mac'; }
+    else if ((m = /Windows NT (\d+\.\d+)/.exec(u))) { os = 'Windows'; osVer = { '10.0': '10/11', '6.3': '8.1', '6.2': '8', '6.1': '7' }[m[1]] || m[1]; device = 'Windows PC'; }
+    else if (/CrOS/.test(u)) { os = 'ChromeOS'; device = 'Chromebook'; }
+    else if (/Linux/.test(u)) { os = 'Linux'; device = 'Linux PC'; }
+    let browser = '', bVer = '';
+    const B = [[/EdgA?\/([\d.]+)|EdgiOS\/([\d.]+)/, 'Edge'], [/OPR\/([\d.]+)/, 'Opera'], [/SamsungBrowser\/([\d.]+)/, 'Samsung Internet'],
+      [/CriOS\/([\d.]+)/, 'Chrome'], [/FxiOS\/([\d.]+)/, 'Firefox'], [/Firefox\/([\d.]+)/, 'Firefox'], [/Chrome\/([\d.]+)/, 'Chrome'],
+      [/Version\/([\d.]+).*Safari/, 'Safari'], [/curl\/([\d.]+)/, 'curl'], [/python-requests\/([\d.]+)/, 'python']];
+    for (const [re, n] of B) { const x = re.exec(u); if (x) { browser = n; bVer = String(x[1] || x[2] || '').split('.').slice(0, 2).join('.'); break; } }
+    const inApp = /FBAN|FBAV/.test(u) ? 'Facebook' : /Instagram/.test(u) ? 'Instagram' : /\bGSA\//.test(u) ? 'Google app'
+      : /Snapchat/.test(u) ? 'Snapchat' : /LinkedInApp/.test(u) ? 'LinkedIn' : /; wv\)/.test(u) ? 'in-app browser' : '';
+    if (!browser && /iPhone|iPad/.test(u) && /AppleWebKit/.test(u)) browser = inApp || 'in-app browser';
+    const bot = /bot|crawl|spider|curl|wget|python|headless|preview|monitor/i.test(u);
+    return { os, osVer, device: device || (u ? 'Unknown device' : 'No user agent'), model, browser, bVer, inApp, bot };
+  }
+
+  const TAB = { live: 'Live', games: 'Games', bets: 'My bets', mine: 'Mine', following: 'Mine', tools: 'Tools', admin: 'Admin Center',
+    security: 'Security Center', homers: 'Homers', edges: 'Edges', week: 'the slate', odds: 'Odds' };
+  const tabName = (r) => TAB[r] || (r ? r : 'the board');
+  function describeReq(m, p) {
+    const is = (x) => p === x;
+    if (is('/') || is('/index.html')) return ['Opened the board', 1];
+    if (is('/api/stream')) return ['Connected to live updates', 2];
+    if (is('/api/betmgm/go')) return ['Tapped a BetMGM price (to a filled-in slip)', 1];
+    if (is('/api/bets')) return m === 'POST' ? ['Placed a bet', 1] : ['Loaded their bets', 2];
+    if (is('/api/bets.csv')) return ['Downloaded their bets (CSV)', 1];
+    if (/^\/api\/bets\//.test(p)) return m === 'DELETE' ? ['Deleted a bet', 1] : ['Edited a bet', 1];
+    if (/^\/api\/game\//.test(p)) return [`Opened a game (${p.split('/')[3] || ''})`, 1];
+    if (/^\/api\/player\//.test(p)) return [`Opened a player (${p.split('/')[3] || ''})`, 1];
+    if (is('/api/me/name')) return ['Set their name', 1];
+    if (is('/api/me/link')) return ['Made a code to link another device', 1];
+    if (is('/api/me/join')) return ['Linked this device to another', 1];
+    if (is('/api/me/claim')) return ['Claimed old bets', 1];
+    if (is('/api/manual')) return m === 'GET' ? ['Loaded their own numbers', 2] : ['Typed in their own number', 1];
+    if (is('/api/matchup')) return ['Looked at a matchup', 1];
+    if (is('/api/leaders')) return ['Looked at the leaders', 1];
+    if (is('/api/group') || /^\/api\/group\//.test(p)) return ['Opened the per-sport admin view', 2];
+    if (is('/api/invites') || /^\/api\/invites\//.test(p)) return [m === 'POST' ? 'Made a share link' : m === 'DELETE' ? 'Turned off a share link' : 'Loaded share links', m === 'GET' ? 2 : 1];
+    if (/^\/api\/security\//.test(p)) return ['Security Center', 2];
+    if (is('/api/me')) return ['Checked in (who am I)', 2];
+    if (is('/api/week') || is('/api/day')) return ['Loaded the slate', 2];
+    if (is('/api/odds') || /^\/api\/odds\//.test(p)) return ['Loaded odds', 2];
+    if (is('/api/keys')) return ['Loaded key numbers', 2];
+    if (is('/api/betmgm/map')) return ['Loaded BetMGM links', 2];
+    if (is('/api/players/today') || is('/api/teams') || is('/api/lan')) return ['Loaded board data', 2];
+    return [`${m} ${p}`, 2];
+  }
+  const ACT = { APP_FOREGROUND: 'Came back to the app', APP_BACKGROUND: 'Switched away from the app', PAGE_EXIT: 'Closed the page', ONLINE: 'Came back online', OFFLINE: 'Lost connection' };
+  const ENTER = { code: 'Signed in with the admin code', 'guest-code': 'Signed in with the guest code', 'guest-link': 'Came in on the guest link',
+    wrong: 'Typed a wrong code', gate: 'Saw the sign-in screen', logout: 'Signed out', 'bad-link': 'Tried a guest link that does not work' };
+  function describe(e) {
+    if (e.k === 'req') { const [txt, lvl] = describeReq(e.m, e.p); return [e.s >= 400 ? `${txt} — failed (${e.s})` : txt, lvl]; }
+    if (e.k === 'view') return [`Viewed ${tabName(e.r)}`, 1];
+    if (e.k === 'click') {
+      const l = e.l || '';
+      if (l.startsWith('tab:')) return [`Tapped the “${tabName(l.slice(4))}” tab`, 1];
+      if (l === 'outbound') return [`Tapped a link out to ${e.href || 'another site'}`, 1];
+      return [`Tapped “${l}”${e.r ? ` on ${tabName(e.r)}` : ''}`, 1];
+    }
+    if (e.k === 'act') return [ACT[e.a] || e.a, e.a === 'APP_BACKGROUND' || e.a === 'APP_FOREGROUND' || e.a === 'PAGE_EXIT' ? 1 : 2];
+    if (e.k === 'err') return [`App error: ${e.msg}`, 2];
+    if (e.k === 'visit') { const c = e.ctx || {}; return [`Opened on a ${c.sw || '?'}×${c.sh || '?'} screen${c.tz ? `, ${c.tz}` : ''}${c.standalone ? ', from the home-screen icon' : ''}${e.ref ? `, from ${e.ref}` : ''}`, 1]; }
+    if (e.k === 'enter') return [ENTER[e.how] || e.how, 1];
+    return [e.k, 2];
+  }
+  const view = (e) => { const [text, lvl] = describe(e); return { ...e, text, lvl }; };
+
+  function sessionsOf(events) {
+    const out = [];
+    let cur = null;
+    for (const e of events) {
+      if (!cur || e.t - cur.end > SESSION_GAP) { cur = { start: e.t, end: e.t, n: 0, views: 0, clicks: 0, bets: 0, sports: new Set(), ips: new Set() }; out.push(cur); }
+      cur.end = Math.max(cur.end, e.t); cur.n++;
+      if (e.k === 'view') cur.views++;
+      if (e.k === 'click') cur.clicks++;
+      if (e.k === 'req' && e.m === 'POST' && e.p === '/api/bets') cur.bets++;
+      if (e.sp) cur.sports.add(e.sp);
+      if (e.ip) cur.ips.add(e.ip);
+    }
+    return out.map((s) => ({ ...s, dur: s.end - s.start, sports: [...s.sports], ips: [...s.ips] })).reverse();
+  }
+
+  // Engine files: bets and the names guests gave themselves. Cached by mtime; the engines write atomically.
+  const fileCache = new Map();
+  function readEngine(sp, name) {
+    const f = path.join(dataDir, sports[sp].dir, name);
+    let st; try { st = fs.statSync(f); } catch { return null; }
+    const c = fileCache.get(f);
+    if (c && c.m === st.mtimeMs) return c.v;
+    let v = null; try { v = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return c ? c.v : null; }
+    fileCache.set(f, { m: st.mtimeMs, v });
+    return v;
+  }
+  function engineName(d) {
+    for (const sp of SPORT_KEYS) {
+      const g = readEngine(sp, 'group.json');
+      for (const u of d.links?.[sp] || []) { const n = g?.people?.[u]?.name; if (n) return n; }
+    }
+    return '';
+  }
+  function betText(b) {
+    return (b.legs || []).map((l) => l.label || [l.matchup, l.team || l.side, l.line != null ? (l.line > 0 && !/t$/.test(l.mkt || '') ? `+${l.line}` : l.line) : '', l.odds != null ? (l.odds > 0 ? `+${l.odds}` : l.odds) : ''].filter((x) => x !== '' && x != null).join(' ')).join('  +  ') || 'Bet';
+  }
+  function betsOf(d) {
+    const out = [];
+    for (const sp of SPORT_KEYS) {
+      const ids = new Set(d.links?.[sp] || []);
+      if (!ids.size) continue;
+      const B = readEngine(sp, 'bets.json');
+      for (const b of B?.bets || []) {
+        if (!ids.has(b.owner)) continue;
+        out.push({ sp, id: b.id, placed: b.placed || null, created: b.created || null, settled: b.settled || null, status: b.status, stake: b.stake ?? null,
+          odds: b.odds ?? null, book: b.book || '', net: b.net ?? null, note: b.note || '', text: betText(b), legs: (b.legs || []).length });
+      }
+    }
+    return out.sort((a, b) => (Date.parse(b.placed) || b.created || 0) - (Date.parse(a.placed) || a.created || 0));
+  }
+
+  const roleOfDev = (d) => d.roleSet || d.role || 'none';
+  function summary(id) {
+    const d = state.devices[id];
+    const ev = byDev.get(id) || [];
+    const info = uaInfo(d.ua, d.ctx);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let views = 0, clicks = 0, today_n = 0, lastDo = null;
+    for (const e of ev) {
+      if (e.k === 'view') views++;
+      if (e.k === 'click') clicks++;
+      if (e.t >= today.getTime() && (e.k === 'click' || e.k === 'view')) today_n++;
+    }
+    for (let i = ev.length - 1; i >= 0; i--) { const v = view(ev[i]); if (v.lvl === 1) { lastDo = { t: v.t, text: v.text, sp: v.sp }; break; } }
+    const ss = sessionsOf(ev);
+    const bets = betsOf(d);
+    const done = bets.filter((b) => b.status === 'won' || b.status === 'lost' || b.status === 'push');
+    const name = engineName(d);
+    const who = d.label || name || '';
+    return {
+      id, role: roleOfDev(d), roleSet: d.roleSet || null, roleSeen: d.role || null, label: d.label || '', name, who,
+      ua: d.ua || '', ...info, ctx: d.ctx || null,
+      ipLast: d.ipLast || '', ipCount: Object.keys(d.ips || {}).length,
+      first: d.first, last: d.last, live: streams.has(id) || Date.now() - d.last < LIVE_MS, streaming: streams.get(id) || 0,
+      sessions: ss.length, sessionsToday: ss.filter((s) => s.end >= today.getTime()).length, timeOn: ss.reduce((a, s) => a + s.dur, 0),
+      views, clicks, tapsToday: today_n, events: ev.length,
+      sports: Object.entries(d.sports || {}).sort((a, b) => b[1] - a[1]).map(([k]) => k), lastDo,
+      bets: { n: bets.length, open: bets.filter((b) => b.status === 'open').length, won: done.filter((b) => b.status === 'won').length,
+        lost: done.filter((b) => b.status === 'lost').length, net: done.reduce((a, b) => a + (b.net || 0), 0), staked: bets.reduce((a, b) => a + (b.stake || 0), 0) },
+    };
+  }
+
+  function boardJSON() {
+    const devices = Object.keys(state.devices).map(summary).sort((a, b) => b.last - a.last);
+    const roleMap = Object.fromEntries(devices.map((d) => [d.id, d.role]));
+    const feed = [];
+    for (let i = ring.length - 1; i >= 0 && feed.length < 250; i--) { const v = view(ring[i]); if (v.lvl === 1 && state.devices[v.dev]) feed.push({ ...v, drole: roleMap[v.dev] }); }
+    return { now: Date.now(), owner: ownerName, devices, feed };
+  }
+  function deviceJSON(id) {
+    const d = state.devices[id];
+    if (!d) return null;
+    const ev = byDev.get(id) || [];
+    return {
+      ...summary(id),
+      links: d.links || {},
+      uaHistory: Object.entries(d.uas || {}).map(([ua, h]) => ({ ua, ...h })).sort((a, b) => b.last - a.last),
+      ipHistory: Object.entries(d.ips || {}).map(([ip, h]) => ({ ip, ...h })).sort((a, b) => b.last - a.last),
+      sessionList: sessionsOf(ev).slice(0, 200),
+      timeline: ev.slice(-3000).map(view).reverse(),
+      betList: betsOf(d),
+    };
+  }
+
+  // Everything on disk, filtered, as a download. Reads the day-files so it covers more than memory holds.
+  function exportRows(dev) {
+    const rows = [];
+    let files = [];
+    try { files = fs.readdirSync(DIR).filter((f) => /^events-.*\.jsonl$/.test(f)).sort(); } catch {}
+    for (const f of files) {
+      let txt = ''; try { txt = fs.readFileSync(path.join(DIR, f), 'utf8'); } catch { continue; }
+      for (const line of txt.split('\n')) {
+        if (!line) continue;
+        let e; try { e = JSON.parse(line); } catch { continue; }
+        if (!e.dev || isCleared(e) || !state.devices[e.dev]) continue;
+        if (dev && e.dev !== dev) continue;
+        rows.push(e);
+      }
+    }
+    return rows.sort((a, b) => a.t - b.t);
+  }
+  const CSV_COLS = ['time_iso', 'device', 'who', 'role', 'sport', 'kind', 'what', 'ip', 'os', 'browser', 'method', 'path', 'status', 'ms', 'label', 'route', 'user_agent'];
+  const csvCell = (v) => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  function exportCSV(dev) {
+    const names = {};
+    const lines = [CSV_COLS.join(',')];
+    for (const e of exportRows(dev)) {
+      const d = state.devices[e.dev];
+      const s = names[e.dev] || (names[e.dev] = { who: d.label || engineName(d), role: roleOfDev(d), info: uaInfo(d.ua, d.ctx), ua: d.ua });
+      const [what] = describe(e);
+      lines.push([new Date(e.t).toISOString(), e.dev, s.who, s.role, e.sp || '', e.k, what, e.ip || '', `${s.info.os} ${s.info.osVer}`.trim(),
+        `${s.info.browser} ${s.info.bVer}`.trim(), e.m || '', e.p || '', e.s ?? '', e.ms ?? '', e.l || e.a || e.how || '', e.r || '', s.ua].map(csvCell).join(','));
+    }
+    return lines.join('\n') + '\n';
+  }
+
+  // ------------------------------------------------------------------ owner actions
+  function setDevice(id, body) {
+    const d = state.devices[id];
+    if (!d) return false;
+    if (typeof body.label === 'string') d.label = body.label.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40);
+    if (body.role === 'owner' || body.role === 'guest' || body.role === null || body.role === 'auto') d.roleSet = body.role === 'auto' ? null : body.role;
+    dirty = true; save();
+    return true;
+  }
+  // Clearing is the owner tidying their own view. The device is not told and not signed out; if it comes
+  // back it simply starts a fresh row.
+  function clearDevice(id) {
+    const d = state.devices[id];
+    if (!d) return false;
+    state.cleared[id] = Date.now();
+    for (const sp of SPORT_KEYS) for (const u of d.links?.[sp] || []) engineToDev.delete(`${sp}:${u}`);
+    delete state.devices[id];
+    const gone = new Set(byDev.get(id) || []);
+    byDev.delete(id);
+    if (gone.size) for (let i = ring.length - 1; i >= 0; i--) if (gone.has(ring[i])) ring.splice(i, 1);
+    dirty = true; save();
+    return true;
+  }
+
+  // ------------------------------------------------------------------ http
+  const sec = { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'", 'referrer-policy': 'same-origin', 'x-content-type-options': 'nosniff' };
+  function json(res, code, v) { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', ...sec }); res.end(JSON.stringify(v)); }
+  function readBody(req) {
+    return new Promise((ok) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 4000) req.destroy(); }); req.on('end', () => { try { ok(JSON.parse(b || '{}')); } catch { ok({}); } }); req.on('error', () => ok({})); });
+  }
+
+  // Returns true if it answered. `role` is the terminal's door verdict for this request.
+  function handle(req, res, pathname, qs, role) {
+    if (pathname !== '/admin' && !pathname.startsWith('/admin/')) return false;
+    if (role !== 'owner') {
+      if (pathname.startsWith('/admin/api/')) json(res, 404, { error: 'Not found' });
+      else { res.writeHead(302, { location: '/', 'cache-control': 'no-store' }); res.end(); }
+      return true;
+    }
+    const M = req.method;
+    if ((pathname === '/admin' || pathname === '/admin/') && M === 'GET') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...sec }); res.end(PAGE); return true; }
+    if (pathname === '/admin/api/board' && M === 'GET') { json(res, 200, boardJSON()); return true; }
+    if (pathname === '/admin/api/export' && M === 'GET') {
+      const q = new URLSearchParams(qs.replace(/^\?/, ''));
+      const dev = DEV_RE.test(q.get('dev') || '') ? q.get('dev') : '';
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      const name = `board-${dev ? dev.slice(0, 8) : 'all'}-${stamp}`;
+      if (q.get('fmt') === 'json') {
+        const devs = dev ? { [dev]: state.devices[dev] } : state.devices;
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-disposition': `attachment; filename="${name}.json"`, ...sec });
+        res.end(JSON.stringify({ exported: new Date().toISOString(), devices: devs, events: exportRows(dev) }, null, 1));
+      } else {
+        res.writeHead(200, { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${name}.csv"`, ...sec });
+        res.end(exportCSV(dev));
+      }
+      return true;
+    }
+    const dm = /^\/admin\/api\/device\/([a-f0-9]{24})$/.exec(pathname);
+    if (dm) {
+      if (M === 'GET') { const d = deviceJSON(dm[1]); json(res, d ? 200 : 404, d || { error: 'Unknown device' }); return true; }
+      // A custom header a cross-site form cannot send: every write needs it.
+      if (req.headers['x-board-admin'] !== '1') { json(res, 403, { error: 'Missing header' }); return true; }
+      if (M === 'POST') { readBody(req).then((b) => json(res, setDevice(dm[1], b) ? 200 : 404, { ok: true })); return true; }
+      if (M === 'DELETE') { json(res, clearDevice(dm[1]) ? 200 : 404, { ok: true }); return true; }
+    }
+    json(res, 404, { error: 'Not found' });
+    return true;
+  }
+
+  function close() { if (dirty) save(); try { stream && stream.end(); } catch {} }
+
+  const PAGE = require('./board-page')({ brand, logo, ownerName, sports: SPORT_KEYS.map((k) => [k, sports[k].label]) });
+  return { identify, request, entrance, client, streamOpen, streamClose, handle, close, STATIC_RE };
+};

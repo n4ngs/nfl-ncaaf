@@ -23,6 +23,15 @@ node terminal.js        # http://localhost:4000 → /nfl/ and /ncaaf/
 `OWNER_NAME`, `OWNER_CODE`. The Security Center "All apps" toggle aggregates the two engines over
 localhost (a shared `TELEMETRY_PEER_SECRET` is auto-generated per boot if unset).
 
+## Admin Center (`/admin`, owner only)
+`board.js` + `board-page.js`, run inside the terminal. The terminal is the one place every request passes
+through and the one place that knows owner vs guest at the door, so capture lives here, not in the engines:
+one `tb_dev` device id across all three sports, role stamped on every event (owner can pin a device as
+"me"/"guest"), full UA + real IP (last `x-forwarded-for` hop), page loads/API calls, and the boards' own
+screen/tap log (`js/tel.js` POSTs to `/<sport>/api/telemetry`, teed by the terminal, then passed on; MLB's
+is answered by the terminal). Log: `DATA_DIR/board/events-*.jsonl` + `devices.json`. Bets and guest names
+are read from each engine's own files. Capture is silent — never sign anyone out or prompt for a name.
+
 ## Deploy
 One Railway service, `node terminal.js`, health `/health`, `numReplicas: 1`, one volume at `/data`
 holding `nfl/` and `ncaaf/`. See `CUTOVER.md`.

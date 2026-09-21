@@ -1509,7 +1509,7 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 429, { error: 'Too many requests. Try again in a minute.' });
     }
     const uid = ensureUid(req, res);
-    Group.note(uid, guestOf(req)?.id || null);
+    Group.note(uid, guestOf(req)?.id || null, roleOf(req) === 'guest');
     if (p.startsWith('/api/') && await oddsRoutes(req, res, url, uid)) return;
     if (p === '/api/stream') {
       res.writeHead(200, {

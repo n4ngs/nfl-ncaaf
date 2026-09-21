@@ -1060,7 +1060,7 @@ const server = http.createServer(async (req, res) => {
   }
   // `self` records the owner's own phone so it is visible in the Admin Center. Only on a board with an
   // access code: without one everybody is the owner, and every passer-by would become a row.
-  Group.note(uid, Group.byToken(cookieOf(req).hl_key || '')?.id || null, { ua: req.headers['user-agent'], addr: clientIp(req), self: role === 'owner' && !!ACCESS_CODE });
+  Group.note(uid, Group.byToken(cookieOf(req).hl_key || '')?.id || null, { ua: req.headers['user-agent'], addr: clientIp(req), self: role === 'owner' && !!ACCESS_CODE, guest: role === 'guest' });
   const ownerOnly = () => sendJSON(res, 403, { error: 'Only the person who runs this board can do that.' });
   if (p === '/api/telemetry' && M === 'POST') {
     if (!telBudget(uid)) return sendJSON(res, 429, { ok: false });
