@@ -800,7 +800,7 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
 .sec-h{margin-bottom:12px}
 @media (min-width:1024px){
   :root{--gutter:52px}
-  .wrap{padding:0 var(--gutter)}
+  .wrap{max-width:min(2400px, 94vw);padding:0}   /* fill the screen: kills the huge side whitespace on wide monitors */
   .head,.view-h{padding:var(--s4) 0 var(--s3)}
   .head h1,.view-h h1{font-size:46px;letter-spacing:-.04em}
   .head p,.view-h p{font-size:16px;margin-top:10px}
