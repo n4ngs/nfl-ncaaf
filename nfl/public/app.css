@@ -821,3 +821,25 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
 /* BetMGM's mark is a link wherever it appears. */
 .bk-go{cursor:pointer}
 .bk-go:hover{opacity:.82}
+
+/* ═══════════════════════════════════════════════════════════════════ odds table pass
+   The board is the screen you live in, so it should read like a trading screen: the book you are
+   hunting for findable at a glance, one clear rule between games, and the price as the loudest thing
+   on the row. Density without losing the hit targets. Desktop only — the phone board is its own thing. */
+@media (min-width:1024px){
+  /* headers: scanning for "BetMGM" across 12 columns should take no effort */
+  .bt th{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);padding:12px 6px 9px}
+  .bt th.l{padding-left:16px}
+  /* one clear rule BETWEEN games; the two rows inside a game stay tied together */
+  .bt td{padding:4px 4px;border-top:0}
+  .bt tr.g0 td{border-top:1px solid var(--line)}
+  /* tighter game rows — 6px a game back, ~100px over a slate */
+  .bt .tm2,.bt .st2{grid-template-rows:27px 27px}
+  /* the numbers are the subject */
+  .bt .px{min-width:58px;height:27px;font-size:14px;font-weight:650}
+  .bt .px.best{box-shadow:0 1px 3px rgba(0,0,0,.28)}
+  /* the matchup column anchors you while the books scroll sideways */
+  .bt .stk{box-shadow:1px 0 0 var(--line),7px 0 14px -9px rgba(0,0,0,.4)}
+  /* the row you are reading across should be unmistakable */
+  .bt tbody tr:hover td{background:color-mix(in srgb,var(--surface) 90%,var(--ink))}
+}
