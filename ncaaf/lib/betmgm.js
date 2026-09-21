@@ -43,9 +43,12 @@ function selToken(sel) {
   // Outlier's production hand-off uses the short documented form: fixtureId-marketId-optionId, no GUID.
   // The Affiliate Helper's longer fixtureId_guid_marketId_optionId_false form also works, so use that
   // only when a guid is actually on hand. Both were seen working in a signed-in NV slip.
+  // BetMGM's betslip POST calls it optionMarketId; their deep-link docs call it marketId. Same number,
+  // so accept either name rather than silently emitting "fixture--option" with the market missing.
+  const mk = sel.optionMarketId != null ? sel.optionMarketId : sel.marketId;
   return sel.fixtureGuid
-    ? [sel.fixtureId, sel.fixtureGuid, sel.marketId, sel.optionId, 'false'].join('_')
-    : [sel.fixtureId, sel.marketId, sel.optionId].join('-');
+    ? [sel.fixtureId, sel.fixtureGuid, mk, sel.optionId, 'false'].join('_')
+    : [sel.fixtureId, mk, sel.optionId].join('-');
 }
 function slipLink(sels, stake) {
   const list = (Array.isArray(sels) ? sels : [sels]).filter(Boolean);
@@ -122,8 +125,75 @@ function pickOption(fx, market, side, G) {
   return (fixtureId && marketId && optionId) ? { fixtureId, fixtureGuid, marketId, optionId } : null;
 }
 
+
+/* ---------- owner-pasted links ----------------------------------------------
+   Until BetMGM issues an AccessId we cannot look ids up, but we do not have to: the owner can paste a
+   BetMGM link for a selection and we keep the triple. That line then opens a真 prefilled slip. Stored
+   per sport beside the rest of the app's state, so it survives restarts and deploys. */
+const { readJSON, writeJSON } = require('./util');
+let store = readJSON('betmgm.json', { v: 1, picks: {} });
+const save = () => writeJSON('betmgm.json', store);
+const mapKey = (gid, market, side) => `${gid}|${market}|${side}`;
+
+// Accept anything BetMGM hands out: a whole url, just the options value, hyphen or underscore form,
+// and multi-leg links (we take the leg that matches, or the first). Ids stay strings/ints as given.
+function parseLink(input) {
+  const s = String(input || '').trim();
+  if (!s) return null;
+  let opts = s;
+  const m = /[?&]options=([^&#\s]+)/.exec(s);
+  if (m) opts = decodeURIComponent(m[1]);
+  const leg = opts.split(/[,~]/)[0].trim();
+  if (!leg) return null;
+  // underscore form: fixtureId_guid_optionMarketId_optionId_false
+  if (leg.includes('_')) {
+    const p = leg.split('_').filter(Boolean);
+    if (p.length >= 4) {
+      const fixtureId = p[0];
+      const optionMarketId = Number(p[p.length - 2]);
+      const optionId = Number(p[p.length - 1]);
+      if (fixtureId && optionMarketId && optionId) return { fixtureId, optionMarketId, optionId };
+      // trailing "false" variant
+      const a = Number(p[p.length - 3]), b = Number(p[p.length - 2]);
+      if (fixtureId && a && b) return { fixtureId, optionMarketId: a, optionId: b };
+    }
+    return null;
+  }
+  // hyphen form: fixtureId-optionMarketId-optionId, where fixtureId itself carries a colon (6:43394)
+  const parts = leg.split('-');
+  if (parts.length < 3) return null;
+  const optionId = Number(parts.pop());
+  const optionMarketId = Number(parts.pop());
+  const fixtureId = parts.join('-');
+  if (!fixtureId || !optionMarketId || !optionId) return null;
+  return { fixtureId, optionMarketId, optionId };
+}
+
+function setMap(gid, market, side, input, label) {
+  const sel = parseLink(input);
+  if (!sel) throw new Error('That does not look like a BetMGM link. Paste the whole url, or just the options value.');
+  store.picks[mapKey(gid, market, side)] = { ...sel, label: String(label || '').slice(0, 80), at: Date.now() };
+  save();
+  return sel;
+}
+function delMap(gid, market, side) {
+  const k = mapKey(gid, market, side);
+  if (!store.picks[k]) return false;
+  delete store.picks[k]; save(); return true;
+}
+const getMap = (gid, market, side) => store.picks[mapKey(gid, market, side)] || null;
+const listMap = () => Object.entries(store.picks).map(([k, v]) => {
+  const [gid, market, side] = k.split('|');
+  return { gid, market, side, ...v };
+}).sort((a, b) => b.at - a.at);
+
 /* ---------- the one call the server makes ---------- */
-async function linkFor(G, market, side, stake) {
+async function linkFor(G, market, side, stake, gid) {
+  // An owner-pasted link wins: it is a real selection, confirmed by hand. Checked FIRST and off the raw
+  // id, so it still works for a game this process has not loaded (a past week, a restart mid-slate).
+  const id = (G && G.id) || gid || '';
+  const pasted = id && getMap(id, market, side);
+  if (pasted) return slipLink(pasted, stake);
   if (!G) return `${BASE}/en/sports`;
   try {
     const rows = await fixtures();
@@ -137,4 +207,4 @@ async function linkFor(G, market, side, stake) {
 }
 const status = () => ({ base: BASE, configured: !!ACCESS_ID, cachedFixtures: cache.rows?.length ?? 0, err: cache.err });
 
-module.exports = { linkFor, searchLink, slipLink, status };
+module.exports = { linkFor, searchLink, slipLink, status, parseLink, setMap, delMap, getMap, listMap };

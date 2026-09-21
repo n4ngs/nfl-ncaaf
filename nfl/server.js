@@ -1412,10 +1412,32 @@ const server = http.createServer(async (req, res) => {
        without touching the board. Nevada's BetMGM only — no other book is deep-linked. */
     if (p === '/api/betmgm/go' && (M === 'GET' || M === 'HEAD')) {
       const G = gameById(String(url.searchParams.get('g') || ''));
-      const to = await BetMGM.linkFor(G, String(url.searchParams.get('m') || 's'), String(url.searchParams.get('s') || 'home'), Number(url.searchParams.get('stake')) || 0);
+      const to = await BetMGM.linkFor(G, String(url.searchParams.get('m') || 's'), String(url.searchParams.get('s') || 'home'), Number(url.searchParams.get('stake')) || 0, String(url.searchParams.get('g') || ''));
       try { Tel.event({ kind: 'app_action', uid, role, user: userId, route: '/api/betmgm/go', data: { action: 'betmgm_open', gid: G?.id || null, mkt: url.searchParams.get('m'), side: url.searchParams.get('s'), prefilled: to.includes('options=') } }); } catch { /* telemetry never blocks a bet */ }
       res.writeHead(302, { location: to, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
       return res.end();
+    }
+    /* Owner-pasted BetMGM links. Until an AccessId exists we cannot resolve ids, but the owner can paste
+       a link for a selection and that line becomes a real prefilled slip. Owner only — it decides where a
+       guest's tap lands. */
+    if (p === '/api/betmgm/map') {
+      if (role !== 'owner') return ownerOnly();
+      if (M === 'GET') return sendJSON(res, 200, { picks: BetMGM.listMap(), configured: BetMGM.status().configured });
+      if (M === 'POST') {
+        const b = await readBody(req);
+        try {
+          const sel = BetMGM.setMap(String(b.gid || ''), String(b.mkt || 's'), String(b.side || 'home'), b.link, b.label);
+          Tel.audit('betmgm_map_set', { uid, role, user: userId, route: '/api/betmgm/map', data: { gid: b.gid, mkt: b.mkt, side: b.side, ...sel } });
+          return sendJSON(res, 200, { ok: true, ...sel });
+        } catch (e) { return sendJSON(res, 400, { error: e.message }); }
+      }
+      if (M === 'DELETE') {
+        const q = Object.fromEntries(url.searchParams);
+        const gone = BetMGM.delMap(String(q.gid || ''), String(q.mkt || 's'), String(q.side || 'home'));
+        if (gone) Tel.audit('betmgm_map_clear', { uid, role, user: userId, route: '/api/betmgm/map', data: q });
+        return sendJSON(res, 200, { ok: gone });
+      }
+      return sendJSON(res, 405, { error: 'Method' });
     }
     if (p === '/api/bets' && M === 'GET') return sendJSON(res, 200, Bets.list(uid));
     if (p === '/api/bets' && M === 'POST') {
