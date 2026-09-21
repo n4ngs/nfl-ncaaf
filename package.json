@@ -1,0 +1,10 @@
+{
+  "name": "nfl-ncaaf",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NFL.NCAAF terminal — Pick Six (NFL) and Hook & Ladder (NCAAF) served as one app with sport tabs.",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node terminal.js"
+  }
+}

@@ -1,0 +1,136 @@
+/* The group: share links and who's on the board (group.js). Same tool-card system as the rest of Tools. */
+.grp .grp-none{margin:var(--s2) 0 0;font-size:13px;color:var(--ink-3)}
+.grp-link{display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:center;padding:12px 0}
+.grp-link + .grp-link{border-top:1px solid var(--line)}
+.grp-link-m b{display:block;font-size:15px;font-weight:600}
+.grp-link-m span{font-size:12px;color:var(--ink-3)}
+.grp-link-go{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
+.grp-link-go .lg{min-height:36px;padding:0 10px;font-size:13px;color:var(--ink-2)}
+.grp-p + .grp-p{border-top:1px solid var(--line)}
+.grp-p-h{display:grid;grid-template-columns:1fr auto 16px;gap:10px;align-items:center;width:100%;min-height:52px;text-align:left}
+.grp-p-n{font-size:15px;font-weight:600}
+.grp-p-n small{display:block;font-size:11px;font-weight:500;color:var(--ink-3)}
+.grp-p-s{font-size:13px;color:var(--ink-2);text-align:right}
+.grp-p-s .w{color:var(--win)}
+.grp-p-s .l{color:var(--ink-2)}
+.grp-p-c{display:grid;place-items:center;color:var(--ink-3)}
+.grp-p-c svg{width:12px;height:12px;transition:transform .15s}
+.grp-p-h[aria-expanded="true"] .grp-p-c svg{transform:rotate(90deg)}
+.grp-p-b{padding:4px 0 12px}
+.grp-b{display:flex;justify-content:space-between;gap:12px;padding:7px 0;font-size:13px;color:var(--ink-2)}
+.grp-b-m{color:var(--ink)}
+.grp-seen{margin:8px 0 0;font-size:12px;color:var(--ink-3)}
+@media (prefers-reduced-motion:reduce){.grp-p-c svg{transition:none}}
+.grp-fine{margin:16px 0 0;font-size:12px;line-height:1.45;color:var(--ink-3)}
+
+/* The Group tab: a summary strip, the people, and the links. */
+.grp-sum{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:var(--s2)}
+.grp-stat{padding:14px var(--s2);border-radius:var(--r-lg);background:var(--surface)}
+.grp-stat-k{display:block;font-size:11px;font-weight:600;color:var(--ink-3);letter-spacing:.02em}
+.grp-stat b{display:block;margin:4px 0 2px;font-size:26px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.grp-stat b.w{color:var(--win)}
+.grp-stat-s{font-size:12px;color:var(--ink-3)}
+.grp-list{padding:4px 0}
+.grp-share{padding:var(--s2)}
+.grp-lede{margin:0 0 4px;font-size:13px;color:var(--ink-2);line-height:1.45}
+.grp-p{display:grid;grid-template-columns:1fr auto auto 16px;gap:12px;align-items:center;width:100%;min-height:60px;padding:10px var(--s2);text-align:left}
+.grp-p + .grp-p{border-top:1px solid var(--line)}
+.grp-p small{display:block;font-size:11px;font-weight:500;color:var(--ink-3);margin-top:2px}
+.grp-p-n{font-size:15px;font-weight:600}
+.grp-p-o,.grp-p-r{font-size:13px;color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums}
+.grp-p-r b{font-weight:650;color:var(--ink)}
+.grp-p-r b.w{color:var(--win)}
+.grp-p-c{display:grid;place-items:center;color:var(--ink-3)}
+.grp-p-c svg{width:12px;height:12px}
+.grp-blist{padding:4px 0;margin-top:8px}
+.grp-b{display:grid;grid-template-columns:1fr auto;gap:12px;padding:10px var(--s2);font-size:14px}
+.grp-b + .grp-b{border-top:1px solid var(--line)}
+.grp-b small{display:block;font-size:11px;color:var(--ink-3);margin-top:2px}
+.grp-b-r{text-align:right;font-variant-numeric:tabular-nums}
+.grp-b-r b.w{color:var(--win)}
+@media (max-width:520px){
+  .grp-sum{grid-template-columns:1fr 1fr}
+  .grp-sum .grp-stat:first-child{grid-column:1 / -1}
+  .grp-p{grid-template-columns:1fr auto 14px;row-gap:2px}
+  .grp-p-o{grid-column:2}
+  .grp-p-r{grid-column:2;grid-row:2}
+}
+
+/* ─────────────────────────────────────────────────────── board health
+   An admin's first question is whether the board is actually working. Healthy is plain ink — green in
+   this app means a ticket of yours is winning and nothing else — and only trouble takes the accent. */
+.grp-health{padding:0;overflow:hidden}
+.grp-health-h{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px;
+  padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;font-weight:600;color:var(--ink)}
+.grp-health-n{font-size:12px;font-weight:500;color:var(--ink-3)}
+.grp-feed{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr) auto;align-items:baseline;gap:4px 12px;
+  padding:11px 16px;border-top:1px solid var(--line);font-size:13px}
+.grp-feed:first-of-type{border-top:0}
+.grp-feed b{color:var(--ink);font-weight:600}
+.grp-feed-w{min-width:0;color:var(--ink-3);font-size:12px}
+.grp-feed-s{white-space:nowrap;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.grp-feed-s.quiet{color:var(--ink-3)}
+.grp-feed-s.bad{color:var(--accent);font-weight:600}
+.grp-lede.bad{color:var(--accent)}
+
+@media (max-width:480px){
+  /* The description is the first thing to go when there is no room for three columns. */
+  .grp-feed{grid-template-columns:minmax(0,1fr) auto}
+  .grp-feed-w{display:none}
+}
+
+/* ─────────────────────────────────────────────── the owner's ledger
+   The whole board's activity in one list. Dense on purpose: this is a log to scan, not a feed to
+   linger over. Win/loss colour follows the app's rule and appears only on a settled result. */
+.grp-ledger{padding:0;overflow:hidden}
+.grp-led-h,.grp-led{display:grid;grid-template-columns:minmax(72px,1fr) minmax(0,2.2fr) minmax(64px,.9fr) minmax(64px,.9fr) 44px;
+  gap:10px;align-items:baseline;padding:10px 16px}
+.grp-led-h{border-bottom:1px solid var(--line);font-size:11px;font-weight:600;letter-spacing:.03em;
+  text-transform:uppercase;color:var(--ink-3)}
+.grp-led{border-top:1px solid var(--line);font-size:13px;cursor:pointer;transition:background .12s var(--ease)}
+.grp-led:first-of-type{border-top:0}
+.grp-led:hover{background:var(--fill)}
+.grp-led small{display:block;font-size:11px;color:var(--ink-3);font-weight:500}
+.grp-led-w{font-weight:600;color:var(--ink);min-width:0}
+.grp-led-p{min-width:0;color:var(--ink-2)}
+.grp-led-s{color:var(--ink-2);font-variant-numeric:tabular-nums}
+.grp-led-r b{font-variant-numeric:tabular-nums}
+.grp-led-r b.w{color:var(--win)}
+.grp-led-r b.l{color:var(--ink-2)}
+.grp-led-c{text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums}
+
+/* what the summary cannot say about a person */
+.grp-arow{display:flex;flex-wrap:wrap;gap:6px 10px;padding:0 16px 12px;font-size:12px;color:var(--ink-3)}
+.grp-a{white-space:nowrap}
+.grp-clv{white-space:nowrap;font-weight:600;color:var(--ink-2)}
+.grp-clv.w{color:var(--win)}
+.grp-clv.l{color:var(--accent)}
+.grp-clv small{font-weight:500;color:var(--ink-3);margin-left:4px}
+
+@media (max-width:560px){
+  /* Risk and CLV fold away before the pick does. */
+  .grp-led-h,.grp-led{grid-template-columns:minmax(64px,1fr) minmax(0,2fr) minmax(56px,.8fr);gap:8px}
+  .grp-led-h span:nth-child(3){display:none}
+  .grp-led-h span:nth-child(4)::before{content:""}
+  .grp-led-s,.grp-led-c,.grp-led-h span:nth-child(5){display:none}
+}
+
+/* ───────────────────────────────────────── clearing a device
+   Destructive and easy to mis-tap on a phone, so it arms on the first press and acts on the second.
+   Resting state is quiet; armed takes the accent, because armed is the moment that matters. */
+.grp-dev{font-family:var(--mono);font-size:11px;color:var(--ink-3);letter-spacing:-.02em}
+.grp-clear{font-size:12px;color:var(--ink-3);padding:2px 0;text-decoration:underline;text-underline-offset:2px;
+  text-decoration-color:var(--line);transition:color .12s var(--ease)}
+.grp-clear:hover{color:var(--ink-2)}
+.grp-clear.armed{color:var(--accent);font-weight:600;text-decoration-color:var(--accent)}
+.grp-sweep{display:block;width:100%;margin-top:10px;padding:12px 16px;border-radius:var(--r-md);
+  background:var(--fill);text-align:left;font-size:13px;font-weight:600;color:var(--ink-2)}
+.grp-sweep small{display:block;margin-top:2px;font-size:11px;font-weight:500;color:var(--ink-3)}
+.grp-sweep:hover{color:var(--ink)}
+
+/* the person sheet's bet rows carry more than a number now */
+.grp-b-clv{font-weight:600}
+.grp-b-clv.w{color:var(--win)}
+.grp-b-clv.l{color:var(--accent)}
+.grp-self{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:var(--fill);
+  font-size:10px;font-style:normal;font-weight:600;letter-spacing:.03em;color:var(--ink-3);vertical-align:middle}
