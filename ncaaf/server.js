@@ -653,10 +653,19 @@ const uidOf = (req) => { const v = cookieOf(req).hl_uid || ''; return UID_RE.tes
 const BASE = process.env.BASE_PATH || '';
 // Slim terminal-style sport switcher injected at the top of <body> when mounted under the NFL.NCAAF
 // terminal. Cross-sport links are absolute (/nfl/, /ncaaf/) so they ignore <base href> on purpose.
-const SPORTBAR = !BASE ? '' : ('<div id="xsport"><b>NFL.NCAAF</b><nav>'
+const SPORTBAR = !BASE ? '' : ('<div id="xsport"><span class="xb">NFL<i>\u00b7</i>NCAAF</span><nav class="xseg" aria-label="Sport">'
   + [['/nfl','NFL'],['/ncaaf','NCAAF']].map(function(x){return '<a href="'+x[0]+'/"'+(x[0]===BASE?' class="on" aria-current="page"':'')+'>'+x[1]+'</a>';}).join('')
-  + '</nav></div><style>#xsport{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:14px;height:34px;padding:0 14px;background:#0a0a0b;color:#e7e7ea;font:700 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em}'
-  + '#xsport b{color:#8a8a92}#xsport nav{display:flex;gap:6px;margin-left:auto}#xsport nav a{padding:6px 13px;border-radius:7px;color:#8a8a92;text-decoration:none}#xsport nav a.on{background:#e7e7ea;color:#0a0a0b}#xsport nav a:hover{color:#e7e7ea}</style>');
+  + '</nav></div><style>'
+  // Native switcher: the board's own design tokens + Geist, so it themes (light/dark) with the app and reads
+  // as part of it. Not sticky, so it never sits over the board's own sticky table headers.
+  + '#xsport{display:flex;align-items:center;gap:12px;height:46px;padding:0 var(--gutter);background:var(--bg);border-bottom:1px solid var(--line);font-family:var(--font)}'
+  + '#xsport .xb{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}'
+  + '#xsport .xb i{color:var(--accent);font-style:normal;padding:0 1px}'
+  + '#xsport .xseg{margin-left:auto;display:flex;gap:2px;padding:3px;background:var(--fill);border-radius:999px}'
+  + '#xsport .xseg a{padding:6px 16px;border-radius:999px;font-size:13px;font-weight:600;color:var(--ink-2);text-decoration:none;letter-spacing:-.01em;transition:color .15s var(--ease)}'
+  + '#xsport .xseg a.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.10)}'
+  + '#xsport .xseg a:not(.on):hover{color:var(--ink)}'
+  + '</style>');
 function addCookie(res, str) {
   const had = res.getHeader('set-cookie');
   res.setHeader('set-cookie', had ? [].concat(had, str) : [str]);
