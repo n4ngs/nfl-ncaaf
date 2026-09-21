@@ -584,6 +584,10 @@ const crypto = require('node:crypto');
 const https = require('node:https');
 const hashCode = (c) => crypto.createHash('sha256').update(`hl:${c}`).digest('hex');
 const codeHash = ACCESS_CODE ? hashCode(ACCESS_CODE) : '';
+// A second code for guests: full board + their own bet tracking, but never owner (no admin / Security
+// Center). The NFL.NCAAF terminal sets this cookie for both sports on one guest entry.
+const GUEST_CODE = process.env.GUEST_CODE || '';
+const guestHash = GUEST_CODE ? hashCode('guest:' + GUEST_CODE) : '';
 // What an owner's installed icon carries in its start_url so a Home Screen launch is still the owner. Derived
 // from the code, never stored; changing ACCESS_CODE invalidates it along with everything else.
 const ownerKey = ACCESS_CODE ? crypto.createHash('sha256').update(`launch:${codeHash}`).digest('hex').slice(0, 32) : '';
@@ -653,13 +657,14 @@ const uidOf = (req) => { const v = cookieOf(req).hl_uid || ''; return UID_RE.tes
 const BASE = process.env.BASE_PATH || '';
 // Slim terminal-style sport switcher injected at the top of <body> when mounted under the NFL.NCAAF
 // terminal. Cross-sport links are absolute (/nfl/, /ncaaf/) so they ignore <base href> on purpose.
-const SPORTBAR = !BASE ? '' : ('<div id="xsport"><span class="xb">NFL<i>\u00b7</i>NCAAF</span><nav class="xseg" aria-label="Sport">'
+const SPORTBAR = !BASE ? '' : ('<div id="xsport"><span class="xb"><svg class="xm" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="var(--ink)"/><path d="M21 21 L33 32 L21 43" fill="none" stroke="var(--accent)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="34" y="38.5" width="15" height="5" rx="2.5" fill="var(--bg)"/></svg>NFL<i>\u00b7</i>NCAAF</span><nav class="xseg" aria-label="Sport">'
   + [['/nfl','NFL'],['/ncaaf','NCAAF']].map(function(x){return '<a href="'+x[0]+'/"'+(x[0]===BASE?' class="on" aria-current="page"':'')+'>'+x[1]+'</a>';}).join('')
   + '</nav></div><style>'
   // Native switcher: the board's own design tokens + Geist, so it themes (light/dark) with the app and reads
   // as part of it. Not sticky, so it never sits over the board's own sticky table headers.
   + '#xsport{display:flex;align-items:center;gap:12px;height:46px;padding:0 var(--gutter);background:var(--bg);border-bottom:1px solid var(--line);font-family:var(--font)}'
-  + '#xsport .xb{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}'
+  + '#xsport .xb{display:inline-flex;align-items:center;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}'
+  + '#xsport .xm{width:17px;height:17px;border-radius:5px;margin-right:8px;flex:none}'
   + '#xsport .xb i{color:var(--accent);font-style:normal;padding:0 1px}'
   + '#xsport .xseg{margin-left:auto;display:flex;gap:2px;padding:3px;background:var(--fill);border-radius:999px}'
   + '#xsport .xseg a{padding:6px 16px;border-radius:999px;font-size:13px;font-weight:600;color:var(--ink-2);text-decoration:none;letter-spacing:-.01em;transition:color .15s var(--ease)}'
@@ -679,6 +684,7 @@ function setUid(req, res, uid) {
 function roleOf(req) {
   if (!ACCESS_CODE) return 'owner';
   if (sameHash(cookieOf(req).hl_code || '', codeHash)) return 'owner';
+  if (guestHash && sameHash(cookieOf(req).hl_guest || '', guestHash)) return 'guest';
   return Group.byToken(cookieOf(req).hl_key || '') ? 'guest' : null;
 }
 function ensureUid(req, res) {
