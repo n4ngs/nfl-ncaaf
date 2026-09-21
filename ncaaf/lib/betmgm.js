@@ -202,12 +202,15 @@ const listMap = () => Object.entries(store.picks).map(([k, v]) => {
 const ODDS_KEY = (process.env.ODDS_API_KEY || '').trim();
 const ODDS_SPORT = process.env.ODDS_SPORT_KEY || 'americanfootball_ncaaf';
 const ODDS_STATE = process.env.BETMGM_STATE || 'nv';
-const ODDS_TTL = Number(process.env.ODDS_TTL_MS) || 15 * 60e3;
+const ODDS_TTL = Number(process.env.ODDS_TTL_MS) || 45 * 60e3;   // free tier is 500/month (~16/day)
 let oc = { at: 0, rows: null };
+let quota = { left: null, used: null, at: 0 };                   // their x-requests-* headers
 
 function oddsGet(u) {
   return new Promise((resolve) => {
     const r = https.get(u, { timeout: 12000, headers: { accept: 'application/json' } }, (res) => {
+      const left = res.headers['x-requests-remaining'], used = res.headers['x-requests-used'];
+      if (left != null) quota = { left: Number(left), used: Number(used), at: Date.now() };
       let b = '';
       res.on('data', (d) => { b += d; if (b.length > 8e6) res.destroy(); });
       res.on('end', () => { try { resolve(res.statusCode === 200 ? JSON.parse(b) : null); } catch { resolve(null); } });
@@ -274,6 +277,6 @@ async function linkFor(G, market, side, stake, gid) {
   } catch { /* any trouble at their end falls back below */ }
   return searchLink(G);
 }
-const status = () => ({ base: BASE, configured: !!ACCESS_ID, odds: !!ODDS_KEY, oddsSport: ODDS_SPORT, oddsCached: (oc.rows||[]).length, cachedFixtures: cache.rows?.length ?? 0, err: cache.err });
+const status = () => ({ base: BASE, configured: !!ACCESS_ID, odds: !!ODDS_KEY, oddsSport: ODDS_SPORT, oddsCached: (oc.rows||[]).length, oddsQuota: quota, cachedFixtures: cache.rows?.length ?? 0, err: cache.err });
 
 module.exports = { linkFor, searchLink, slipLink, status, parseLink, setMap, delMap, getMap, listMap };
