@@ -1,8 +1,9 @@
 'use strict';
 /* BetMGM Nevada — one tap from a line on the board to BetMGM, with the bet already in the slip.
  *
- * BetMGM publishes a betslip deep link:
- *     https://www.nv.betmgm.com/en/sports?options={fixtureId}-{marketId}-{optionId}&type=Single
+ * BetMGM's betslip deep link, as the live NV site actually builds it (their published docs show an
+ * older hyphen form; this was confirmed from a link their own Affiliate Helper generated):
+ *     /en/sports?options={fixtureId}_{fixtureGuid}_{marketId}_{optionId}_false&type=Single
  * Those ids are BetMGM's own. Only their Sports API hands them out, and it answers
  * "AccessId is not provided" without a partner access id, so:
  *
@@ -30,14 +31,28 @@ function searchLink(G) {
   const q = [nameOf(G?.away), nameOf(G?.home)].filter(Boolean).join(' ');
   return q ? `${BASE}/en/sports/search?query=${encodeURIComponent(q)}` : `${BASE}/en/sports`;
 }
-function slipLink(sel, stake) {
-  const p = new URLSearchParams();
-  p.set('options', [sel.fixtureId, sel.marketId, sel.optionId].join('-'));
-  p.set('type', 'Single');
-  if (stake > 0) p.set('stake', String(stake));
-  if (WM) p.set('wm', WM);
-  p.set('source', 'board');
-  return `${BASE}/en/sports?${p.toString()}`;
+/* The real shape, confirmed from a link BetMGM's own Affiliate Helper generated while signed in:
+     options={fixtureId}_{fixtureGuid}_{marketId}_{optionId}_{isClassicBetBuilder}
+   Legs of the SAME game join with "~" (a same-game parlay); different games join with ",".
+   A single Giants moneyline looks like:
+     ?options=6:43394_62f4f181-585f-44b6-9941-be7783302469_3594950_5692112_false&type=Single
+   Note this is NOT the "{fixtureId}-{marketId}-{optionId}" hyphen form in their published docs: the live
+   site uses underscores and carries the fixture GUID. Built by hand rather than with URLSearchParams,
+   because that would percent-encode the ":" and "~" their format depends on. */
+function selToken(sel) {
+  return [sel.fixtureId, sel.fixtureGuid, sel.marketId, sel.optionId, 'false']
+    .filter((x) => x != null && x !== '').join('_');
+}
+function slipLink(sels, stake) {
+  const list = (Array.isArray(sels) ? sels : [sels]).filter(Boolean);
+  if (!list.length) return `${BASE}/en/sports`;
+  const sameGame = list.length > 1 && list.every((s) => s.fixtureId === list[0].fixtureId);
+  const q = [`options=${list.map(selToken).join(sameGame ? '~' : ',')}`,
+             `type=${list.length > 1 ? 'COMBO' : 'Single'}`];
+  if (stake > 0) q.push(`stake=${encodeURIComponent(stake)}`);
+  if (WM) q.push(`wm=${encodeURIComponent(WM)}`);
+  q.push('source=board');
+  return `${BASE}/en/sports?${q.join('&')}`;
 }
 
 /* ---------- their Sports API (only used when an access id is configured) ---------- */
@@ -93,9 +108,10 @@ function pickOption(fx, market, side, G) {
   const op = opts.find((o) => want.test(String(o?.name?.value || o?.name || ''))) || null;
   if (!op) return null;
   const fixtureId = fx.id ?? fx.fixtureId;
+  const fixtureGuid = fx.guid ?? fx.fixtureGuid ?? fx.eventGuid ?? null;
   const marketId = mk.id ?? mk.marketId;
   const optionId = op.id ?? op.optionId;
-  return (fixtureId && marketId && optionId) ? { fixtureId, marketId, optionId } : null;
+  return (fixtureId && marketId && optionId) ? { fixtureId, fixtureGuid, marketId, optionId } : null;
 }
 
 /* ---------- the one call the server makes ---------- */
