@@ -30,6 +30,10 @@ const hashCode = (c) => crypto.createHash('sha256').update(`hl:${c}`).digest('he
 const OWNER_HASH = ADMIN_CODE ? hashCode(ADMIN_CODE) : '';
 const GUEST_HASH = GUEST_CODE ? hashCode('guest:' + GUEST_CODE) : '';
 // A stable, unguessable one-tap guest link: share https://host/g/<GUEST_LINK>.
+// Bing Bong Live hashes its own way, so mint its token too and one entry covers all three sports.
+const bblTok = (x) => crypto.createHash('sha256').update(`bing-bong-live:${x}`).digest('hex').slice(0, 40);
+const BBL_OWNER = ADMIN_CODE ? bblTok(ADMIN_CODE) : '';
+const BBL_GUEST = GUEST_CODE ? bblTok('guest:' + GUEST_CODE) : '';
 const GUEST_LINK = GUEST_CODE ? crypto.createHash('sha256').update(`guestlink:${GUEST_CODE}`).digest('hex').slice(0, 24) : '';
 const OWNER_NAME = (process.env.OWNER_NAME || '').trim().slice(0, 24);
 const GATED = !!ADMIN_CODE;
@@ -41,12 +45,15 @@ const PEER_SECRET = process.env.TELEMETRY_PEER_SECRET || crypto.randomBytes(32).
 const SPORTS = {
   nfl:   { dir: 'nfl',   base: '/nfl',   label: 'NFL',   port: 5061, appId: 'pick-six',        sibling: 'ncaaf', ck: 'ps' },
   ncaaf: { dir: 'ncaaf', base: '/ncaaf', label: 'NCAAF', port: 5062, appId: 'hook-and-ladder', sibling: 'nfl',   ck: 'hl' },
+  mlb:   { dir: 'mlb',   base: '/mlb',   label: 'MLB',   port: 5063, appId: 'bing-bong-live',  sibling: 'nfl',   ck: 'bbl' },
 };
+// Which Odds API sport each engine resolves its BetMGM links against.
+const ODDS_SPORT = { nfl: 'americanfootball_nfl', ncaaf: 'americanfootball_ncaaf', mlb: 'baseball_mlb' };
 
 // ---- brand ----------------------------------------------------------------
-const BRAND = 'NFL.NCAAF';
+const BRAND = 'THE.BOARD';
 const LOGO = // a terminal caret — the wordmark's icon, favicon and PWA icon
-  '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NFL.NCAAF">'
+  '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="THE.BOARD">'
   + '<rect width="64" height="64" rx="15" fill="#0B0B0D"/>'
   + '<path d="M21 21 L33 32 L21 43" fill="none" stroke="#EE3A2E" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>'
   + '<rect x="34" y="38.5" width="15" height="5" rx="2.5" fill="#F5F5F7"/></svg>';
@@ -67,6 +74,7 @@ function childEnv(key) {
   env.BASE_PATH = s.base;
   env.DATA_DIR = path.join(DATA_DIR, s.dir);
   env.APP_ID = s.appId;
+  if (ODDS_SPORT[key]) env.ODDS_SPORT_KEY = ODDS_SPORT[key];
   env.TELEMETRY_PEER_SECRET = PEER_SECRET;
   env.TELEMETRY_PEER_URL = `http://127.0.0.1:${sib.port}`;
   env.TELEMETRY_PEER_NAME = sib.appId;
@@ -94,20 +102,21 @@ const safeEq = (a, b) => { a = String(a || ''); b = String(b || ''); if (!a || a
 function role(req) {
   if (!GATED) return 'owner';
   const c = cookies(req);
-  if (safeEq(c.ps_code, OWNER_HASH) || safeEq(c.hl_code, OWNER_HASH)) return 'owner';
-  if (GUEST_HASH && (safeEq(c.ps_guest, GUEST_HASH) || safeEq(c.hl_guest, GUEST_HASH))) return 'guest';
+  if (safeEq(c.ps_code, OWNER_HASH) || safeEq(c.hl_code, OWNER_HASH) || (BBL_OWNER && safeEq(c.bbl_access, BBL_OWNER))) return 'owner';
+  if ((GUEST_HASH && (safeEq(c.ps_guest, GUEST_HASH) || safeEq(c.hl_guest, GUEST_HASH))) || (BBL_GUEST && safeEq(c.bbl_guest, BBL_GUEST))) return 'guest';
   return null;
 }
 function setAuth(res, kind, isHttps) {
   const opt = `Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax${isHttps ? '; Secure' : ''}`;
   const val = kind === 'owner' ? OWNER_HASH : GUEST_HASH;
   const name = kind === 'owner' ? 'code' : 'guest';
-  // Set the credential for BOTH sports at Path=/, so one entry authenticates NFL and NCAAF together.
-  res.setHeader('set-cookie', [`ps_${name}=${val}; ${opt}`, `hl_${name}=${val}; ${opt}`]);
+  // Set the credential for ALL THREE sports at Path=/, so one entry authenticates the whole board.
+  const bbl = kind === 'owner' ? `bbl_access=${BBL_OWNER}` : `bbl_guest=${BBL_GUEST}`;
+  res.setHeader('set-cookie', [`ps_${name}=${val}; ${opt}`, `hl_${name}=${val}; ${opt}`, `${bbl}; ${opt}`]);
 }
 function clearAuth(res, isHttps) {
   const gone = `Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isHttps ? '; Secure' : ''}`;
-  res.setHeader('set-cookie', ['ps_code=', 'hl_code=', 'ps_guest=', 'hl_guest='].map((k) => `${k}; ${gone}`));
+  res.setHeader('set-cookie', ['ps_code=', 'hl_code=', 'ps_guest=', 'hl_guest=', 'bbl_access=', 'bbl_guest='].map((k) => `${k}; ${gone}`));
 }
 
 // ---- login page -----------------------------------------------------------
@@ -128,7 +137,7 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 .e{color:var(--a);font-size:14px;min-height:18px;margin:2px 0 0}.f{color:var(--i3);font-size:12px;margin-top:18px;text-align:center}
 </style></head>
 <body><div class="card">
-<div class="top"><span class="logo">${LOGO}</span><span class="wm">NFL<b>.</b>NCAAF</span></div>
+<div class="top"><span class="logo">${LOGO}</span><span class="wm">THE<b>.</b>BOARD</span></div>
 <h1>${OWNER_NAME ? OWNER_NAME + "'s board" : 'Enter your code'}</h1>
 <p>NFL and NCAAF, one board. Enter the code you were given.</p>
 <form method="post" action="/login" autocomplete="off">
@@ -150,9 +159,9 @@ const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(','
 const isHttps = (req) => (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
 
 // Assets that must load even before sign-in (PWA install + uptime checks).
-const OPEN = /^\/(nfl|ncaaf)\/(api\/health|manifest\.webmanifest|sw\.js|favicon\.ico|icons\/[\w.\-/]+)$/;
+const OPEN = /^\/(nfl|ncaaf|mlb)\/(api\/health|manifest\.webmanifest|sw\.js|favicon\.ico|icons\/[\w.\-/]+)$/;
 
-function lastSport(req) { const m = /(?:^|;\s*)sport=(nfl|ncaaf)/.exec(req.headers.cookie || ''); return m ? m[1] : 'nfl'; }
+function lastSport(req) { const m = /(?:^|;\s*)sport=(nfl|ncaaf|mlb)/.exec(req.headers.cookie || ''); return m ? m[1] : 'nfl'; }
 
 const server = http.createServer((req, res) => {
   const u = req.url || '/';
@@ -199,7 +208,7 @@ const server = http.createServer((req, res) => {
     return res.end();
   }
 
-  const m = /^\/(nfl|ncaaf)(\/.*)?$/.exec(pathname);
+  const m = /^\/(nfl|ncaaf|mlb)(\/.*)?$/.exec(pathname);
   if (!m) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('Not found'); }
   const s = SPORTS[m[1]];
   if (m[2] === undefined) { res.writeHead(301, { location: `${s.base}/` }); return res.end(); }

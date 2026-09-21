@@ -1,0 +1,51 @@
+/* Bing Bong Live — play limits (limits.js). app.css tokens only: calm ink and fills, no red, no green. */
+
+/* the slip notice, after the first Save tap past a limit */
+.lim-note{margin-top:12px;padding:12px 14px;border-radius:var(--r-md);background:var(--surface);box-shadow:inset 0 0 0 1px var(--line);font-size:14px;line-height:1.45;color:var(--ink)}
+.lim-note p{margin:0}
+.lim-note .lim-note-s{margin-top:4px;font-size:13px;color:var(--ink-2)}
+
+/* My bets: this week / today against your limit */
+.lim-mine{display:grid;gap:10px;margin-top:12px;padding:12px var(--s2)}
+.lim-row-t{font-size:13px;color:var(--ink-2)}
+.lim-row-t b{color:var(--ink);font-weight:600}
+.lim-bar{height:6px;margin-top:6px;border-radius:3px;background:var(--fill);overflow:hidden}
+.lim-bar i{display:block;height:100%;border-radius:3px;background:var(--ink-3)}
+
+/* Settings card */
+.lim-now{margin:12px 0 0;font-size:13px;color:var(--ink-2)}
+.lim-brk{margin-top:var(--s3);padding-top:var(--s2);border-top:1px solid var(--line)}
+.lim-brk-h{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.lim-brk-h b{display:block;font-size:15px;font-weight:600}
+.lim-brk-h span{display:block;margin-top:2px;font-size:13px;line-height:1.4;color:var(--ink-2)}
+.lim-sw{position:relative;flex:none;width:60px;height:44px;border-radius:999px}
+.lim-sw i{position:absolute;left:4px;right:4px;top:6px;bottom:6px;border-radius:999px;background:var(--fill);box-shadow:inset 0 0 0 1px var(--line);transition:background-color .2s var(--ease)}
+.lim-sw i::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:var(--ink-3);transition:transform .2s var(--ease)}
+.lim-sw[aria-checked="true"] i{background:var(--ink);box-shadow:none}
+.lim-sw[aria-checked="true"] i::after{transform:translateX(20px);background:var(--surface)}
+.lim-sw:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.lim-until{display:grid;gap:12px;margin-top:var(--s2)}
+.lim-until .bets-chips{gap:6px}
+.lim-brk-s{margin:0;font-size:13px;color:var(--ink-2)}
+.lim-card .bets-btns [hidden]{display:none}
+.lim-help{margin:var(--s2) 0 0;font-size:13px;color:var(--ink-2)}
+.lim-help a{display:inline-flex;align-items:center;min-height:44px;font-weight:600;color:var(--ink);text-decoration:underline;text-underline-offset:2px}
+.lim-help a:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+/* Take a break: no Edge Finder entry, no price flashes on the Odds board */
+.lim-break .odds-edge-slot,.lim-break .odds-edge-entry{display:none}
+.lim-break .odds-px.tick,.lim-break .odds-px.tick small,.lim-break .odds-tp.tick{animation:none}
+.lim-break .odds-px.tick{background-color:var(--fill);color:var(--ink);box-shadow:none}
+.lim-break .odds-px.tick small{color:var(--ink-2)}
+.lim-break .odds-tp.tick{background-color:transparent;color:var(--ink);box-shadow:none}
+.lim-break .odds-tp.best.tick{background-color:var(--surface);box-shadow:inset 0 0 0 1.5px var(--ink)}
+
+/* close the empty Edge Finder row */
+.lim-break .odds-lay{grid-template-areas:"boards" "moves"}
+@media (min-width:1024px){
+  .lim-break .odds-lay{grid-template-areas:"boards moves";grid-template-rows:auto}
+  .lim-mine{padding:var(--s2) var(--s3)}
+}
+@media (prefers-reduced-motion:reduce){
+  .lim-sw i,.lim-sw i::after{transition:none}
+}

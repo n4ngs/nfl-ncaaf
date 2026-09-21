@@ -1,0 +1,14 @@
+{
+  "name": "bing-bong-live",
+  "version": "1.0.0",
+  "description": "Live MLB home runs, at-bats and Statcast",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

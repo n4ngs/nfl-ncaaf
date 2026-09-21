@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bing Bong Live</title>
+<meta name="description" content="Every MLB home run seconds after it's hit, with the video, plus every at-bat pitch by pitch.">
+<meta name="theme-color" content="#F4F4F6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Bing Bong">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@500&display=swap" rel="stylesheet">
+<script>
+  // Apply the saved theme before first paint so the page never flashes the wrong one.
+  try { var t = JSON.parse(localStorage.getItem('bbl.theme')); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="odds.css">
+<link rel="stylesheet" href="bets.css">
+<link rel="stylesheet" href="group.css">
+<link rel="stylesheet" href="mlbhome.css">
+<link rel="stylesheet" href="mlbtools.css">
+<link rel="stylesheet" href="share.css">
+<link rel="stylesheet" href="limits.css">
+</head>
+<body>
+<div class="wrap" id="app">
+  <header class="top">
+    <a class="brand" href="#live" data-tab="live" aria-label="Bing Bong Live, go to Live"><span class="mark"><i></i></span>Bing Bong Live</a>
+    <nav class="nav" aria-label="Sections">
+      <a data-tab="live" href="#live">Live</a>
+      <a data-tab="homers" href="#homers">Homers</a>
+      <a data-tab="games" href="#games">Games</a>
+      <a data-tab="following" href="#following">Mine</a>
+      <a data-tab="tools" href="#tools">Tools</a>
+    </nav>
+    <div class="top-actions">
+      <button class="pill phone-btn" id="phoneBtn" type="button">Open on iPhone</button>
+      <button class="ibtn" id="alertBtn" type="button" aria-label="Home run alerts: off"></button>
+      <button class="ibtn" id="themeBtn" type="button" aria-label="Theme: automatic"></button>
+      <div class="pill" id="livePill" role="status" aria-live="polite"><span class="dot pulse"></span><span id="liveText">Connecting</span></div>
+    </div>
+  </header>
+
+  <nav class="days" id="days" aria-label="Pick a day">
+    <div class="days-in" id="dayStrip"></div>
+    <label class="day-cal" title="Pick any day"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="14" height="12.5" rx="2.5"/><path d="M3 8.5h14M7 2.8v3.4M13 2.8v3.4"/></svg><input type="date" id="dateInput" aria-label="Pick any day"></label>
+  </nav>
+
+  <main id="main">
+    <!-- ============ LIVE ============ -->
+    <section class="view" id="view-live" data-view="live" aria-label="Live">
+      <div id="banner"></div>
+      <div id="mlbMoveSlot"></div>
+      <section class="head">
+        <div>
+          <div class="dayline" id="dayline"></div>
+          <h1 id="headline">Home runs tonight</h1>
+          <p id="subline"></p>
+        </div>
+        <div class="glance-top" id="glanceTop"></div>
+      </section>
+
+      <div class="lay hero-grid">
+        <div class="hero-side-first" id="airSlot"></div>
+        <section class="hero-main hero" id="hero" aria-label="Latest home run"></section>
+        <aside class="hero-side" id="heroSide"></aside>
+      </div>
+
+      <section class="sec">
+        <div class="sec-h"><h2 id="scoresTitle">Scores</h2><a class="more" href="#games" data-tab="games" id="scoreMeta"></a></div>
+        <div class="strip" id="strip"></div>
+      </section>
+
+      <div id="liveOddsHost"></div>
+
+      <section class="sec" id="absSec">
+        <div class="sec-h"><h2>At bat now</h2><span class="more" id="abMeta"></span></div>
+        <div class="abs" id="abs"></div>
+      </section>
+
+      <section class="sec sec-glance">
+        <div class="sec-h"><h2 id="glanceTitle">Today at a glance</h2></div>
+        <div class="card glance" id="glance"></div>
+      </section>
+
+      <section class="sec" id="learn">
+        <div class="card learn">
+          <h3>New to baseball?</h3>
+          <p>A home run is a ball hit over the outfield wall. Four numbers explain almost every one.</p>
+          <div class="terms">
+            <div class="term"><b>Exit velocity</b><span>How fast the ball leaves the bat. 95 mph is hit hard. Over 110 is rare.</span></div>
+            <div class="term"><b>Launch angle</b><span>How steeply it rises. Most homers leave at 25° to 35°. Under 10° is a grounder.</span></div>
+            <div class="term"><b>Parks</b><span>In how many of the 30 big-league ballparks the same hit would have been a home run.</span></div>
+            <div class="term"><b>Barrel</b><span>The ideal mix of speed and angle. Barrels usually go for extra bases or leave the park.</span></div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- ============ HOMERS ============ -->
+    <section class="view" id="view-homers" data-view="homers" aria-label="Homers">
+      <div class="view-h">
+        <div><h1 id="homersTitle">Home runs</h1><p id="homersSub"></p></div>
+        <div class="seg" id="homersSeg" role="group" aria-label="Show">
+          <button type="button" data-seg="tonight">Home runs</button>
+          <button type="button" data-seg="hits">All hits</button>
+          <button type="button" data-seg="statcast">Statcast</button>
+          <button type="button" data-seg="season">Season</button>
+        </div>
+      </div>
+      <div id="homersBody"></div>
+    </section>
+
+    <!-- ============ GAMES ============ -->
+    <section class="view" id="view-games" data-view="games" aria-label="Games">
+      <div class="view-h"><div><h1>Games</h1><p id="gamesSub"></p></div></div>
+      <div id="oddsHost"></div>
+      <div class="games" id="gamesList"></div>
+    </section>
+
+    <!-- ============ FOLLOWING ============ -->
+    <section class="view" id="view-following" data-view="following" aria-label="Following">
+      <div class="view-h"><div><h1>Mine</h1><p id="followSub">Your players and teams, live.</p></div></div>
+      <div id="betsHost"></div>
+      <div id="followBody"></div>
+    </section>
+    <!-- ============ TOOLS ============ -->
+    <section class="view" id="view-tools" data-view="tools" aria-label="Tools">
+      <div class="view-h"><div><h1>Tools</h1><p>Calculators, your sizing, and where every line comes from.</p></div></div>
+      <div id="toolsBody"></div>
+    </section>
+  </main>
+
+  <footer class="foot" id="foot">MLB Stats API, Statcast and MLB video. Live games refresh every 2 seconds.</footer>
+</div>
+
+<nav class="tabbar" aria-label="Sections">
+  <a data-tab="live" href="#live"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg>Live</a>
+  <a data-tab="homers" href="#homers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M7.2 5.2c1.6 1.8 2.4 4 2.4 6.8s-.8 5-2.4 6.8M16.8 5.2c-1.6 1.8-2.4 4-2.4 6.8s.8 5 2.4 6.8"/></svg>Homers<span class="badge" id="hrBadge" hidden></span></a>
+  <a data-tab="games" href="#games"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M12 5v14M3.5 12h17"/></svg>Games</a>
+  <a data-tab="following" href="#following"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.8l2.5 5.1 5.6.8-4 3.9 1 5.6-5.1-2.7-5 2.7 1-5.6-4.1-3.9 5.6-.8z"/></svg>Mine</a>
+  <a data-tab="tools" href="#tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="3"/><path d="M7.5 8.5h9M7.5 12h9M7.5 15.5h5"/></svg>Tools</a>
+</nav>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<dialog class="dlg" id="dlg" aria-labelledby="dlgTitle">
+  <div class="dlg-in" id="dlgIn">
+    <div class="dlg-bar"><div class="grab"></div><button class="ibtn dlg-close" id="dlgClose" type="button" aria-label="Close"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+    <div id="dlgBody"></div>
+  </div>
+</dialog>
+
+<script src="js/core.js"></script>
+<script src="js/live.js"></script>
+<script src="js/views.js"></script>
+<script src="js/sheets.js"></script>
+<script src="js/odds.js"></script>
+<script src="js/bets.js"></script>
+<script src="js/group.js"></script>
+<script src="js/mlbhome.js"></script>
+<script src="js/mlbtools.js"></script>
+<script src="js/share.js"></script>
+<script src="js/limits.js"></script>
+<script src="js/boot.js"></script>
+</body>
+</html>

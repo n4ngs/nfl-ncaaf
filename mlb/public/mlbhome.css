@@ -1,0 +1,91 @@
+/* Bing Bong Live — odds on the home (Live) page: move cards, game of the moment, line moves.
+   Only tokens from app.css (Geist scale, --r-*, --s*, color tokens), so dark mode comes for free.
+   The accent is used for the live dot and the steam tag and nothing else; green is never used here. */
+
+/* ---------- shared ---------- */
+.mh-sec{min-width:0}
+.mh-lab{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:0 0 12px}
+.mh-lab b{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.mh-lab span{font-size:13px;color:var(--ink-2);text-align:right}
+
+/* ---------- 1. move cards (#mlbMoveSlot) ---------- */
+#mlbMoveSlot:not(:empty){display:grid;gap:12px;margin-top:var(--s2)}
+.mh-mv{display:block;width:100%;text-align:left;padding:var(--s2);min-height:44px}
+.mh-mv-top{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px}
+.mh-mv-k{display:inline-flex;align-items:center;gap:8px;font-weight:600;min-width:0}
+.mh-mv-k.hot{color:var(--accent)}
+.mh-mv-main{display:flex;align-items:center;gap:10px;margin-top:10px}
+.mh-mv-lg{width:24px;height:24px}
+.mh-mv-who{flex:1;min-width:0}
+.mh-mv-who b{display:block;font-size:15px;font-weight:600;letter-spacing:-.01em;line-height:1.25}
+.mh-mv-who span{display:block;font-size:12px;color:var(--ink-2);margin-top:2px}
+.mh-mv-num{font-size:26px;font-weight:650;line-height:1;white-space:nowrap;text-align:right}
+.mh-mv-num s{font-size:14px;font-weight:500;color:var(--ink-3);margin-right:5px;letter-spacing:0}
+.mh-mv-num small{display:block;font-size:11px;font-weight:500;color:var(--ink-2);letter-spacing:0;margin-top:4px}
+.mh-mv-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:12px;color:var(--ink-2)}
+.mh-mv-foot > span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mh-mv-foot > span:last-child{display:inline-flex;align-items:center;gap:4px;flex:none}
+.mh-mv-foot svg{width:12px;height:12px}
+
+/* ---------- 2. game of the moment ---------- */
+.mh-hero{display:block;width:100%;text-align:left;padding:var(--s2)}
+.mh-sb{display:grid;gap:10px}
+.mh-t{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;min-width:0}
+.mh-t-lg{width:24px;height:24px}
+.mh-t-nm{font-size:17px;font-weight:600;letter-spacing:-.015em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mh-t-sc{font-size:22px;font-weight:650}
+.mh-t.behind .mh-t-nm,.mh-t.behind .mh-t-sc{color:var(--ink-2)}
+.mh-t.behind .logo{opacity:.65}
+
+.mh-big3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s2);margin-top:var(--s3)}
+.mh-st{display:block;min-width:0}
+.mh-st .v{display:block;font-size:26px;font-weight:650;line-height:1;white-space:nowrap}
+.mh-st .l{display:block;font-size:12px;color:var(--ink-2);margin-top:8px;line-height:1.3}
+
+.mh-wpb{display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--line);margin-top:var(--s3)}
+.mh-wpb i{display:block;height:100%;background:var(--ink)}
+.mh-wpl{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-2);margin-top:6px}
+.mh-wpl b{color:var(--ink);font-weight:600}
+
+.mh-say{display:block;font-size:15px;line-height:1.45;margin-top:var(--s3);padding-top:var(--s2);border-top:1px solid var(--line)}
+.mh-say .muted{display:block;font-size:13px;margin-top:6px}
+
+/* ---------- 3. line moves ---------- */
+.mh-list{padding:4px 0}
+.mh-li{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:0 12px;width:100%;min-height:52px;padding:10px var(--s2);text-align:left}
+.mh-li + .mh-li{border-top:1px solid var(--line)}
+.mh-li-mid{min-width:0}
+.mh-li-t{display:block;font-size:14px;line-height:1.35}
+.mh-li-s{display:block;font-size:12px;color:var(--ink-2);margin-top:2px}
+.mh-li-v{font-size:15px;font-weight:650;text-align:right;white-space:nowrap}
+.mh-tag{height:22px;padding:0 9px;font-size:11px;letter-spacing:.02em;align-self:center}
+.mh-tag.hot{background:var(--accent);color:var(--on-accent)}
+.mh-empty{padding:var(--s3) var(--s2)}
+.mh-empty b{font-size:15px}
+.mh-more{display:flex;align-items:center;justify-content:center;gap:4px;width:100%;min-height:44px;border-top:1px solid var(--line);font-size:13px;font-weight:600;color:var(--ink-2)}
+.mh-more svg{width:12px;height:12px}
+
+/* ---------- affordances ---------- */
+@media (hover:hover){
+  .mh-mv:hover,.mh-hero:hover{box-shadow:inset 0 0 0 1px var(--line)}
+  .mh-li:hover,.mh-more:hover{background:var(--fill)}
+}
+.mh-mv:active,.mh-hero:active{transform:scale(.995)}
+.mh-mv,.mh-hero{transition:transform .16s var(--ease)}
+
+/* ---------- desktop ---------- */
+@media (min-width:1024px){
+  #mlbMoveSlot:not(:empty){grid-template-columns:repeat(2,1fr);margin-top:var(--s3)}
+  .mh-mv{padding:var(--s3)}
+  .mh-mv-num{font-size:36px}
+  .mh-hero{padding:var(--s3)}
+  .mh-sb{max-width:520px}
+  .mh-say{max-width:78ch}
+  .mh-t-nm{font-size:20px}
+  .mh-t-sc{font-size:26px}
+  .mh-big3{gap:var(--s3);margin-top:var(--s4);max-width:720px}
+  .mh-st .v{font-size:38px;letter-spacing:-.04em}
+  .mh-st .l{font-size:13px}
+  .mh-li-t{font-size:15px}
+  .mh-li-v{font-size:17px}
+}

@@ -1,0 +1,337 @@
+/* Bing Bong Live — odds: Games tab "Odds" view, game odds sheet, Edge Finder. app.css tokens only.
+   Informational: no shouting pills, no green (green is only for your own winning tickets). */
+
+/* ---------- Scores | Odds */
+.odds-switch{margin:0 0 var(--s2)}
+.odds-switch button,.odds-chart-seg button,.odds-edge-chips button{position:relative}
+.odds-switch button::before,.odds-chart-seg button::before,.odds-edge-chips button::before{content:"";position:absolute;inset:-6px 0}
+.odds-view{min-width:0}
+.odds-lede{margin:0 0 var(--s2);font-size:13px;color:var(--ink-2);line-height:1.4}
+.odds-note{margin:var(--s3) 0 0;font-size:13px;color:var(--ink-2);line-height:1.5}
+.odds-note b{color:var(--ink);font-weight:600}
+.odds-none{margin:0;font-size:13px;color:var(--ink-3)}
+
+/* layout: phone = edge entry, boards, moves; desktop = boards left, edge + moves right */
+.odds-lay{display:grid;gap:12px;grid-template-areas:"edge" "boards" "moves";grid-template-columns:minmax(0,1fr)}
+.odds-edge-slot{grid-area:edge;min-width:0}
+.odds-boards{grid-area:boards;display:grid;gap:12px;min-width:0}
+.odds-moves-slot{grid-area:moves;min-width:0}
+
+/* ---------- a board card */
+.odds-card{padding:var(--s2);min-width:0}
+.odds-card.fin{opacity:.92}
+.odds-gh{display:flex;align-items:center;gap:6px;min-height:20px;font-size:12px;font-weight:500;color:var(--ink-2)}
+.odds-gh .odds-spark{margin-left:auto}
+.odds-spark{display:block;overflow:visible;flex:none}
+.odds-spark polyline{fill:none;stroke:var(--ink-2);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.odds-spark circle{fill:var(--ink)}
+.odds-grid{display:grid;grid-template-columns:auto repeat(3,minmax(0,1fr));gap:4px 5px;align-items:center;margin-top:8px}
+.odds-colh{font-size:11px;font-weight:500;color:var(--ink-3);text-align:right;padding:0 6px 2px;white-space:nowrap}
+.odds-tm{display:flex;align-items:center;gap:6px;min-width:0;font-size:15px;font-weight:600;padding-right:4px}
+.odds-tm .logo{width:22px;height:22px}
+.odds-tm .odds-sc{margin-left:auto;padding:0 4px 0 2px;font-size:17px;font-weight:650}
+.odds-teams{display:grid;gap:8px;margin:10px 0 8px}
+.odds-teams .odds-tm .odds-sc{margin-left:auto}
+.odds-px{position:relative;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:2px;min-width:0;min-height:48px;padding:5px 6px;border-radius:var(--r-sm);background:var(--fill);color:var(--ink);text-align:right;white-space:nowrap;overflow:hidden}
+.odds-px > .num{font-size:14px;font-weight:650;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.odds-px small{font-size:11px;font-weight:500;line-height:1.1;color:var(--ink-2);letter-spacing:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+button.odds-px:hover{box-shadow:inset 0 0 0 1px var(--line)}
+.odds-px.na{background:none;color:var(--ink-2);font-weight:500}
+.odds-px.na > .num{font-weight:600}
+.odds-open{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--ink-2)}
+.odds-open-k{font-weight:600;color:var(--ink-3)}
+.odds-open-v{display:flex;flex-wrap:wrap;gap:2px 12px;min-width:0}
+.odds-open-v .num{color:var(--ink);font-weight:500}
+.odds-mv-d{color:var(--ink-2);font-weight:600}
+.odds-foot{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:10px;padding-top:6px;border-top:1px solid var(--line)}
+.odds-sheet .odds-open{margin-top:var(--s2);padding-top:var(--s2);border-top:1px solid var(--line)}
+.odds-open-sheet{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 4px;font-size:13px;font-weight:600;color:var(--ink)}
+.odds-open-sheet svg{width:11px;height:11px;color:var(--ink-3)}
+.odds-open-sheet:hover{text-decoration:underline;text-underline-offset:3px}
+
+/* A price that just moved: a wash of the live red with a small pop, fading back over 2.4 s.
+   Redraws resume it where it was (odds.js oddsFlash sets a negative animation-delay). */
+.odds-px.tick,.odds-tp.tick{animation:odds-tick 2.4s var(--ease);will-change:background-color,transform}
+.odds-px.tick small{animation:odds-tick-sub 2.4s var(--ease);animation-delay:inherit}
+@keyframes odds-tick{
+  0%{background-color:color-mix(in srgb,var(--accent) 26%,var(--surface));color:var(--accent);box-shadow:inset 0 0 0 1.5px var(--accent);transform:scale(1.06)}
+  14%{transform:scale(1)}
+  55%{background-color:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--accent) 45%,transparent)}
+  100%{background-color:var(--fill);color:var(--ink);box-shadow:inset 0 0 0 1.5px transparent;transform:none}}
+@keyframes odds-tick-sub{0%,55%{color:color-mix(in srgb,var(--accent) 80%,var(--ink-2))}100%{color:var(--ink-2)}}
+/* the best price in the book table is ringed in ink; its flash settles back to that ring */
+.odds-tp.best.tick{animation-name:odds-tick-best}
+@keyframes odds-tick-best{
+  0%{background-color:var(--accent);color:var(--on-accent);transform:scale(1.06)}
+  14%{transform:scale(1)}
+  55%{background-color:color-mix(in srgb,var(--accent) 20%,var(--surface));color:var(--accent)}
+  100%{background-color:var(--surface);color:var(--ink);transform:none}}
+@media (prefers-reduced-motion:reduce){
+  /* app.css switches animations off; hold a static highlight for the same 2.4 s instead */
+  .odds-px.tick,.odds-tp.tick{background-color:color-mix(in srgb,var(--accent) 16%,var(--surface));color:var(--accent);box-shadow:inset 0 0 0 1.5px var(--accent)}
+  .odds-px.tick small{color:var(--accent)}
+}
+
+/* ---------- Edge Finder entry (one quiet row) */
+.odds-edge-entry{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:56px;padding:10px var(--s2);border-radius:var(--r-lg);background:var(--surface);text-align:left;color:var(--ink-2)}
+.odds-edge-entry > span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.odds-edge-entry b{font-size:15px;font-weight:600;color:var(--ink)}
+.odds-edge-entry > span > span{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.odds-edge-entry svg{width:12px;height:12px;flex:none}
+.odds-edge-entry:hover{background:var(--fill)}
+
+/* ---------- line moves */
+.odds-moves{padding:var(--s2) 0 6px}
+.odds-moves .sub-h{padding:0 var(--s2);margin-bottom:4px}
+.odds-moves ul{list-style:none;margin:0;padding:0}
+.odds-moves li + li{border-top:1px solid var(--line)}
+.odds-moves .odds-none{padding:4px var(--s2) 10px}
+.odds-mv{display:flex;flex-direction:column;gap:2px;width:100%;min-height:52px;padding:8px var(--s2);text-align:left}
+.odds-mv:hover{background:var(--fill)}
+.odds-mv-h{font-size:12px;color:var(--ink-2)}
+.odds-mv-h b{color:var(--ink);font-weight:600}
+.odds-mv-t{font-size:13px;line-height:1.35;color:var(--ink)}
+.odds-more{display:flex;align-items:center;min-height:44px;padding:0 var(--s2);font-size:13px;font-weight:600;color:var(--ink)}
+.dlg .odds-moves{margin-top:var(--s2)}
+
+/* ---------- game odds sheet */
+.odds-sheet h2{font-size:24px}
+.odds-sh-head{display:flex;align-items:center;gap:12px}
+.odds-sh-teams{display:flex;flex:none}
+.odds-sh-teams .logo{width:32px;height:32px}
+.odds-sh-teams .logo + .logo,.odds-sh-teams .logo.lg-l ~ .logo.lg-l,.odds-sh-teams .logo.lg-d ~ .logo.lg-d{margin-left:-6px}
+.odds-sh-sub{margin:4px 0 0;font-size:13px}
+.odds-chart-seg{margin:0 0 12px}
+.odds-chart{display:block;width:100%;height:auto;overflow:visible}
+.odds-chart .gl{stroke:var(--line);stroke-width:1}
+.odds-chart .ax{fill:var(--ink-3);font:500 11px var(--font)}
+.odds-chart .ln{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.odds-chart .ln.t0{stroke:var(--ink-3);stroke-width:1;opacity:.55}
+.odds-chart .ln.t1{stroke:var(--ink-2);stroke-width:1.6}
+.odds-chart .ln.t2{stroke:var(--ink);stroke-width:2.6}
+.odds-chart .op{stroke:var(--ink-2);stroke-width:1;stroke-dasharray:4 4}
+.odds-chart .opl{fill:var(--ink-2);font:600 11px var(--font)}
+.odds-chart .fp{stroke:var(--ink-2);stroke-width:1;stroke-dasharray:2 3}
+.odds-chart .fpl{fill:var(--ink-2);font:600 11px var(--font)}
+.odds-chart .end{fill:var(--ink)}
+.odds-chart .endl{fill:var(--ink);font:650 12px var(--font)}
+.odds-chart-empty{padding:var(--s3) var(--s2);border-radius:var(--r-md);background:var(--surface);font-size:13px;color:var(--ink-2);text-align:center}
+.odds-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:12px;color:var(--ink-2)}
+.odds-legend i{display:inline-block;width:14px;height:0;margin-right:6px;vertical-align:3px;border-top:2px solid var(--ink)}
+.odds-legend i.c{border-top-width:3px}
+.odds-legend i.s{border-top:2px solid var(--ink-2)}
+.odds-legend i.o{border-top:1px solid var(--ink-3)}
+.odds-legend i.op{border-top:1px dashed var(--ink-2)}
+
+/* book table: all three markets per book; top = away / over, bottom = home / under */
+.odds-tbl-wrap{padding:4px 0;overflow:hidden}
+.odds-tbl{width:100%;border-collapse:collapse;table-layout:fixed}
+.odds-tbl th,.odds-tbl td{padding:6px 2px;vertical-align:middle}
+.odds-tbl thead th{font-size:11px;font-weight:500;color:var(--ink-3);text-align:right;padding:8px 10px 4px}
+.odds-tbl thead th:first-child{text-align:left;padding-left:var(--s2);width:27%}
+.odds-tbl tbody tr + tr{border-top:1px solid var(--line)}
+.odds-tbl tbody th{padding-left:var(--s2);text-align:left;font-size:13px;font-weight:400;color:var(--ink-2);line-height:1.3;overflow-wrap:anywhere}
+.odds-tbl tbody th b{display:block;color:var(--ink);font-weight:600}
+.odds-tbl tbody th span{display:block;font-size:11px}
+.odds-tbl tbody th em{display:block;font-style:normal;font-size:11px;color:var(--ink-2)}
+.odds-tbl td:last-child{padding-right:8px}
+.odds-tbl tr.ref th b{color:var(--ink-2)}
+.odds-tbl tr.stale td{opacity:.55}
+.odds-tp{position:relative;display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%;min-height:44px;padding:0 8px;border-radius:var(--r-sm);font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap}
+.odds-tp .num{overflow:hidden;text-overflow:ellipsis}
+.odds-tp small{display:none}
+button.odds-tp:hover{background:var(--fill)}
+.odds-tp.na{color:var(--ink-2);font-weight:500}
+.odds-tp.best{box-shadow:inset 0 0 0 1.5px var(--ink);background:var(--surface)}
+.odds-links .lbtn{min-height:44px}
+
+/* ---------- Edge Finder sheet */
+.odds-edge-sizing{margin:0;font-size:13px;color:var(--ink-2)}
+.odds-edge-chips{margin-top:var(--s2)}
+.odds-edge-list{padding:4px 0;margin-top:12px}
+.odds-edge-row{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:0 12px;align-items:start;width:100%;min-height:60px;padding:12px var(--s2);text-align:left}
+.odds-edge-row + .odds-edge-row{box-shadow:inset 0 1px 0 var(--line)}
+.odds-edge-row:hover{background:var(--fill)}
+.odds-edge-logo{width:24px;height:24px;margin-top:1px}
+.odds-edge-mid{min-width:0;display:block}
+.odds-edge-t{display:block;font-size:15px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.odds-edge-t b{font-weight:600}
+.odds-edge-t .num{font-weight:500}
+.odds-edge-bk{font-size:13px;font-weight:500;color:var(--ink-2)}
+.odds-edge-s{display:block;margin-top:2px;font-size:12px;line-height:1.35;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.odds-edge-c{display:block;margin-top:3px;font-size:12px;line-height:1.35;color:var(--ink);white-space:normal}
+.odds-edge-c::before{content:"";display:inline-block;width:5px;height:5px;margin-right:6px;border-radius:50%;box-shadow:inset 0 0 0 1.25px var(--ink-2);vertical-align:1px}
+.odds-edge-v{display:flex;flex-direction:column;align-items:flex-end;gap:2px;padding-top:1px}
+.odds-edge-p{font-size:15px;font-weight:500;color:var(--ink-2);white-space:nowrap}
+.odds-edge-k{font-size:11px;font-weight:500;color:var(--ink-3);white-space:nowrap}
+.odds-edge-row.c-solid .odds-edge-p{color:var(--ink)}
+.odds-edge-row.c-solid .odds-edge-k{color:var(--ink-2)}
+.odds-edge-row.c-weak .odds-edge-t,.odds-edge-row.c-weak .odds-edge-p{color:var(--ink-2)}
+.odds-edge-none{margin:var(--s2) 0 0;padding:var(--s2);border-radius:var(--r-md);background:var(--surface);font-size:13px;color:var(--ink-2)}
+.odds-edge-opts{display:flex;gap:8px;flex-wrap:wrap;margin-top:var(--s2)}
+.odds-edge-opts .lbtn{min-height:44px}
+
+@media (min-width:1024px){
+  /* The wide board needs the full width, so Edge Finder and the moves sit side by side above it. */
+  .odds-lay{grid-template-columns:minmax(0,7fr) minmax(0,5fr);grid-template-areas:"edge moves" "boards boards";gap:var(--s3);align-items:start}
+  .odds-boards{grid-template-columns:minmax(0,1fr);gap:var(--s3)}
+  .odds-card{padding:var(--s2) var(--s3) var(--s2)}
+  .odds-edge-entry{padding:12px var(--s3)}
+  .odds-edge-row{padding:12px var(--s3)}
+  .odds-sheet h2{font-size:28px}
+  .odds-sh-teams .logo{width:44px;height:44px}
+  .odds-tbl thead th:first-child{width:22%}
+  .odds-tbl tbody th span{display:inline}
+  .odds-tbl tbody th span::before{content:" · "}
+  .odds-tbl tbody th b{display:inline}
+  .odds-tbl td{padding:4px}
+  .odds-tbl td{display:table-cell}
+  .odds-tbl td .odds-tp{display:inline-flex;width:calc(50% - 2px)}
+  .odds-tbl td .odds-tp + .odds-tp{margin-left:4px}
+}
+
+/* ---------- the board: one market at a time, phone rows and a wide table (same shape as the football board) */
+.odds-mseg{margin:0 0 var(--s2)}
+.odds-mseg button{position:relative;height:38px}
+.odds-grp{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:var(--s4) 0 12px}
+.odds-grp h3{margin:0;font-size:17px;font-weight:600;letter-spacing:-.02em}
+.odds-grp span{font-size:13px;color:var(--ink-2)}
+.odds-done summary{list-style:none;cursor:pointer}
+.odds-done summary::-webkit-details-marker{display:none}
+.odds-done summary span{display:inline-flex;align-items:center;gap:6px}
+.odds-done summary svg{width:12px;height:12px;transition:transform .2s}
+.odds-done[open] summary svg{transform:rotate(90deg)}
+.odds-brd{padding:4px 0}
+.odds-brhd{display:grid;grid-template-columns:22px minmax(0,1fr) auto 72px 72px;gap:0 8px;padding:10px var(--s2) 2px;font-size:11px;font-weight:600;color:var(--ink-3);text-align:right}
+.odds-brhd span:first-child{grid-column:1/3;text-align:left}
+.odds-br + .odds-br{border-top:1px solid var(--line)}
+.odds-br-t{display:grid;grid-template-columns:22px minmax(0,1fr) auto 72px 72px;gap:0 8px;align-items:center;height:44px;padding:0 var(--s2)}
+.odds-brhd.nb,.odds-br.nb .odds-br-t{grid-template-columns:22px minmax(0,1fr) auto 84px}
+.odds-br-t img{width:22px;height:22px}
+.odds-br-n{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.odds-br-n small{font-size:12px;font-weight:500;color:var(--ink-2);margin-left:6px}
+.odds-br-s{min-width:20px;text-align:right;font-size:17px;font-weight:650}
+.odds-br-t.trail{color:var(--ink-2)}
+.odds-br .odds-px{min-width:72px;height:40px;padding:0 8px}
+.odds-br-f{display:flex;align-items:center;gap:8px;width:100%;min-height:40px;padding:2px var(--s2) 10px;font-size:12px;color:var(--ink-2);text-align:left;flex-wrap:wrap}
+.odds-br-f:hover{background:var(--fill)}
+.odds-br-f b{color:var(--ink);font-weight:600}
+.odds-br-live{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:600}
+.odds-br-spk{margin-left:auto;display:inline-flex;align-items:center;gap:6px}
+.odds-br-spk svg:last-child{width:12px;height:12px;color:var(--ink-3)}
+.odds-sep{width:3px;height:3px;border-radius:50%;background:var(--ink-3)}
+.odds-px.old{opacity:.5}
+.odds-btwrap{display:none}
+
+@media (min-width:1024px){
+  .odds-brd{display:none}
+  .odds-btwrap{display:block;overflow-x:auto;border-radius:var(--r-lg);background:var(--surface);scrollbar-width:thin}
+  .odds-bt{width:100%;border-collapse:separate;border-spacing:0}
+  .odds-bt th{position:sticky;top:0;z-index:2;background:var(--surface);font-size:11px;font-weight:600;color:var(--ink-3);text-align:right;padding:12px 4px 10px;white-space:nowrap;border-bottom:1px solid var(--line)}
+  .odds-bt th.l{text-align:left;padding-left:16px}
+  .odds-bt td{padding:6px 4px;text-align:right;vertical-align:middle;border-top:1px solid var(--line);background:var(--surface)}
+  .odds-bt tbody tr:first-child td{border-top:0}
+  .odds-bt td.l{text-align:left}
+  .odds-bt .stk{position:sticky;left:0;z-index:1;box-shadow:1px 0 0 var(--line)}
+  .odds-bt th.stk{z-index:3}
+  .odds-bt tbody tr{cursor:pointer}
+  .odds-bt tbody tr:hover td{background:color-mix(in srgb,var(--surface) 94%,var(--ink))}
+  .odds-sharp{display:inline-grid;place-items:center;width:14px;height:14px;margin-left:3px;border-radius:50%;box-shadow:inset 0 0 0 1px var(--ink-3);font-size:9px;color:var(--ink-2);vertical-align:1px}
+  .odds-bt-mu{display:grid;grid-template-columns:96px auto;gap:10px;align-items:center;padding-left:12px}
+  .odds-bt-st{font-size:12px;color:var(--ink-2);display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .odds-bt-st b{color:var(--ink);font-weight:600;font-size:13px}
+  .odds-bt-tms{display:grid;grid-template-rows:30px 30px;gap:2px;min-width:0}
+  .odds-bt-tms > div{display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .odds-bt-tms img{width:20px;height:20px}
+  .odds-bt-tms .trail{color:var(--ink-2)}
+  .odds-bt-n{font-weight:600;font-size:14px;width:150px;overflow:hidden;text-overflow:ellipsis}
+  .odds-bt-n small{font-weight:500;color:var(--ink-3);font-size:11px;margin-left:4px}
+  .odds-bt-s{margin-left:auto;font-weight:650;font-size:15px;min-width:26px;text-align:right;padding-right:6px}
+  .odds-st2{display:grid;grid-template-rows:30px 30px;gap:2px;align-items:center;justify-items:end}
+  .odds-bt .odds-px{min-width:58px;height:30px;font-size:14px;padding:0 6px}
+  .odds-bt-mv{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:11px;color:var(--ink-2);white-space:nowrap;padding-right:4px}
+  .odds-grp{margin:var(--s5) 0 var(--s2)}
+  .odds-grp h3{font-size:22px}
+}
+
+/* ---------- where the money is, weather, key numbers, your own numbers */
+.odds-splits,.odds-wx,.odds-keys,.odds-counter{padding:var(--s2)}
+.odds-sp + .odds-sp{margin-top:var(--s2);padding-top:var(--s2);border-top:1px solid var(--line)}
+.odds-sp-h{font-size:13px;font-weight:600}
+.odds-sp-row{display:grid;grid-template-columns:56px 1fr;gap:10px;align-items:center;margin-top:8px;font-size:12px;color:var(--ink-2)}
+.odds-bar2{display:flex;height:22px;border-radius:6px;overflow:hidden;background:var(--fill);font-size:11px;font-weight:600}
+.odds-bar2 i{display:flex;align-items:center;padding:0 8px;font-style:normal;white-space:nowrap;min-width:0}
+.odds-bar2 i:first-child{background:var(--ink);color:var(--surface)}
+.odds-bar2 i:last-child{margin-left:auto;color:var(--ink)}
+.odds-signal{font-size:14px;line-height:1.45;margin:var(--s2) 0 0}
+.odds-wx-v{font-size:34px;font-weight:650;line-height:1}
+.odds-wx-v small{font-size:14px;font-weight:500;color:var(--ink-2);margin-left:6px;letter-spacing:0}
+.odds-wx-k{font-size:13px;color:var(--ink-2);margin-top:4px}
+.odds-wx p,.odds-keys p{font-size:14px;line-height:1.45;margin:var(--s2) 0 0}
+.odds-keys-h{font-size:12px;font-weight:600;color:var(--ink-2);margin-top:var(--s2)}
+.odds-hist{display:flex;align-items:flex-end;gap:4px;height:80px;margin-top:8px}
+.odds-hist div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%}
+.odds-hist i{display:block;width:100%;border-radius:3px 3px 0 0;background:var(--line);min-height:2px}
+.odds-hist .on i{background:var(--ink)}
+.odds-hist span{font-size:10px;color:var(--ink-3);font-weight:600}
+.odds-hist .on span{color:var(--ink)}
+.odds-counter .chips{margin:var(--s2) 0}
+.odds-counter .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.odds-counter .fld{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:500;color:var(--ink-2)}
+.odds-counter .inp{height:48px;border-radius:var(--r-md);background:var(--fill);border:0;padding:0 14px;font-size:17px;font-weight:600;color:var(--ink);outline:none;width:100%;font-variant-numeric:tabular-nums}
+.odds-counter .inp:focus{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.odds-mine{list-style:none;margin:var(--s2) 0 0;padding:0;display:grid;gap:8px}
+.odds-mine li{display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap}
+.odds-px.mine{box-shadow:inset 0 0 0 1px var(--ink-3)}
+.odds-px.mine::after{content:"";position:absolute;top:3px;left:4px;width:5px;height:5px;border-radius:50%;background:var(--ink-2)}
+.odds-px.best.mine::after{background:var(--surface)}
+
+.odds-counter .chips{display:flex;flex-wrap:wrap;gap:6px}
+.odds-counter .chip{position:relative;height:36px;padding:0 14px;border-radius:999px;background:var(--fill);font-size:14px;font-weight:600;color:var(--ink);display:inline-flex;align-items:center}
+.odds-counter .chip[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.odds-counter .chip::before{content:"";position:absolute;inset:-4px -2px}
+.odds-counter .btn{display:flex;align-items:center;justify-content:center;height:48px;width:100%;margin-top:var(--s2);border-radius:999px;background:var(--ink);color:var(--surface);font-size:15px;font-weight:600}
+.odds-counter .err{color:var(--ink);font-size:13px;font-weight:600;margin-top:12px;min-height:0;display:flex;align-items:center;gap:8px}
+.odds-counter .err:not(:empty)::before{content:"!";display:grid;place-items:center;flex:none;width:18px;height:18px;border-radius:50%;background:var(--ink);color:var(--surface);font-size:12px;font-weight:700}
+.odds-counter .tag{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;background:var(--fill);font-size:11px;font-weight:600}
+
+/* ---------- board controls */
+.odds-ctrl{display:flex;flex-direction:column;gap:10px;margin:0 0 var(--s2)}
+.odds-fils{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:2px 0}
+.odds-fils::-webkit-scrollbar{display:none}
+.odds-fil{position:relative;height:36px;padding:0 12px;border-radius:999px;background:var(--surface);font-size:13px;font-weight:500;color:var(--ink-2);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:none}
+.odds-fil[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.odds-fil .odds-n{font-size:11px;opacity:.7}
+.odds-find{height:40px;border-radius:999px;background:var(--surface);border:0;padding:0 14px;font-size:16px;color:var(--ink);outline:none;width:100%}
+.odds-find:focus{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.odds-hot{color:var(--accent);font-weight:600}
+.odds-spl{width:88px;margin-left:auto}
+.odds-spl .odds-bar2{height:15px;font-size:10px}
+.odds-spl .odds-bar2 i{padding:0 5px}
+.odds-spl .odds-bar2.mny i:first-child{background:var(--ink-2)}
+.odds-spl .odds-bar2 + .odds-bar2{margin-top:3px}
+.odds-wxc{font-size:12px;color:var(--ink-2);white-space:nowrap}
+.odds-wxc b{color:var(--ink);font-weight:600}
+@media (min-width:1024px){
+  .odds-ctrl{flex-direction:row;align-items:center;justify-content:space-between}
+  .odds-find{max-width:260px}
+}
+
+/* ---------- first five innings and team totals */
+.odds-f5{padding:14px 0 4px;overflow-x:auto}
+.odds-f5t{width:100%;border-collapse:collapse;font-size:14px}
+.odds-f5t th{font-size:11px;font-weight:500;color:var(--ink-3);text-align:right;padding:0 8px 8px;white-space:nowrap}
+.odds-f5t th:first-child{text-align:left;padding-left:var(--s2)}
+.odds-f5t td{padding:4px;border-top:1px solid var(--line);text-align:right}
+.odds-f5t td:first-child{text-align:left;padding-left:var(--s2)}
+.odds-f5t .odds-px{min-width:62px;height:38px}
+.odds-bk{font-weight:600;font-size:14px}
+.odds-f5 .odds-note{padding:0 var(--s2)}
+.odds-tt{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border-radius:var(--r-lg);overflow:hidden;margin-top:12px}
+.odds-tt > div{background:var(--surface);padding:var(--s2)}
+.odds-tt-k{font-size:12px;color:var(--ink-2)}
+.odds-tt-v{font-size:26px;font-weight:650;margin-top:2px}
+.odds-tt-x{font-size:12px;color:var(--ink-2);margin-top:2px}
+
+/* The "Where to bet" link in the board's opening line. */
+.odds-lede .odds-link{font-size:13px;font-weight:600;color:var(--ink);text-decoration:underline;text-underline-offset:3px}
