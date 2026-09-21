@@ -464,6 +464,10 @@ function oddsBookCell(g, O, mkt, side, book, best, pre) {
   const cls = `odds-px${isBest ? ' best' : ''}${old ? ' old' : ''}${L.m ? ' mine' : ''}${fl.cls}`;
   const inner = `<span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}`;
   if (!pre) return `<span class="${cls}"${fl.style} role="img" aria-label="${esc(label)}">${inner}</span>`;
+  // BetMGM Nevada is the one book this board links into: a real anchor, so one tap goes straight to a
+  // prefilled slip. It carries data-mgmbet rather than data-odds-bet, because the odds click handler
+  // calls preventDefault on everything it matches, which would kill the navigation.
+  if (book === 'mgm') return `<a class="${cls}"${fl.style} href="api/betmgm/go?g=${encodeURIComponent(g.pk)}&m=${encodeURIComponent(mkt)}&s=${encodeURIComponent(side)}" target="_blank" rel="noopener" data-fk="k${g.pk}${book}${mkt}${side}" data-mgmbet="${g.pk}|${oddsBetMkt(mkt)}|${side}|${book}" aria-label="${esc(label)}, bet at BetMGM">${inner}</a>`;
   return `<button type="button" class="${cls}"${fl.style} data-fk="k${g.pk}${book}${mkt}${side}" data-odds-bet="${g.pk}|${oddsBetMkt(mkt)}|${side}|${book}" aria-label="${esc(label)}">${inner}</button>`;
 }
 
@@ -1323,3 +1327,17 @@ document.addEventListener('input', (ev) => {
 $('#dlg')?.addEventListener('close', () => { ODDS.sheetPk = null; ODDS.sheetHist = null; });
 // Relative times ("12 min old") and freshness keep moving while the view is up.
 setInterval(() => { if (!document.hidden && (S.tab === 'games' || S.dlgKind === 'odds' || S.dlgKind === 'edges')) oddsRepaint(); }, 30e3);
+
+/* BetMGM Nevada — its price is a real link, so one tap opens BetMGM with the bet already in the slip (a
+   popup blocker can stop window.open, never an anchor). This opens the board's own slip alongside it so
+   the bet is still logged here. Deliberately no preventDefault. */
+document.addEventListener('click', (ev) => {
+  const a = ev.target && ev.target.closest && ev.target.closest('[data-mgmbet]');
+  if (!a) return;
+  const parts = String(a.dataset.mgmbet || '').split('|');
+  const pk = parts[0], mkt = parts[1], side = parts[2], book = parts[3];
+  try {
+    const px = typeof oddsPriceAt === 'function' ? oddsPriceAt(pk, mkt, side, book) : null;
+    if (typeof betsOpenSlip === 'function') betsOpenSlip({ pk: Number(pk), mkt, side, book, line: px?.line ?? null, odds: px?.odds ?? null });
+  } catch (e) { /* the link still opens */ }
+});

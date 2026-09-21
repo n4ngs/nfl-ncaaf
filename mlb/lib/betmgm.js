@@ -230,7 +230,8 @@ async function oddsRows() {
   if (Array.isArray(j)) oc = { at: Date.now(), rows: j };
   return oc.rows;
 }
-const MKT_KEY = { s: 'spreads', h1s: 'spreads', t: 'totals', ml: 'h2h' };
+// MLB calls the spread a run line.
+const MKT_KEY = { s: 'spreads', h1s: 'spreads', rl: 'spreads', t: 'totals', ml: 'h2h' };
 function matchEvent(rows, G) {
   const home = norm(nameOf(G && G.home)), away = norm(nameOf(G && G.away));
   if (!home || !away) return null;
