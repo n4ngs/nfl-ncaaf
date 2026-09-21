@@ -657,19 +657,21 @@ const uidOf = (req) => { const v = cookieOf(req).hl_uid || ''; return UID_RE.tes
 const BASE = process.env.BASE_PATH || '';
 // Slim terminal-style sport switcher injected at the top of <body> when mounted under the NFL.NCAAF
 // terminal. Cross-sport links are absolute (/nfl/, /ncaaf/) so they ignore <base href> on purpose.
-const SPORTBAR = !BASE ? '' : ('<div id="xsport"><span class="xb"><svg class="xm" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="var(--ink)"/><path d="M21 21 L33 32 L21 43" fill="none" stroke="var(--accent)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="34" y="38.5" width="15" height="5" rx="2.5" fill="var(--bg)"/></svg>NFL<i>\u00b7</i>NCAAF</span><nav class="xseg" aria-label="Sport">'
+const SPORTBAR = !BASE ? '' : ('<div id="xsport"><span class="brand"><svg class="xm" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="var(--ink)"/><path d="M21 21 L33 32 L21 43" fill="none" stroke="var(--accent)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="34" y="38.5" width="15" height="5" rx="2.5" fill="var(--surface)"/></svg><span class="wm">NFL<b>.</b>NCAAF</span></span><nav class="xseg" aria-label="Sport">'
   + [['/nfl','NFL'],['/ncaaf','NCAAF']].map(function(x){return '<a href="'+x[0]+'/"'+(x[0]===BASE?' class="on" aria-current="page"':'')+'>'+x[1]+'</a>';}).join('')
   + '</nav></div><style>'
-  // Native switcher: the board's own design tokens + Geist, so it themes (light/dark) with the app and reads
-  // as part of it. Not sticky, so it never sits over the board's own sticky table headers.
-  + '#xsport{display:flex;align-items:center;gap:12px;height:46px;padding:0 var(--gutter);background:var(--bg);border-bottom:1px solid var(--line);font-family:var(--font)}'
-  + '#xsport .xb{display:inline-flex;align-items:center;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}'
-  + '#xsport .xm{width:17px;height:17px;border-radius:5px;margin-right:8px;flex:none}'
-  + '#xsport .xb i{color:var(--accent);font-style:normal;padding:0 1px}'
-  + '#xsport .xseg{margin-left:auto;display:flex;gap:2px;padding:3px;background:var(--fill);border-radius:999px}'
-  + '#xsport .xseg a{padding:6px 16px;border-radius:999px;font-size:13px;font-weight:600;color:var(--ink-2);text-decoration:none;letter-spacing:-.01em;transition:color .15s var(--ease)}'
-  + '#xsport .xseg a.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.10)}'
+  // Prominent, exchange-style top nav (OddsJam x Polymarket): the sport switch is the primary control,
+  // big and obvious, from the board's own tokens so it themes light/dark. Not sticky (never over sticky headers).
+  + '#xsport{display:flex;align-items:center;gap:18px;height:62px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--line);font-family:var(--font)}'
+  + '#xsport .brand{display:inline-flex;align-items:center;gap:11px;flex:none}'
+  + '#xsport .xm{width:28px;height:28px;border-radius:8px;display:block;flex:none}'
+  + '#xsport .wm{font-family:var(--mono);font-size:14px;font-weight:700;letter-spacing:.02em;color:var(--ink);white-space:nowrap}'
+  + '#xsport .wm b{color:var(--accent);font-weight:700}'
+  + '#xsport .xseg{display:flex;gap:4px;padding:4px;background:var(--fill);border-radius:13px}'
+  + '#xsport .xseg a{display:flex;align-items:center;padding:10px 24px;border-radius:9px;font-size:15px;font-weight:600;color:var(--ink-2);text-decoration:none;letter-spacing:-.01em;transition:color .15s var(--ease)}'
+  + '#xsport .xseg a.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.16),0 0 0 1px var(--line)}'
   + '#xsport .xseg a:not(.on):hover{color:var(--ink)}'
+  + '@media (max-width:560px){#xsport{gap:10px;padding:0 14px;height:56px}#xsport .wm{display:none}#xsport .xseg a{padding:9px 18px;font-size:14px}}'
   + '</style>');
 function addCookie(res, str) {
   const had = res.getHeader('set-cookie');
