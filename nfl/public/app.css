@@ -792,3 +792,25 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
    Rows repeat, so they get hairlines and a hover tint, never a shadow each. */
 .grp-p,.gm{transition:background-color .12s var(--ease), transform .12s var(--ease)}
 .grp-p:hover,.gm:hover{background:var(--fill)}
+
+/* ═══════════════════════════════════════════════════════════════════ density pass
+   The board is a data screen — it should read dense and purposeful (OddsJam × Polymarket), not airy.
+   This trims oversized section gaps, headline sizes and desktop gutters WITHOUT moving any layout, so
+   every screen keeps its structure and just tightens up. Numbers, cards and elevation are untouched. */
+.sec{margin-top:var(--s5)}
+.head,.view-h{padding:var(--s2) 0 var(--s2)}
+.head h1,.view-h h1{font-size:30px;letter-spacing:-.035em}
+.head p,.view-h p{margin-top:6px}
+.sec-h{margin-bottom:12px}
+@media (min-width:1024px){
+  :root{--gutter:52px}
+  .wrap{padding:0 var(--gutter)}
+  .head,.view-h{padding:var(--s4) 0 var(--s3)}
+  .head h1,.view-h h1{font-size:46px;letter-spacing:-.04em}
+  .head p,.view-h p{font-size:16px;margin-top:10px}
+  .sec{margin-top:var(--s6)}
+  .sec-h h2{font-size:24px}
+  .lay{gap:var(--s3)}
+  .hero-side{gap:var(--s3)}
+  .bets-lay,.gs-grid{gap:var(--s3)}
+}
