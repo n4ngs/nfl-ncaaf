@@ -187,6 +187,73 @@ const listMap = () => Object.entries(store.picks).map(([k, v]) => {
   return { gid, market, side, ...v };
 }).sort((a, b) => b.at - a.at);
 
+
+/* ---------- The Odds API resolver ------------------------------------------
+   The real unlock. The Odds API (the-odds-api.com) returns BetMGM's OWN ids and a ready-made betslip
+   link per outcome when asked for includeLinks + includeSids:
+
+     {"name":"New York Giants","price":-105,"point":6.5,
+      "link":"https://sports.{state}.betmgm.com/en/sports?options=6:43394-3609440-5715883&type=Single",
+      "sid":"5715883"}
+
+   That triple matches the one we verified by hand, so no AccessId and no scraping is needed. The free
+   tier is 500 calls a month, so this is fetched LAZILY (only when someone actually taps BetMGM) and
+   cached — a handful of taps a day costs a few calls. */
+const ODDS_KEY = (process.env.ODDS_API_KEY || '').trim();
+const ODDS_SPORT = process.env.ODDS_SPORT_KEY || 'americanfootball_ncaaf';
+const ODDS_STATE = process.env.BETMGM_STATE || 'nv';
+const ODDS_TTL = Number(process.env.ODDS_TTL_MS) || 15 * 60e3;
+let oc = { at: 0, rows: null };
+
+function oddsGet(u) {
+  return new Promise((resolve) => {
+    const r = https.get(u, { timeout: 12000, headers: { accept: 'application/json' } }, (res) => {
+      let b = '';
+      res.on('data', (d) => { b += d; if (b.length > 8e6) res.destroy(); });
+      res.on('end', () => { try { resolve(res.statusCode === 200 ? JSON.parse(b) : null); } catch { resolve(null); } });
+    });
+    r.on('error', () => resolve(null));
+    r.on('timeout', () => { r.destroy(); resolve(null); });
+  });
+}
+async function oddsRows() {
+  if (!ODDS_KEY) return null;
+  if (oc.rows && Date.now() - oc.at < ODDS_TTL) return oc.rows;
+  const u = `https://api.the-odds-api.com/v4/sports/${ODDS_SPORT}/odds/?apiKey=${encodeURIComponent(ODDS_KEY)}`
+    + `&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=betmgm&includeLinks=true&includeSids=true`;
+  const j = await oddsGet(u);
+  if (Array.isArray(j)) oc = { at: Date.now(), rows: j };
+  return oc.rows;
+}
+const MKT_KEY = { s: 'spreads', h1s: 'spreads', t: 'totals', ml: 'h2h' };
+function matchEvent(rows, G) {
+  const home = norm(nameOf(G && G.home)), away = norm(nameOf(G && G.away));
+  if (!home || !away) return null;
+  const near = (a, b) => a && b && (a.includes(b) || b.includes(a));
+  return (rows || []).find((e) => near(norm(e.home_team), home) && near(norm(e.away_team), away))
+      || (rows || []).find((e) => near(norm(e.home_team), home) || near(norm(e.away_team), away))
+      || null;
+}
+// Their link carries a {state} placeholder; swap in the state this board bets in.
+const fixState = (link) => String(link || '').replace('{state}', ODDS_STATE);
+async function oddsLink(G, market, side) {
+  const rows = await oddsRows();
+  if (!rows) return null;
+  const ev = matchEvent(rows, G);
+  if (!ev) return null;
+  const bk = (ev.bookmakers || []).find((b) => b.key === 'betmgm');
+  const mk = bk && (bk.markets || []).find((m) => m.key === (MKT_KEY[market] || 'spreads'));
+  if (!mk) return null;
+  const want = market === 't'
+    ? (side === 'over' ? 'over' : 'under')
+    : norm(nameOf(G && G[side]));
+  const out = (mk.outcomes || []).find((o) => {
+    const n = norm(o.name);
+    return market === 't' ? n === want : (n.includes(want) || want.includes(n));
+  });
+  return out && out.link ? fixState(out.link) : null;
+}
+
 /* ---------- the one call the server makes ---------- */
 async function linkFor(G, market, side, stake, gid) {
   // An owner-pasted link wins: it is a real selection, confirmed by hand. Checked FIRST and off the raw
@@ -195,6 +262,8 @@ async function linkFor(G, market, side, stake, gid) {
   const pasted = id && getMap(id, market, side);
   if (pasted) return slipLink(pasted, stake);
   if (!G) return `${BASE}/en/sports`;
+  // The Odds API hands us BetMGM's own ids and a finished betslip link — no key from BetMGM needed.
+  try { const ol = await oddsLink(G, market, side); if (ol) return ol; } catch { /* fall through */ }
   try {
     const rows = await fixtures();
     if (rows) {
@@ -205,6 +274,6 @@ async function linkFor(G, market, side, stake, gid) {
   } catch { /* any trouble at their end falls back below */ }
   return searchLink(G);
 }
-const status = () => ({ base: BASE, configured: !!ACCESS_ID, cachedFixtures: cache.rows?.length ?? 0, err: cache.err });
+const status = () => ({ base: BASE, configured: !!ACCESS_ID, odds: !!ODDS_KEY, oddsSport: ODDS_SPORT, oddsCached: (oc.rows||[]).length, cachedFixtures: cache.rows?.length ?? 0, err: cache.err });
 
 module.exports = { linkFor, searchLink, slipLink, status, parseLink, setMap, delMap, getMap, listMap };
