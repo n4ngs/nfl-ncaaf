@@ -34,6 +34,7 @@ const Bets = require('./lib/bets');
 const Manual = require('./lib/manual');
 const Group = require('./lib/group');
 const Tel = require('./lib/telemetry');
+const BetMGM = require('./lib/betmgm');
 const { margins } = require('./lib/margins');
 
 const { log } = U;
@@ -1349,6 +1350,16 @@ const server = http.createServer(async (req, res) => {
       const n = Bets.claimUnowned(uid);
       emitBets();
       return sendJSON(res, 200, { ok: true, claimed: n });
+    }
+    /* BetMGM Nevada: one tap from a price on the board into BetMGM with the bet already in the slip.
+       Resolves server-side so the link can improve (prefilled betslip once an access id is configured)
+       without touching the board. Nevada's BetMGM only — no other book is deep-linked. */
+    if (p === '/api/betmgm/go' && (M === 'GET' || M === 'HEAD')) {
+      const G = gameById(String(url.searchParams.get('g') || ''));
+      const to = await BetMGM.linkFor(G, String(url.searchParams.get('m') || 's'), String(url.searchParams.get('s') || 'home'), Number(url.searchParams.get('stake')) || 0);
+      try { Tel.event({ kind: 'app_action', uid, role, user: userId, route: '/api/betmgm/go', data: { action: 'betmgm_open', gid: G?.id || null, mkt: url.searchParams.get('m'), side: url.searchParams.get('s'), prefilled: to.includes('options=') } }); } catch { /* telemetry never blocks a bet */ }
+      res.writeHead(302, { location: to, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+      return res.end();
     }
     if (p === '/api/bets' && M === 'GET') return sendJSON(res, 200, Bets.list(uid));
     if (p === '/api/bets' && M === 'POST') {
