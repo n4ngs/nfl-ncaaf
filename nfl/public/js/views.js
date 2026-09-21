@@ -483,7 +483,7 @@ function boardRow(g, mkt) {
 
 function boardTable(games, mkt, books = visibleBooks()) {
   const [s1, s2] = sideKeys(mkt);
-  const head = `<thead><tr><th class="l stk">Matchup</th><th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}">${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
+  const head = `<thead><tr><th class="l stk">Matchup</th><th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}" title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}">${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
   const rows = games.map((g, i) => {
     const lead = (g.home.score ?? 0) > (g.away.score ?? 0) ? 'home' : 'away';
     const trail = !isPre(g) && g.home.score !== g.away.score ? (lead === 'home' ? 'trail0' : 'trail1') : '';
@@ -512,7 +512,7 @@ function boardTable(games, mkt, books = visibleBooks()) {
       <td><div class="st2">${open(s1)}${open(s2)}</div></td>
       <td><div class="st2">${mk ? pxCell(g, mkt, s1, mk, null) : '<span class="px na">—</span>'}${mk ? pxCell(g, mkt, s2, mk, null) : '<span class="px na">—</span>'}</div></td>
       <td><div class="meta mvc">${isPre(g) ? sparkSVG(mkt === 't' ? g.spark?.t : g.spark?.s, 48, 18) : ''}${moved ? `<span>${moved > 0 ? '▲' : '▼'} ${trim(Math.abs(moved))}</span>` : isPre(g) ? '<span class="faint">steady</span>' : ''}</div></td>
-      ${books.map((b) => `<td><div class="st2">${pxCell(g, mkt, s1, b.key, bestA)}${pxCell(g, mkt, s2, b.key, bestH)}</div></td>`).join('')}
+      ${books.map((b) => `<td data-bk="${esc(b.key)}"><div class="st2">${pxCell(g, mkt, s1, b.key, bestA)}${pxCell(g, mkt, s2, b.key, bestH)}</div></td>`).join('')}
       <td><div class="spl">${a != null ? `<div class="bar2" title="Tickets: ${esc(aw)} ${a}% / ${esc(hm)} ${100 - a}%"><i style="width:${Math.max(a, 18)}%">${a}%</i><i>${100 - a}%</i></div>` : ''}${am != null ? `<div class="bar2 m" style="margin-top:4px" title="Money: ${esc(aw)} ${am}% / ${esc(hm)} ${100 - am}%"><i style="width:${Math.max(am, 18)}%">${am}%</i><i>${100 - am}%</i></div>` : ''}${a == null ? '<span class="faint">—</span>' : ''}</div></td>
     </tr>`;
   }).join('');

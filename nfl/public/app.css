@@ -843,3 +843,11 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
   /* the row you are reading across should be unmistakable */
   .bt tbody tr:hover td{background:color-mix(in srgb,var(--surface) 90%,var(--ink))}
 }
+
+/* BetMGM is the one column you can act on — a tap there puts the bet in your slip at the book.
+   Mark the lane so the eye finds it among a dozen: an accent rule under the header and a whisper of
+   lift down the column. Deliberately not the live-red wash, which means something else here. */
+@media (min-width:1024px){
+  .bt th[data-bk="mgm"]{color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
+  .bt td[data-bk="mgm"]{background:color-mix(in srgb,var(--surface) 94%,var(--ink))}
+}
