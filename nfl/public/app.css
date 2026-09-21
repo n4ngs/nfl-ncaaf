@@ -804,7 +804,10 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
 .sec-h{margin-bottom:12px}
 @media (min-width:1024px){
   :root{--gutter:52px}
-  .wrap{max-width:min(2400px, 94vw);padding:0}   /* fill the screen: kills the huge side whitespace on wide monitors */
+  /* Fill the screen: kills the huge side whitespace on wide monitors. width+max-width rather than
+     max-width:min(), because if min() ever fails to parse the whole declaration is dropped and the
+     earlier 1480px cap silently wins — which is the exact bug this is fixing. */
+  .wrap{width:94vw;max-width:3200px;padding:0}
   .head,.view-h{padding:var(--s4) 0 var(--s3)}
   .head h1,.view-h h1{font-size:46px;letter-spacing:-.04em}
   .head p,.view-h p{font-size:16px;margin-top:10px}
