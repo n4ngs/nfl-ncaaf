@@ -439,7 +439,12 @@ function pxCell(g, mkt, side, book, best, opts = {}) {
   const label = [bookFull(book), `${who} ${m === 'ml' ? fmtOdds(p.odds) : mkt === 't' ? fmtTot(p.line) : fmtPts(p.line)}`, m === 'ml' ? '' : fmtOdds(p.odds), isBest ? 'best price' : '', L?.m ? 'typed in' : '', flash.label, old ? `checked ${ago(L.seen)}` : ''].filter(Boolean).join(', ');
   const cls = `px num${isBest ? ' best' : ''}${L?.m ? ' man' : ''}${flash.cls}${old ? ' old' : ''}`;
   if (isFinal(g)) return `<span class="${cls}"${flash.style} aria-label="${esc(label)}">${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}</span>`;
-  return `<button type="button" class="${cls}"${flash.style} data-bet="${g.id}|${m}|${side}|${book}"${book === 'mgm' ? ` data-mgm="api/betmgm/go?g=${encodeURIComponent(g.id)}&m=${m}&s=${side}"` : ''} aria-label="${esc(label)}" title="${esc(label)}">${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}${typeof edgeBadge === 'function' && !(typeof limBreak === 'function' && limBreak()) ? edgeBadge(g, m, side, book) : ''}</button>`;
+  const inner = `${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}${typeof edgeBadge === 'function' && !(typeof limBreak === 'function' && limBreak()) ? edgeBadge(g, m, side, book) : ''}`;
+  // BetMGM Nevada: a real link, so one tap goes straight there. A popup blocker can stop
+  // window.open, but it can never stop an anchor. boot.js still opens the slip off data-mgmbet
+  // (deliberately without preventDefault) so the bet can be logged here at the same time.
+  if (book === 'mgm') return `<a class="${cls}"${flash.style} href="api/betmgm/go?g=${encodeURIComponent(g.id)}&m=${m}&s=${side}" target="_blank" rel="noopener" data-mgmbet="${g.id}|${m}|${side}|${book}" aria-label="${esc(label)}, bet at BetMGM" title="${esc(label)} \u2014 tap to bet at BetMGM">${inner}</a>`;
+  return `<button type="button" class="${cls}"${flash.style} data-bet="${g.id}|${m}|${side}|${book}" aria-label="${esc(label)}" title="${esc(label)}">${inner}</button>`;
 }
 function bestFor(g, mkt, side) {
   const books = mkt === 'h1' ? g.h1 : isLive(g) ? g.live : g.books;
@@ -721,11 +726,3 @@ function renderTray() {
   t.innerHTML = `<span>${plural(S.parlay.length, 'leg')} · ${esc(fmtOdds(toAm(d)))}</span><button type="button" data-parlay-open>Review</button><button type="button" class="x" data-parlay-clear aria-label="Clear parlay">✕</button>`;
 }
 
-/* BetMGM Nevada — tapping its price opens BetMGM with the bet ready to confirm, and still lets the
-   board's own handler open the slip so the bet can be logged here. Capture phase, so the new tab is
-   opened by the same gesture (popup blockers allow that) before anything else runs. */
-document.addEventListener('click', function (e) {
-  var el = e.target && e.target.closest && e.target.closest('[data-mgm]');
-  if (!el) return;
-  try { window.open(el.getAttribute('data-mgm'), '_blank', 'noopener'); } catch (x) { /* blocked: the slip still opens */ }
-}, true);

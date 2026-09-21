@@ -417,6 +417,10 @@ function openSlip(opts = {}) {
 // Book icons shipped in public/icons/books; books without one get a clean monogram.
 const BOOK_ICON = new Set(['circa', 'stn', 'czr', 'mgm', 'sp', 'wg', 'wynn', 'dk', 'fd', 'pin']);
 function bookIcon(k, size = 32) {
+  // BetMGM Nevada is the one book this app links into, so its mark is always a way in — wherever
+  // it appears (slip, books sheet, bets), tapping it opens BetMGM. boot.js handles it first, so it
+  // never also fires whatever the mark happens to be sitting inside.
+  if (k === 'mgm') return `<img class="bk-ico bk-go" src="icons/books/mgm.png" width="${size}" height="${size}" alt="BetMGM" title="Open BetMGM" data-mgmgo="1" loading="lazy">`;
   if (BOOK_ICON.has(k)) return `<img class="bk-ico" src="icons/books/${k}.png" width="${size}" height="${size}" alt="" loading="lazy">`;
   const name = k === 'other' ? '…' : (S.books.find((b) => b.key === k)?.short || k).replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase();
   return `<span class="bk-ico bk-mono" style="width:${size}px;height:${size}px" aria-hidden="true">${esc(name)}</span>`;

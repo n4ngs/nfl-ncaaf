@@ -60,10 +60,23 @@ async function setAlerts(mode) {
 
 // ------------------------------------------------------------ one click handler for the whole app
 document.addEventListener('click', (ev) => {
+  // BetMGM's mark, anywhere it appears, opens BetMGM. Handled first and stopped here so it never
+  // also triggers the tile or row it sits inside.
+  const mgmMark = ev.target.closest && ev.target.closest('[data-mgmgo]');
+  if (mgmMark) {
+    ev.preventDefault(); ev.stopPropagation();
+    try { window.open('https://www.nv.betmgm.com/en/sports', '_blank', 'noopener'); } catch (e) { /* blocked */ }
+    return;
+  }
   const t = ev.target.closest('button, a, [data-open], [data-bet]');
   if (!t) return;
   const d = t.dataset;
 
+  if (d.mgmbet) { // BetMGM: the anchor itself opens BetMGM; open the slip too so it can be logged
+    const [gid, mkt, side, book] = d.mgmbet.split('|');
+    openSlip({ gid, mkt, side, book });
+    return;                       // no preventDefault on purpose: the link must still open
+  }
   if (d.bet) { // a price: log a bet at that number
     ev.preventDefault(); ev.stopPropagation();
     const [gid, mkt, side, book] = d.bet.split('|');

@@ -810,3 +810,7 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
   .hero-side{gap:var(--s3)}
   .bets-lay,.gs-grid{gap:var(--s3)}
 }
+
+/* BetMGM's mark is a link wherever it appears. */
+.bk-go{cursor:pointer}
+.bk-go:hover{opacity:.82}
