@@ -16,17 +16,17 @@
    Pinnacle, DraftKings and FanDuel don't take Nevada bets, so they carry no link and are reference only. */
 
 const BOOKS = [
-  { key: 'circa', name: 'Circa Sports', short: 'Circa', vegas: true, sharp: true, vsin: 'Circa', an: [78], site: 'https://www.circasports.com/', ios: 'https://apps.apple.com/us/app/circa-sports-nevada/id1463697334' },
-  { key: 'pin', name: 'Pinnacle', short: 'Pinnacle', sharp: true, pin: true },
-  { key: 'stn', name: 'Station Casinos', short: 'Station', vegas: true, vsin: 'Stations', an1: [18], site: 'https://stnsports.com/', ios: 'https://apps.apple.com/us/app/stn-sports-and-race/id6444440650' },
-  { key: 'boom', name: "Boomer's", short: "Boomer's", vegas: true, vsin: 'Boomers', ios: 'https://apps.apple.com/us/app/boomers-sportsbook-nevada/id6749002754' },
-  { key: 'czr', name: 'Caesars', short: 'Caesars', vegas: true, an: [49], vsin: 'Caesars', site: 'https://sportsbook.caesars.com/us/nv/bet', ios: 'https://apps.apple.com/us/app/caesars-sportsbook-casino/id1413099571' },
-  { key: 'mgm', name: 'BetMGM', short: 'BetMGM', vegas: true, an: [444, 75], vsin: 'BetMGM', site: 'https://www.nv.betmgm.com/en/sports', ios: 'https://apps.apple.com/us/app/betmgm-sportsbook-casino/id1430875409' },
-  { key: 'sp', name: 'South Point', short: 'S. Point', vegas: true, vsin: 'South Point', an: [31], site: 'https://southpointcasino.com/', ios: 'https://apps.apple.com/us/app/southpoint-sports/id1464581805' },
-  { key: 'wg', name: 'Westgate SuperBook', short: 'Westgate', vegas: true, vsin: 'Westgate', an: [14], site: 'https://www.superbook.com/', ios: 'https://apps.apple.com/us/app/the-superbook/id1473895927' },
-  { key: 'wynn', name: 'Wynn', short: 'Wynn', vegas: true, vsin: 'Wynn', ios: 'https://apps.apple.com/us/app/wynn-sports-nevada/id6476514610' },
-  { key: 'dk', name: 'DraftKings', short: 'DK', an: [68], espn: '100' },
-  { key: 'fd', name: 'FanDuel', short: 'FanDuel', an: [69] },
+  { key: 'circa', color: '#E03131', name: 'Circa Sports', short: 'Circa', vegas: true, sharp: true, vsin: 'Circa', an: [78], site: 'https://www.circasports.com/', ios: 'https://apps.apple.com/us/app/circa-sports-nevada/id1463697334' },
+  { key: 'pin', color: '#2F9E44', name: 'Pinnacle', short: 'Pinnacle', sharp: true, pin: true },
+  { key: 'stn', color: '#1971C2', name: 'Station Casinos', short: 'Station', vegas: true, vsin: 'Stations', an1: [18], site: 'https://stnsports.com/', ios: 'https://apps.apple.com/us/app/stn-sports-and-race/id6444440650' },
+  { key: 'boom', color: '#F08C00', name: "Boomer's", short: "Boomer's", vegas: true, vsin: 'Boomers', ios: 'https://apps.apple.com/us/app/boomers-sportsbook-nevada/id6749002754' },
+  { key: 'czr', color: '#C2A24C', name: 'Caesars', short: 'Caesars', vegas: true, an: [49], vsin: 'Caesars', site: 'https://sportsbook.caesars.com/us/nv/bet', ios: 'https://apps.apple.com/us/app/caesars-sportsbook-casino/id1413099571' },
+  { key: 'mgm', color: '#E8A33D', name: 'BetMGM', short: 'BetMGM', vegas: true, an: [444, 75], vsin: 'BetMGM', site: 'https://www.nv.betmgm.com/en/sports', ios: 'https://apps.apple.com/us/app/betmgm-sportsbook-casino/id1430875409' },
+  { key: 'sp', color: '#7048E8', name: 'South Point', short: 'S. Point', vegas: true, vsin: 'South Point', an: [31], site: 'https://southpointcasino.com/', ios: 'https://apps.apple.com/us/app/southpoint-sports/id1464581805' },
+  { key: 'wg', color: '#0CA678', name: 'Westgate SuperBook', short: 'Westgate', vegas: true, vsin: 'Westgate', an: [14], site: 'https://www.superbook.com/', ios: 'https://apps.apple.com/us/app/the-superbook/id1473895927' },
+  { key: 'wynn', color: '#B08968', name: 'Wynn', short: 'Wynn', vegas: true, vsin: 'Wynn', ios: 'https://apps.apple.com/us/app/wynn-sports-nevada/id6476514610' },
+  { key: 'dk', color: '#53A318', name: 'DraftKings', short: 'DK', an: [68], espn: '100' },
+  { key: 'fd', color: '#1493FF', name: 'FanDuel', short: 'FanDuel', an: [69] },
 ];
 
 // Not books you can bet at, but columns on the board.

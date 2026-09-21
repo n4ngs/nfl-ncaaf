@@ -482,7 +482,7 @@ function boardRow(g, mkt) {
 
 function boardTable(games, mkt, books = visibleBooks()) {
   const [s1, s2] = sideKeys(mkt);
-  const head = `<thead><tr><th class="l stk">Matchup</th><th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}" title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}">${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
+  const head = `<thead><tr><th class="l stk">Matchup</th><th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}" title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}">${b.color ? `<i class="bkdot" style="background:${esc(b.color)}"></i>` : ''}${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
   const rows = games.map((g, i) => {
     const lead = (g.home.score ?? 0) > (g.away.score ?? 0) ? 'home' : 'away';
     const trail = !isPre(g) && g.home.score !== g.away.score ? (lead === 'home' ? 'trail0' : 'trail1') : '';

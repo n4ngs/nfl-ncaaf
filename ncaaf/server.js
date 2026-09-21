@@ -204,7 +204,7 @@ function snapshot(uid, role = 'owner') {
     cal: cal.weeks.map((c) => ({ ...c, id: wid({ season: cal.season, type: c.type, week: c.week }) })),
     def: defId, cur: curId, tracked: tracked().map((w) => w.id),
     week: W ? weekSnapshot(W) : null,
-    books: BOOKS.map(({ key, name, short, vegas, sharp, site, ios }) => ({ key, name, short, vegas: !!vegas, sharp: !!sharp, site: site || null, ios: ios || null, feed: feeds().has(key) })),
+    books: BOOKS.map(({ key, name, short, vegas, sharp, site, ios, color }) => ({ key, name, short, color: color || null, vegas: !!vegas, sharp: !!sharp, site: site || null, ios: ios || null, feed: feeds().has(key) })),
     bets: Bets.list(uid),
     liveMs: LIVE_MS,
     // Who you are on this board, and the name a guest is greeted with.
