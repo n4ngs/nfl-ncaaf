@@ -180,6 +180,54 @@ function serveDesign(req, res, name, ext) {
   res.writeHead(200, h); res.end(d.body);
 }
 
+// ---- speed: one compressed, cached bundle per board -----------------------------------------
+/* Each board's index.html lists ~20 stylesheets and ~20 scripts. A phone fetched and revalidated every one
+   of them on every open (and MLB served them uncompressed) — dozens of round trips before the first price.
+   At boot, read each board's own tag list, concatenate the files in the same order (all are 'use strict'
+   classic scripts, so one file behaves the same), brotli/gzip them once, and serve them under a content hash
+   with a one-year immutable cache. The index is rewritten in flight to load just the two bundles. A deploy
+   changes the hash, so phones pick up new code on the next open and never hold a stale mix. */
+const zlib = require('node:zlib');
+const BUNDLE = {};
+const CSS_TAG = /<link rel="stylesheet" href="([^"]+)">\n?/g;
+const JS_TAG = /<script src="([^"]+)"(?: defer)?><\/script>\n?/g;
+function buildBundles() {
+  for (const key of Object.keys(SPORTS)) {
+    const pub = path.join(__dirname, SPORTS[key].dir, 'public');
+    let html; try { html = fs.readFileSync(path.join(pub, 'index.html'), 'utf8'); } catch { continue; }
+    const read = (u) => (u.startsWith('/_board/') ? DESIGN[u.slice('/_board/'.length)].body.toString('utf8') : fs.readFileSync(path.join(pub, u.replace(/^\//, '')), 'utf8'));
+    const pack = (list, ext, sep) => {
+      const body = Buffer.from(list.map((u) => `/* ${u} */\n${read(u)}${sep}`).join('\n'));
+      const hash = crypto.createHash('sha1').update(body).digest('hex').slice(0, 12);
+      return { name: `_b/${hash}.${ext}`, list: new Set(list), type: ext === 'css' ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8',
+        raw: body, br: zlib.brotliCompressSync(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }), gz: zlib.gzipSync(body, { level: 9 }) };
+    };
+    try {
+      const css = pack([...html.matchAll(CSS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)), 'css', '\n');
+      const js = pack([...html.matchAll(JS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)), 'js', '\n;');
+      BUNDLE[key] = { css, js };
+      console.log(`[terminal] ${key} bundle: ${css.list.size} css -> ${Math.round(css.br.length / 1024)}KB br, ${js.list.size} js -> ${Math.round(js.br.length / 1024)}KB br`);
+    } catch (e) { console.log(`[terminal] ${key} bundle skipped: ${e.message}`); }   // falls back to the separate files
+  }
+}
+buildBundles();
+function sendBundle(req, res, b) {
+  const ae = String(req.headers['accept-encoding'] || '');
+  const [body, enc] = /\bbr\b/.test(ae) ? [b.br, 'br'] : /\bgzip\b/.test(ae) ? [b.gz, 'gzip'] : [b.raw, null];
+  res.writeHead(200, { 'content-type': b.type, 'cache-control': 'public, max-age=31536000, immutable', vary: 'accept-encoding',
+    'content-length': body.length, ...(enc ? { 'content-encoding': enc } : {}) });
+  res.end(body);
+}
+// Swap a board page's tag list for its two bundles (same position for scripts, end of <head> for styles).
+function useBundles(key, html) {
+  const B = BUNDLE[key];
+  if (!B) return html;
+  let placed = false;
+  html = html.replace(CSS_TAG, (m, u) => (B.css.list.has(u) ? '' : m)).replace('</head>', `<link rel="stylesheet" href="${B.css.name}">\n</head>`);
+  html = html.replace(JS_TAG, (m, u) => { if (!B.js.list.has(u)) return m; if (placed) return ''; placed = true; return `<script src="${B.js.name}"></script>\n`; });
+  return html;
+}
+
 // ---- rate limit (per ip) --------------------------------------------------
 const fails = new Map();
 function locked(ip) { const a = (fails.get(ip) || []).filter((t) => t > Date.now() - 15 * 60e3); fails.set(ip, a); return a.length >= 10; }
@@ -277,6 +325,9 @@ const server = http.createServer((req, res) => {
     return res.end();
   }
 
+  const bm = /^\/(nfl|ncaaf|mlb)\/_b\/([a-f0-9]{12})\.(css|js)$/.exec(pathname);
+  if (bm && BUNDLE[bm[1]] && BUNDLE[bm[1]][bm[3]].name === `_b/${bm[2]}.${bm[3]}`) return sendBundle(req, res, BUNDLE[bm[1]][bm[3]]);
+
   const m = /^\/(nfl|ncaaf|mlb)(\/.*)?$/.exec(pathname);
   if (!m) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('Not found'); }
   const s = SPORTS[m[1]];
@@ -297,8 +348,8 @@ const server = http.createServer((req, res) => {
   const isStream = enginePath === '/api/stream';
   // The owner's copy of a board page gets an Admin Center link in the sport bar; ask for it uncompressed so
   // it can be edited in flight. Guests' pages pass through untouched.
-  const adminLink = r === 'owner' && req.method === 'GET' && (enginePath === '/' || enginePath === '/index.html');
-  if (adminLink) headers['accept-encoding'] = 'identity';
+  const isPage = req.method === 'GET' && (enginePath === '/' || enginePath === '/index.html');
+  if (isPage) headers['accept-encoding'] = 'identity';
   const send = (body) => {
     const pr = http.request({ host: '127.0.0.1', port: s.port, method: req.method, path: forwardPath, headers }, (pres) => {
       const h = { ...pres.headers };
@@ -307,12 +358,14 @@ const server = http.createServer((req, res) => {
       if (sc.length) h['set-cookie'] = sc;
       Board.request(who, r, sp, req.method, enginePath, pres.statusCode, Date.now() - t0);
       if (isStream && pres.statusCode === 200) { Board.streamOpen(who.dev); res.on('close', () => Board.streamClose(who.dev)); }
-      if (adminLink && (h['content-type'] || '').includes('text/html') && !h['content-encoding']) {
+      if (isPage && (h['content-type'] || '').includes('text/html') && !h['content-encoding']) {
         const parts = [];
         pres.on('data', (c) => parts.push(c));
         pres.on('end', () => {
-          const html = Buffer.concat(parts).toString('utf8').replace('</nav></div><style>', `</nav>${ADMIN_PILL}</div><style>`);
-          const buf = Buffer.from(html);
+          let html = useBundles(sp, Buffer.concat(parts).toString('utf8'));
+          if (r === 'owner') html = html.replace('</nav></div><style>', `</nav>${ADMIN_PILL}</div><style>`);
+          let buf = Buffer.from(html);
+          if (/\bbr\b/.test(String(req.headers['accept-encoding'] || ''))) { buf = zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } }); h['content-encoding'] = 'br'; h.vary = 'accept-encoding, cookie'; }
           h['content-length'] = String(buf.length);
           res.writeHead(pres.statusCode || 200, h);
           res.end(buf);

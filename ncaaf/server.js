@@ -231,7 +231,11 @@ function flush(W) {
   if (!tracked().includes(W)) return;
   for (const G of W.games.values()) {
     const p = pub(G, W);
-    const s = JSON.stringify(p);
+    /* Change detection ignores the fine grain of `seen` (every book is re-stamped on every Action Network poll,
+       so without this EVERY game went out every 9 s during games and every phone redrew the whole board).
+       Bucketed to 5 minutes it still refreshes well inside the client's 15-minute "old number" window, and a
+       real change — a price, a score, the clock — goes out immediately as before. */
+    const s = JSON.stringify(p, (k, v) => (k === 'seen' && typeof v === 'number' ? Math.floor(v / 300e3) : v));
     if (W.sent.get(G.id) === s) continue;
     W.sent.set(G.id, s);
     if (clients.size) emit('game', p);
