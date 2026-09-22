@@ -19,7 +19,10 @@ const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 
 const PORT = Number(process.env.PORT) || 4000;
-const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
+// Where everything durable lives: bets, names, share links, line history, the Admin Center log. On Railway
+// this MUST be the mounted volume — the container's own disk is wiped on every deploy. DATA_DIR was never
+// set on this service, so fall back to the mount path Railway injects rather than silently using ./data.
+const DATA_DIR = path.resolve(process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data'));
 
 // ---- access ---------------------------------------------------------------
 // ADMIN = ACCESS_CODE (owner). GUEST_CODE = a guest entrance. Hashes match what the engines compute
@@ -312,6 +315,7 @@ server.requestTimeout = 0;
 server.headersTimeout = 0;
 server.keepAliveTimeout = 76000;
 server.listen(PORT, () => {
+  console.log(`[terminal] data -> ${DATA_DIR}${process.env.RAILWAY_VOLUME_MOUNT_PATH && !DATA_DIR.startsWith(path.resolve(process.env.RAILWAY_VOLUME_MOUNT_PATH)) ? '  (WARNING: not on the volume)' : ''}`);
   console.log(`[terminal] ${BRAND} on :${PORT}  gated=${GATED} guest=${!!GUEST_HASH}${GUEST_LINK ? `  guest-link=/g/${GUEST_LINK}` : ''}`);
 });
 
