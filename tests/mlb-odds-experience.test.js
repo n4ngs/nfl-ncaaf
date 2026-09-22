@@ -171,3 +171,22 @@ test('HTTP200 refresh outcomes communicate errors, partial responses and schedul
   c.state.status.set(c.S.date, { sources: { pin: { state: 'idle' } } });
   assert.match(c.oddsSourceStatus(), /Idle/); assert.doesNotMatch(c.oddsSourceStatus(), />Unavailable</);
 });
+
+
+test('startup waits for day data and disables refresh while genuine loaded empty days stay empty', () => {
+  const { c } = harness();
+  c.S.games.clear(); c.S.date = null; c.S.today = '2026-09-22'; c.S.loading = null;
+  const initial = c.oddsViewHTML();
+  assert.match(initial, /role="status"><b>Loading this day’s games/);
+  assert.match(initial, /data-odds-refresh[^>]*disabled aria-busy="true"/);
+  assert.doesNotMatch(initial, /No games|Choose another day/);
+  c.S.date = '2026-09-22';
+  const emptyToday = c.oddsViewHTML();
+  assert.match(emptyToday, /No games today/); assert.doesNotMatch(emptyToday, /Loading this day/);
+  assert.doesNotMatch(emptyToday, /data-odds-refresh[^>]*disabled/);
+  c.S.loading = '2026-09-21'; c.S.isToday = false;
+  const switching = c.oddsViewHTML();
+  assert.match(switching, /Loading this day’s games/); assert.doesNotMatch(switching, /No games/);
+  c.S.loading = null; c.S.date = '2026-09-21';
+  assert.match(c.oddsViewHTML(), /No games on this day/);
+});

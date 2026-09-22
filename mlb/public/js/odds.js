@@ -369,9 +369,10 @@ function oddsDayGames() {
 function oddsViewHTML() {
   const games = oddsDayGames(), f = ODDS.fetched.get(S.date), mkt = ODDS.mkt;
   const refresh = ODDS.status.get(S.date)?.refresh, busy = f?.busy || refresh?.in_progress;
+  const dayPending = !!S.loading || !S.date; // No selected day exists before the initial snapshot.
   const cooldown = Number.isFinite(refresh?.next_allowed_at) && refresh.next_allowed_at > serverNow();
-  const head = `<div class="odds-workspace-head"><div><p class="odds-kicker">MLB · Prices & movement</p><h1>MLB market board</h1></div><button type="button" class="odds-refresh" data-odds-refresh data-fk="refresh" ${busy || S.loading ? 'disabled aria-busy="true"' : cooldown ? 'disabled' : ''}>${busy ? 'Refreshing…' : cooldown ? `Refresh in ${Math.ceil((refresh.next_allowed_at - serverNow()) / 1000)}s` : 'Refresh odds'}</button></div>`;
-  if (S.loading) return `${head}<div class="card empty" role="status"><b>Loading this day’s games…</b></div>`;
+  const head = `<div class="odds-workspace-head"><div><p class="odds-kicker">MLB · Prices & movement</p><h1>MLB market board</h1></div><button type="button" class="odds-refresh" data-odds-refresh data-fk="refresh" ${busy || dayPending ? 'disabled aria-busy="true"' : cooldown ? 'disabled' : ''}>${busy ? 'Refreshing…' : cooldown ? `Refresh in ${Math.ceil((refresh.next_allowed_at - serverNow()) / 1000)}s` : 'Refresh odds'}</button></div>`;
+  if (dayPending) return `${head}<div class="card empty" role="status"><b>Loading this day’s games…</b></div>`;
   if (!games.length) return `${head}<div class="card empty"><b>No games ${S.isToday ? 'today' : 'on this day'}</b>Choose another day above.</div>`;
   const shown = games.filter((g) => oddsPasses(g) && oddsMatches(g));
   const live = shown.filter((g) => g.state === 'Live' && !isOff(g));
