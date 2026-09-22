@@ -41,7 +41,7 @@ const BETS = {
   list: [], loaded: false,
   odds: new Map(), books: [], games: new Map(),
   pending: new Set(), // bets hidden while their Undo toast is showing
-  seg: ['follow', 'mine', 'results'].includes(store.get('betsSeg', 'follow')) ? store.get('betsSeg', 'follow') : 'follow',
+  seg: new URLSearchParams(location.search).has('portfolio') ? 'mine' : ['follow', 'mine', 'results'].includes(store.get('betsSeg', 'mine')) ? store.get('betsSeg', 'mine') : 'mine',
   parlay: (() => { const p = store.get('betsParlay', null); return p && Array.isArray(p.legs) && Date.now() - (p.at || 0) < 24 * 3600e3 ? p.legs.slice(0, 12) : []; })(),
   slip: null, more: false,
   me: null, link: null, linkTimer: 0,
@@ -101,13 +101,18 @@ function betsInningText(g) {
 // { line, odds } for one side at one book. Book lines keep the run line from the HOME side; legs keep the bettor's side.
 const betsOddsFor = (pk) => (typeof oddsGame === 'function' ? oddsGame(pk) : null) || BETS.odds.get(Number(pk)) || null;
 function betsPrice(pk, book, mkt, side) {
-  const O = betsOddsFor(pk);
-  const L = !O ? null : book === 'open' ? O.open : book === 'close' ? O.close : O.books?.[book];
+  const O = betsOddsFor(pk), g = betsGame(pk);
+  if (!betsIsPre(g)) {
+    const p = typeof oddsLiveQuote === 'function' ? oddsLiveQuote(g, O, book, mkt, side) : null;
+    return p?.actionable ? p : null;
+  }
+  const f5 = String(mkt).startsWith('f5'), base = f5 ? mkt.slice(2) : mkt;
+  const L = !O ? null : book === 'open' ? O.open : book === 'close' ? O.close : (f5 ? O.f5 : O.books)?.[book];
   if (!L) return null;
   const i = side === 'home' || side === 'over' ? 0 : 1;
-  if (mkt === 'ml' || mkt === 'f5ml') return L.ml?.[i] != null ? { line: null, odds: L.ml[i] } : null;
-  if (mkt === 'rl') return L.rl?.line != null ? { line: side === 'home' ? L.rl.line : -L.rl.line, odds: L.rl.odds?.[i] ?? null } : null;
-  if (mkt === 't') return L.t?.line != null ? { line: L.t.line, odds: L.t.odds?.[i] ?? null } : null;
+  if (base === 'ml') return L.ml?.[i] != null ? { line: null, odds: L.ml[i] } : null;
+  if (base === 'rl') return L.rl?.line != null ? { line: side === 'home' ? L.rl.line : -L.rl.line, odds: L.rl.odds?.[i] ?? null } : null;
+  if (base === 't') return L.t?.line != null ? { line: L.t.line, odds: L.t.odds?.[i] ?? null } : null;
   return null;
 }
 function betsLegLabel(g, l) {
@@ -210,7 +215,7 @@ function betsReturn(r) {
 function betsLegFrom(pk, mkt, side, book) {
   pk = Number(pk);
   const b = book && book !== 'cons' && book !== 'open' && book !== 'close' ? book : '';
-  const p = betsPrice(pk, book || 'cons', mkt, side) || (book !== 'cons' ? betsPrice(pk, 'cons', mkt, side) : null) || {};
+  const p = betsPrice(pk, book || 'cons', mkt, side) || (betsIsPre(betsGame(pk)) && book !== 'cons' ? betsPrice(pk, 'cons', mkt, side) : null) || {};
   return { pk, mkt, side, line: mkt === 'ml' || mkt === 'f5ml' ? null : p.line ?? NaN, odds: p.odds ?? NaN, book: b };
 }
 function betsOpenSlip(opts = {}) {
@@ -218,9 +223,12 @@ function betsOpenSlip(opts = {}) {
   let slip;
   if (opts.parlay) slip = { legs: BETS.parlay.map((l) => ({ ...l })), stake: NaN, book: BETS.parlay.find((l) => l.book)?.book || '', parlay: true };
   else if (opts.pk && opts.mkt && opts.side) {
+    const g = betsGame(opts.pk), live = g?.state === 'Live';
+    const fresh = live ? betsPrice(opts.pk, opts.book || 'cons', opts.mkt, opts.side) : null;
+    if (live && opts.book && !['cons', 'open', 'close'].includes(opts.book) && !fresh) { betsToast('This live price is unavailable. Enter your ticket manually.'); return; }
     const l = betsLegFrom(opts.pk, opts.mkt, opts.side, opts.book);
-    if (opts.mkt !== 'ml' && opts.mkt !== 'f5ml' && Number.isFinite(opts.line)) l.line = opts.line; // the price that was tapped wins
-    if (Number.isFinite(opts.odds)) l.odds = opts.odds;
+    if (!live && opts.mkt !== 'ml' && opts.mkt !== 'f5ml' && Number.isFinite(opts.line)) l.line = opts.line; // the price that was tapped wins
+    if (!live && Number.isFinite(opts.odds)) l.odds = opts.odds;
     slip = { legs: [l], stake: NaN, book: l.book };
   } else slip = { legs: [], stake: NaN, book: '', pick: true };
   slip.returnTo = returnTo;
@@ -256,29 +264,31 @@ function betsBetter(mkt, side, a, b) {
   return (betsDec(a.odds) || 0) > (betsDec(b.odds) || 0);
 }
 // Every book's price for this exact pick, best first, as big tappable tiles. Tapping one switches the slip to it.
-// Pre-game only: once a game starts, the books' prices here are the frozen pre-game ones, not live.
+// Live tiles use per-selection source evidence; pregame/closing books stay separate.
 function betsSlipBooksHTML(l, sel) {
   const g = betsGame(l?.pk);
-  if (!l || (g && !betsIsPre(g))) return '';
+  if (!l || (g && !betsIsPre(g) && g.state !== 'Live')) return '';
+  const live = g?.state === 'Live';
+  if (live && l.mkt.startsWith('f5')) return '';
   const O = betsOddsFor(l.pk);
-  if (!O?.books) return '';
+  if (!(live ? O?.live : O?.books)) return '';
   const rows = [];
   for (const b of betsBookList()) {
-    const L = O.books[b.key];
-    const p = betsPrice(l.pk, b.key, l.mkt, l.side);
+    const L = (live ? O.live : l.mkt.startsWith('f5') ? O.f5 : O.books)?.[b.key];
+    const p = live && typeof oddsLiveQuote === 'function' ? oddsLiveQuote(g, O, b.key, l.mkt, l.side) : betsPrice(l.pk, b.key, l.mkt, l.side);
     if (!p || p.odds == null || (l.mkt !== 'ml' && l.mkt !== 'f5ml' && p.line == null)) continue;
-    rows.push({ k: b.key, p, typed: !!L?.m, old: betsStale(L) });
+    rows.push({ k: b.key, p, typed: !live && !!L?.m, old: live ? !p.actionable : betsStale(L), enabled: !live || p.actionable, state: live ? p.actionable ? 'Live' : p.freshness : null });
   }
   if (!rows.length) return '';
   let best = null;
-  try { best = typeof oddsBest === 'function' ? oddsBest(O, l.mkt, l.side)?.book || null : null; } catch { best = null; }
+  try { best = live ? oddsLiveBest(g, O, l.mkt, l.side)?.book || null : typeof oddsBest === 'function' ? oddsBest(O, l.mkt, l.side)?.book || null : null; } catch { best = null; }
   if (!best) best = rows.filter((r) => !r.old).reduce((a, r) => (!a || betsBetter(l.mkt, l.side, r.p, a.p) ? r : a), null)?.k || null;
   rows.sort((a, b) => (a.k === best ? -1 : b.k === best ? 1 : 0) || (betsBetter(l.mkt, l.side, a.p, b.p) ? -1 : betsBetter(l.mkt, l.side, b.p, a.p) ? 1 : 0));
   const priceTxt = (p) => (l.mkt === 'ml' ? betsFmtOdds(p.odds) : `${l.mkt === 't' ? (l.side === 'over' ? 'o' : 'u') + betsFmtTot(p.line) : betsFmtLine(p.line)} ${betsFmtOdds(p.odds)}`);
   const spoken = (s) => s.replace(new RegExp(BETS_MINUS, 'g'), 'minus ').replace(/\+/g, 'plus ');
   return `<div class="bets-books-h"><span>Where to bet</span><span>Tap a book to use its price · <button type="button" class="bets-k" data-bets-books>book links</button></span></div>
-    <div class="bets-books" role="group" aria-label="Choose a book">${rows.map((r) => `<button type="button" class="bets-bk${sel === r.k ? ' on' : ''}${r.old ? ' old' : ''}" data-bets-book="${r.k}" aria-pressed="${sel === r.k}" aria-label="${esc(spoken(`${betsBookFull(r.k)}: ${priceTxt(r.p)}${r.k === best ? ', best price' : ''}${r.typed ? ', typed in' : ''}${r.old ? ', price may be old' : ''}`))}">
-      ${betsBookIcon(r.k)}<span class="bets-bk-n">${esc(betsBookName(r.k))}</span><span class="bets-bk-p num">${esc(priceTxt(r.p))}</span>${r.k === best ? '<span class="bets-bk-tag">Best</span>' : r.typed ? '<span class="bets-bk-tag">Typed</span>' : r.old ? '<span class="bets-bk-tag">Old</span>' : ''}
+    <div class="bets-books" role="group" aria-label="Choose a book">${rows.map((r) => `<button type="button" class="bets-bk${sel === r.k ? ' on' : ''}${r.old ? ' old' : ''}" ${r.enabled ? `data-bets-book="${r.k}"` : 'disabled'} aria-pressed="${sel === r.k}" aria-label="${esc(spoken(`${betsBookFull(r.k)}: ${priceTxt(r.p)}${r.k === best ? ', best price' : ''}${r.typed ? ', typed in' : ''}${r.old ? ', price may be old' : ''}`))}">
+      ${betsBookIcon(r.k)}<span class="bets-bk-n">${esc(betsBookName(r.k))}</span><span class="bets-bk-p num">${esc(priceTxt(r.p))}</span>${live ? `<span class="bets-bk-tag">${esc(r.state)}${r.k === best ? ' · Best' : ''}</span>` : r.k === best ? '<span class="bets-bk-tag">Best</span>' : r.typed ? '<span class="bets-bk-tag">Typed</span>' : r.old ? '<span class="bets-bk-tag">Old</span>' : ''}
     </button>`).join('')}
       <button type="button" class="bets-bk${sel === 'other' ? ' on' : ''}" data-bets-book="other" aria-pressed="${sel === 'other'}" aria-label="Another book. Type the price.">${betsBookIcon('other')}<span class="bets-bk-n">Other</span><span class="bets-bk-p">Type the price</span></button>
     </div>${betsWhereHTML(sel)}`;
@@ -348,7 +358,7 @@ function betsSlipHTML() {
   const bookOpts = [['', 'Choose a book'], ...books.map((b) => [b.key, b.name]), ['other', 'Other']]
     .map(([k, n]) => `<option value="${esc(k)}" ${sl.book === k ? 'selected' : ''}>${esc(n)}</option>`).join('');
   const tiles = single && !sl.parlay ? betsSlipBooksHTML(l0, sl.book) : '';
-  const showBook = !tiles || sl.book === 'other';
+  const showBook = true;
   const lineVal = single && l0.mkt !== 'ml' && Number.isFinite(l0.line) ? (l0.mkt === 't' ? betsFmtTot(l0.line) : betsFmtLine(l0.line).replace(BETS_MINUS, '-')) : '';
   const legRow = (l, i) => {
     const g = betsGame(l.pk);
@@ -361,19 +371,20 @@ function betsSlipHTML() {
     <h2 id="dlgTitle">${single ? 'Log this bet' : `${sl.legs.length}-leg parlay`}</h2>
     <p class="bets-lede">${single ? esc(BETS_MKT[l0.mkt] || '') : 'Every leg has to win. Pushes drop out.'}</p>
     <div class="bets-picks">${sl.legs.map(legRow).join('')}</div>
-    ${tiles}
-    <div class="bets-fgrid">
+    <div class="bets-fgrid portfolio-entry-primary">
       ${single && l0.mkt !== 'ml' && l0.mkt !== 'f5ml' ? `<label class="bets-fld">Line<input class="bets-inp" id="betsLine" inputmode="text" autocomplete="off" value="${esc(lineVal)}"></label>` : ''}
       <label class="bets-fld">${single ? 'Odds' : 'Ticket odds'}<input class="bets-inp" id="betsOdds" inputmode="text" autocomplete="off" value="${esc(Number.isFinite(odds) ? String(odds) : '')}" placeholder="-110"></label>
       <label class="bets-fld${!showBook && single && l0.mkt !== 'ml' ? ' bets-full' : ''}">Stake ($)<input class="bets-inp" id="betsStake" inputmode="decimal" autocomplete="off" value="${esc(Number.isFinite(sl.stake) ? String(sl.stake) : '')}" placeholder="Amount"></label>
       ${showBook ? `<label class="bets-fld${single && l0.mkt !== 'ml' ? '' : ' bets-full-m'}">Book<span class="bets-sel"><select class="bets-inp" id="betsBook">${bookOpts}</select></span></label>` : ''}
+    </div><details class="portfolio-entry-more"><summary>Add a note</summary><div class="bets-fgrid">
       <label class="bets-fld bets-full">Note<input class="bets-inp bets-note" id="betsNote" autocomplete="off" placeholder="Optional: why you like it" maxlength="200" value="${esc(sl.note || '')}"></label>
-    </div>
-    <div id="betsCalc">${betsCalcHTML()}</div>
+    </div></details>
     ${single && g0 && betsIsFinal(g0) ? '<p class="bets-note-p">This game is over, so it can’t be logged.</p>' : ''}
     <div class="bets-err" id="betsErr" role="alert"></div>
     <div id="betsLim" aria-live="polite">${typeof limSlipHTML === 'function' ? limSlipHTML(sl) : ''}</div>
-    <div id="betsBtns">${betsBtnsHTML()}</div>`;
+    <div id="betsBtns">${betsBtnsHTML()}</div>
+    ${tiles ? `<details class="portfolio-entry-more"><summary>Compare available prices</summary><div>${tiles}</div></details>` : ''}
+    <details class="portfolio-entry-more"><summary>Payout &amp; price analysis</summary><div id="betsCalc">${betsCalcHTML()}</div></details>`;
 }
 // Payout, implied chance and the price against the sharp fair price. Redrawn on every keystroke.
 function betsCalcHTML() {
@@ -1050,6 +1061,20 @@ function betsMineHook() {
   const sub = $('#followSub');
   if (sub) sub.textContent = seg === 'mine' ? 'Your bets, live. Private to this device.' : seg === 'results' ? 'How your bets and your prices have done.' : 'Your players and teams, live.';
   const main = $('#betsMain');
+  if (seg === 'mine' && typeof BoardPortfolioView !== 'undefined' && BoardPortfolioView.mount(main, {
+    sport: 'mlb', currentBets: betsVisible(), currentGames: BETS.games,
+    sports: location.pathname.startsWith('/mlb/') ? undefined : ['mlb'],
+    basePaths: location.pathname.startsWith('/mlb/') ? undefined : { mlb: '' },
+    onNew: () => betsOpenSlip({}), detailHTML: (ticket) => ticket.sport === 'mlb' ? betsCard(ticket.raw) : null,
+    resultsHTML: () => `<h2>MLB results</h2>${betsResultsHTML()}`
+  })) {
+    $('#view-following')?.classList.add('portfolio-mode');
+    $('#betsTools').hidden = true;
+    if (!betsMineHook.didOpen && new URLSearchParams(location.search).get('portfolio') === 'new' && BETS.games.size) { betsMineHook.didOpen = true; betsOpenSlip({}); }
+    return;
+  }
+  $('#view-following')?.classList.remove('portfolio-mode');
+  main.classList.remove('portfolio');
   const html = seg === 'mine' ? betsMineHTML() : seg === 'results' ? betsResultsHTML() : '';
   if (main.dataset.key !== html) { main.innerHTML = html; main.dataset.key = html; }
   const tools = $('#betsTools');
@@ -1109,6 +1134,7 @@ document.addEventListener('click', (ev) => {
   if (d.betsBook && BETS.slip?.legs.length === 1) { // a book tile in the slip: use that book and its price
     betsReadSlip();
     const sl = BETS.slip, l = sl.legs[0];
+    if (d.betsBook !== 'other' && betsGame(l.pk)?.state === 'Live' && !betsPrice(l.pk, d.betsBook, l.mkt, l.side)) { betsToast('This live price is no longer available.'); betsPaintSlip(); return; }
     sl.book = d.betsBook;
     if (d.betsBook === 'other') l.book = '';
     else {

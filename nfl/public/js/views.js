@@ -613,6 +613,23 @@ function betStats(list) {
 }
 
 function renderBets() {
+  if (typeof BoardPortfolioView !== 'undefined' && BoardPortfolioView.mount($('#betsBody'), {
+    sport: 'nfl', currentBets: S.bets, gameOf: gameById,
+    sports: location.pathname.startsWith('/nfl/') ? undefined : ['nfl'],
+    basePaths: location.pathname.startsWith('/nfl/') ? undefined : { nfl: '' },
+    onNew: () => openSlip({}), detailHTML: (ticket) => ticket.sport === 'nfl' ? betCard(ticket.raw) : null,
+    resultsHTML: () => `<h2>NFL results</h2>${resultsView()}`,
+    signalText: (ticket) => {
+      if (ticket.sport !== 'nfl' || ticket.status !== 'open') return '';
+      const live = ticket.legs.map((leg) => gameById(leg.gid)).filter((g) => g && isLive(g));
+      return live.length ? live.map((g) => `${g.away.abbr} ${g.away.score} · ${g.home.abbr} ${g.home.score} · ${clockLabel(g)}`).join(' / ') : '';
+    }
+  })) {
+    if (!renderBets.didOpen && new URLSearchParams(location.search).get('portfolio') === 'new' && S.weeks.size) {
+      renderBets.didOpen = true; openSlip({});
+    }
+    return;
+  }
   $$('#betSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.bseg === S.bseg)));
   const st = betStats(S.bets);
   const units = (n) => (S.unit ? `${(n / S.unit).toFixed(1)}u` : '');

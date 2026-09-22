@@ -111,6 +111,45 @@ function oddsSide(L, mkt, side) {
   if (mkt === 't') { if (!L.t || L.t.line == null) return null; return { line: L.t.line, odds: (side === 'over' ? L.t.odds?.[0] : L.t.odds?.[1]) ?? null }; }
   return null;
 }
+// Live display is a separate projection. Never feed it into opening/closing history or pregame models.
+const oddsIsLive = (g) => !!g && g.state === 'Live' && !isOff(g) && !/suspend/i.test(g.detail || '');
+function oddsLiveQuote(g, O, book, mkt, side) {
+  if (!['ml', 'rl', 't'].includes(mkt) || !(mkt === 't' ? ['over', 'under'] : ['home', 'away']).includes(side)) return null;
+  const L = O?.live?.[book], q = L?.quote_meta?.[mkt]?.[side];
+  if (!q) return null;
+  const stamp = (value) => typeof value === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? Date.parse(value) : NaN;
+  const sourceAt = stamp(q.source_observed_at), receivedAt = stamp(q.received_at);
+  const age = serverNow() - sourceAt;
+  let freshness = 'FRESH';
+  if (q.conflicted || q.freshness === 'CONFLICTED' || (Number.isFinite(sourceAt) && (sourceAt > serverNow() || sourceAt > receivedAt))) freshness = 'CONFLICTED';
+  else if (['suspended', 'removed'].includes(q.market_status) || (g?.state === 'Live' && !oddsIsLive(g))) freshness = 'SUSPENDED';
+  else if (!oddsIsLive(g) || L.is_live !== true || q.is_live !== true || q.market_status !== 'active' || !Number.isFinite(sourceAt) || !Number.isFinite(receivedAt) || !Number.isFinite(q.max_age_ms) || q.max_age_ms <= 0 || !Number.isFinite(q.american_odds) || Math.abs(q.american_odds) < 100 || (mkt !== 'ml' && !Number.isFinite(q.line_value))) freshness = 'UNVERIFIED';
+  else if (age > q.max_age_ms || q.freshness === 'STALE') freshness = 'STALE';
+  else if (q.actionable !== true || q.freshness !== 'FRESH') freshness = 'UNVERIFIED';
+  return { line: mkt === 'ml' ? null : q.line_value ?? null, odds: q.american_odds ?? null, book,
+    freshness, actionable: freshness === 'FRESH', seen: Number.isFinite(sourceAt) ? sourceAt : null,
+    source_observed_at: q.source_observed_at, source: q.source || L.source || L.src || null };
+}
+function oddsLiveBest(g, O, mkt, side) {
+  let best = null;
+  for (const book of Object.keys(O?.live || {})) {
+    if (ODDS_NOT_BETTABLE.has(book)) continue;
+    const p = oddsLiveQuote(g, O, book, mkt, side);
+    if (p?.actionable && (!best || oddsBetter(mkt, side, p, best))) best = p;
+  }
+  return best;
+}
+function oddsLiveCell(g, O, mkt, side, book, best = null, actionable = true) {
+  const p = oddsLiveQuote(g, O, book, mkt, side);
+  if (!p) return '<span class="odds-px na">—<small>Live unavailable</small></span>';
+  const { main, sub } = oddsTwoLine(mkt, side, p);
+  const state = p.actionable ? 'Live' : p.freshness.charAt(0) + p.freshness.slice(1).toLowerCase();
+  const isBest = p.actionable && best?.book === book;
+  const label = `${oddsBookFull(book)}, ${oddsWho(g, mkt, side)} ${oddsSpokenPrice(mkt, side, p)}, live ${state.toLowerCase()}`;
+  const inner = `<span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small>${esc(state)}${isBest ? ' · Best' : ''}</small>`;
+  if (!actionable || !p.actionable || ODDS_NOT_BETTABLE.has(book)) return `<span class="odds-px na${p.actionable ? '' : ' old'}" aria-label="${esc(label)}">${inner}</span>`;
+  return `<button type="button" class="odds-px${isBest ? ' best' : ''}" data-odds-bet="${g.pk}|${mkt}|${side}|${book}" aria-label="${esc(label + '. Opens a bet slip.')}" data-fk="live${g.pk}${book}${mkt}${side}">${inner}</button>`;
+}
 // Better for the bettor: the better number first, then the better price.
 function oddsBetter(mkt, side, a, b) {
   if (!b) return true;
@@ -149,7 +188,8 @@ function oddsMarket(O) {
 }
 // Exposed for the bet slip: one book's current price for one side.
 function oddsPriceAt(pk, mkt, side, book) {
-  const O = oddsGame(pk);
+  const O = oddsGame(pk), g = S.games.get(Number(pk));
+  if (!oddsIsPre(g)) { const p = oddsLiveQuote(g, O, book, mkt, side); return p?.actionable ? p : null; }
   const f5 = String(mkt).startsWith('f5');
   const L = (f5 ? O?.f5 : O?.books)?.[book];
   const p = oddsSide(L, f5 ? mkt.slice(2) || 'ml' : mkt, side);
@@ -311,7 +351,7 @@ function oddsViewHTML() {
   const soon = grp(shown.filter((g) => oddsIsPre(g)));
   const done = grp(shown.filter((g) => g.state === 'Final' || isOff(g)));
   // The best price is only worth a column where you can still take it.
-  const block = (list) => { const best = list.some(oddsIsPre); return `<div class="card odds-brd">${oddsRowHead(mkt, best)}${list.map((g) => oddsRow(g, mkt, best)).join('')}</div>${oddsBoardTable(list, mkt)}`; };
+  const block = (list) => { const best = list.some((g) => oddsIsPre(g) || (oddsIsLive(g) && mkt !== 'f5')); return `<div class="card odds-brd">${oddsRowHead(mkt, best)}${list.map((g) => oddsRow(g, mkt, best)).join('')}</div>${oddsBoardTable(list, mkt)}`; };
   const section = (title, list) => (list.length ? `<div class="odds-grp"><h3>${esc(title)}</h3><span>${list.length === 1 ? '1 game' : `${list.length} games`}</span></div>${block(list)}` : '');
   const wasOpen = document.getElementById('oddsDone')?.open;
   const none = !live.length && !soon.length && !done.length;
@@ -431,6 +471,11 @@ function oddsMktLine(O, pre) {
 }
 // The market cell. Not a price you can take, so it isn't a button.
 function oddsMktCell(g, O, mkt, side, pre) {
+  if (g?.state === 'Live') {
+    const candidates = [...new Set(['cons', 'pin', 'circa', ...Object.keys(O?.live || {})])];
+    const book = candidates.find((k) => oddsLiveQuote(g, O, k, mkt, side)?.actionable) || candidates.find((k) => oddsLiveQuote(g, O, k, mkt, side));
+    return oddsLiveCell(g, O, mkt, side, book, null, false);
+  }
   const base = oddsBaseMkt(mkt);
   const books = oddsBooksFor(O, mkt);
   const mk = oddsIsF5(mkt) ? { L: books.cons || books.pin || Object.values(books)[0] || null, key: 'market' } : oddsMktLine(O, pre);
@@ -444,7 +489,7 @@ function oddsMktCell(g, O, mkt, side, pre) {
 // The best price anywhere, with the book underneath. Tapping it opens the slip at that book.
 function oddsBestCell(g, O, mkt, side, pre) {
   const base = oddsBaseMkt(mkt);
-  const best = pre ? (oddsIsF5(mkt) ? oddsBestIn(O?.f5, base, side) : oddsBest(O, mkt, side)) : null;
+  const best = g?.state === 'Live' ? oddsLiveBest(g, O, mkt, side) : pre ? (oddsIsF5(mkt) ? oddsBestIn(O?.f5, base, side) : oddsBest(O, mkt, side)) : null;
   if (!best) return '<span class="odds-px na" aria-hidden="true">—</span>';
   const { main } = oddsTwoLine(base, side, best);
   const sub = base === 'ml' ? oddsBookCode(best.book) : `${oddsFmt(best.odds)} ${oddsBookCode(best.book)}`;
@@ -454,6 +499,7 @@ function oddsBestCell(g, O, mkt, side, pre) {
 }
 // One book's own price, for the wide table.
 function oddsBookCell(g, O, mkt, side, book, best, pre) {
+  if (g?.state === 'Live') return oddsLiveCell(g, O, mkt, side, book, best);
   const base = oddsBaseMkt(mkt);
   const L = oddsBooksFor(O, mkt)[book];
   const p = oddsSide(L, base, side);
@@ -558,6 +604,7 @@ function oddsRow(g, mkt, showBest = true) {
 }
 // "Opened −140 ▲12¢" for the row footer: how far this market has come since it opened.
 function oddsMoveBits(g, O, pre) {
+  if (g?.state === 'Live') return '<span>Live prices · closing history in details</span>';
   const open = O?.open || O?.books?.open;
   const now = oddsMktLine(O, pre).L;
   if (!open || !now) return '';
@@ -619,7 +666,7 @@ function oddsBoardTable(games, mkt) {
       return `<div class="${trail ? 'trail' : ''}">${logo(t.id)}<span class="odds-bt-n">${esc(t.name || t.abbr)}${mkt === 't' ? `<small>${pSide === 'over' ? 'Over' : 'Under'}</small>` : ''}</span><span class="odds-bt-s num">${!pre && g[tSide]?.score != null ? g[tSide].score : ''}</span></div>`;
     };
     const bestOf = (side) => (oddsIsF5(mkt) ? oddsBestIn(O?.f5, 'ml', side) : oddsBest(O, mkt, side));
-    const best1 = pre ? bestOf(s1) : null, best2 = pre ? bestOf(s2) : null;
+    const best1 = live ? oddsLiveBest(g, O, mkt, s1) : pre ? bestOf(s1) : null, best2 = live ? oddsLiveBest(g, O, mkt, s2) : pre ? bestOf(s2) : null;
     const move = oddsMoveBits(g, O, pre);
     return `<tr data-odds-open="${g.pk}">
       <td class="l stk"><div class="odds-bt-mu"><div class="odds-bt-st">${live ? '<span class="dot"></span>' : ''}<b>${esc(pre ? timeLabel(g.start) : gameStatus(g))}</b></div><div class="odds-bt-tms">${tm('away', s1)}${tm('home', s2)}</div></div></td>
@@ -831,9 +878,10 @@ function oddsFiveHTML(pk) {
     if (!p || p.odds == null) return '<span class="odds-px na" aria-hidden="true">—</span>';
     const { main, sub } = oddsTwoLine(m, side, p);
     const b = best(m, side);
-    const isBest = k !== 'cons' && b?.book === k;
+    const isBest = oddsIsPre(g) && k !== 'cons' && b?.book === k;
     const who = m === 't' ? (side === 'over' ? 'Over' : 'Under') : oddsTeam(g, side).name;
     const label = `${oddsBookFull(k)}, first five innings, ${who} ${oddsSpokenPrice(m, side, p)}${isBest ? ', best price' : ''}. Opens a bet slip.`;
+    if (!oddsIsPre(g)) return `<span class="odds-px na"><span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small>Pregame</small></span>`;
     return `<button type="button" class="odds-px${isBest ? ' best' : ''}" data-odds-bet="${pk}|f5${m}|${side}|${k}" aria-label="${esc(label)}"><span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}</button>`;
   };
   const rows = keys.map((k) => `<tr><td><div class="odds-bk">${esc(oddsBookName(k))}</div></td><td>${cell(k, 'ml', 'away')}</td><td>${cell(k, 'ml', 'home')}</td><td>${cell(k, 't', 'over')}</td><td>${cell(k, 't', 'under')}</td></tr>`).join('');
@@ -969,6 +1017,13 @@ function oddsChartSVG(h, O, g, mkt, W) {
 }
 
 // Every book: moneyline, run line and total, best price marked, price age when it's over 5 minutes.
+function oddsLiveTableHTML(pk) {
+  const O = oddsGame(pk), g = S.games.get(Number(pk));
+  if (g?.state !== 'Live') return '';
+  const books = Object.keys(O?.live || {}).filter((k) => !ODDS_NOT_BETTABLE.has(k));
+  const cells = (book, mkt, sides) => sides.map((side) => oddsLiveCell(g, O, mkt, side, book, oddsLiveBest(g, O, mkt, side))).join('');
+  return `<h3 class="sub-h">Live prices<span>Source-verified prices only</span></h3><p class="odds-note">Top: away / over · bottom: home / under. Unavailable prices cannot prefill a ticket. Pregame closing history stays below.</p>${books.length ? `<div class="card odds-tbl-wrap"><table class="odds-tbl"><thead><tr><th scope="col">Book</th><th scope="col">Money</th><th scope="col">Run line</th><th scope="col">Total</th></tr></thead><tbody>${books.map((book) => `<tr><th scope="row">${esc(oddsBookName(book))}</th><td>${cells(book, 'ml', ['away', 'home'])}</td><td>${cells(book, 'rl', ['away', 'home'])}</td><td>${cells(book, 't', ['over', 'under'])}</td></tr>`).join('')}</tbody></table></div>` : '<p class="odds-none">Live quotes unavailable.</p>'}`;
+}
 function oddsTableHTML(pk) {
   const O = oddsGame(pk), g = S.games.get(pk);
   if (!O) return '<h3 class="sub-h">Every book</h3><div class="odds-chart-empty">No prices for this game yet.</div>';
@@ -1001,7 +1056,7 @@ function oddsTableHTML(pk) {
       <td>${cell(k, L, 't', 'over')}${cell(k, L, 't', 'under')}</td>
     </tr>`;
   }).join('');
-  return `<h3 class="sub-h">Every book<span>${pre ? `Top: ${esc(away.abbr)} / over · bottom: ${esc(home.abbr)} / under` : 'Last prices before first pitch'}</span></h3>
+  return `${oddsLiveTableHTML(pk)}<h3 class="sub-h">${pre ? 'Every book' : 'Pregame closing context'}<span>${pre ? `Top: ${esc(away.abbr)} / over · bottom: ${esc(home.abbr)} / under` : 'Last prices before first pitch'}</span></h3>
     <div class="card odds-tbl-wrap"><table class="odds-tbl">
       <thead><tr><th scope="col">Book</th><th scope="col">Money</th><th scope="col">Run line</th><th scope="col">Total</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
@@ -1307,6 +1362,7 @@ document.addEventListener('click', (ev) => {
   } else if (d.oddsBet) {
     const [pk, mkt, side, book] = d.oddsBet.split('|');
     const px = oddsPriceAt(pk, mkt, side, book);
+    if (!px) { if (typeof betsToast === 'function') betsToast('This price is no longer available. Refresh the board or enter your ticket manually.'); return; }
     if (typeof betsOpenSlip === 'function') betsOpenSlip({ pk: Number(pk), mkt, side, book, line: px?.line ?? null, odds: px?.odds ?? null });
     else if (typeof toastText === 'function') toastText('The bet slip isn’t available yet.');
   } else if (d.oddsOpen) oddsOpenSheet(d.oddsOpen);
@@ -1329,7 +1385,7 @@ document.addEventListener('input', (ev) => {
 });
 $('#dlg')?.addEventListener('close', () => { ODDS.sheetPk = null; ODDS.sheetHist = null; });
 // Relative times ("12 min old") and freshness keep moving while the view is up.
-setInterval(() => { if (!document.hidden && (S.tab === 'games' || S.dlgKind === 'odds' || S.dlgKind === 'edges')) oddsRepaint(); }, 30e3);
+setInterval(() => { if (!document.hidden && (S.tab === 'games' || S.dlgKind === 'odds' || S.dlgKind === 'edges')) oddsRepaint(); }, 5000);
 
 /* BetMGM Nevada — its price is a real link, so one tap opens BetMGM with the bet already in the slip (a
    popup blocker can stop window.open, never an anchor). This opens the board's own slip alongside it so
@@ -1339,6 +1395,7 @@ document.addEventListener('click', (ev) => {
   if (!a) return;
   const parts = String(a.dataset.mgmbet || '').split('|');
   const pk = parts[0], mkt = parts[1], side = parts[2], book = parts[3];
+  if (!oddsIsPre(S.games.get(Number(pk)))) { ev.preventDefault(); if (typeof betsToast === 'function') betsToast('Pregame links are unavailable after first pitch. Use a current live price.'); return; }
   try {
     const px = typeof oddsPriceAt === 'function' ? oddsPriceAt(pk, mkt, side, book) : null;
     if (typeof betsOpenSlip === 'function') betsOpenSlip({ pk: Number(pk), mkt, side, book, line: px?.line ?? null, odds: px?.odds ?? null });

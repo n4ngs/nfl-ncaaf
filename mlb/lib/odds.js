@@ -17,6 +17,8 @@ const { keys } = require('./keys');
 
 const EVERY = { an: 20e3, anIdle: 5 * 60e3, an1: 2 * 60e3, pin: 2 * 60e3, espn: 60e3, vsin: 2 * 60e3, wx: 30 * 60e3 };
 const PUSH_MIN = 3000;      // at most one odds push per game per 3 s
+const configuredLiveAge = Number(process.env.MLB_LIVE_MAX_AGE_MS);
+const LIVE_MAX_AGE_MS = Number.isFinite(configuredLiveAge) && configuredLiveAge > 0 ? Math.max(20000, configuredLiveAge) : 50000;
 const SEEN_PUSH = 2 * 60e3; // re-push a game whose prices held but whose `seen` moved on, this often
 
 let ctx = null;             // { today: () => Day|null, emit(type, data) }
@@ -26,6 +28,10 @@ const status = { an: {}, an1: {}, pin: {}, espn: {}, vsin: {}, wx: {} };
 const pending = new Map();  // pk -> { price: bool }
 const sentAt = new Map();   // pk -> ms
 let anOnce = false;
+// Explicit in-play observations are ephemeral and never written into pregame history or close.
+const liveQuotes = new Map(); // pk -> { books, receivedAt }
+const knownLivePks = new Set(); // retain an empty public projection when a live-only quote disappears
+
 
 // ---------------------------------------------------------------- day model
 function dayGames() {
@@ -42,6 +48,8 @@ function current() {
     past.delete(d.date);
     pending.clear();
     sentAt.clear();
+    liveQuotes.clear();
+    knownLivePks.clear();
     log('odds: day', d.date, `${Object.keys(cur.games).length} games from history`);
   }
   return cur;
@@ -79,6 +87,50 @@ function apply(D, pk, src, lines, seen) {
   }
 }
 
+function liveQuoteView(q, market, receivedAt, now) {
+  const sourceAt = Date.parse(q.source_observed_at), age = Number.isFinite(sourceAt) ? now - sourceAt : null;
+  let freshness = 'FRESH', reason_code = null;
+  if (q.conflicted || (Number.isFinite(sourceAt) && sourceAt > receivedAt)) { freshness = 'CONFLICTED'; reason_code = 'CONFLICTED_QUOTE'; }
+  else if (['suspended', 'removed'].includes(q.market_status)) { freshness = 'SUSPENDED'; reason_code = q.market_status === 'removed' ? 'MARKET_REMOVED' : 'MARKET_SUSPENDED'; }
+  else if (q.market_status !== 'active' || q.is_live !== true) { freshness = 'UNVERIFIED'; reason_code = 'UNVERIFIED_MARKET_STATE'; }
+  else if (age == null) { freshness = 'UNVERIFIED'; reason_code = 'MISSING_SOURCE_TIMESTAMP'; }
+  else if (!Number.isFinite(q.american_odds) || Math.abs(q.american_odds) < 100 || (market !== 'ml' && !Number.isFinite(q.line_value))) { freshness = 'UNVERIFIED'; reason_code = 'INVALID_PRICE'; }
+  else if (age > LIVE_MAX_AGE_MS) { freshness = 'STALE'; reason_code = 'SOURCE_QUOTE_STALE'; }
+  return { ...q, src: 'an', source: 'an', received_at: new Date(receivedAt).toISOString(),
+    freshness, reason_code, age_ms: age, max_age_ms: LIVE_MAX_AGE_MS, actionable: freshness === 'FRESH' };
+}
+function liveBookView(L, receivedAt, now) {
+  const quote_meta = Object.fromEntries(Object.entries(L.quote_meta || {}).map(([market, sides]) => [market,
+    Object.fromEntries(Object.entries(sides).map(([side, q]) => [side, liveQuoteView(q, market, receivedAt, now)]))]));
+  const rows = Object.values(quote_meta).flatMap(Object.values);
+  const rank = { FRESH: 0, STALE: 1, UNVERIFIED: 2, SUSPENDED: 3, CONFLICTED: 4 };
+  const worst = rows.reduce((a, b) => !a || rank[b.freshness] > rank[a.freshness] ? b : a, null);
+  const clocks = rows.map((q) => Date.parse(q.source_observed_at));
+  return { ...L, quote_meta, src: 'an', source: 'an', is_live: true, seen: receivedAt,
+    received_at: new Date(receivedAt).toISOString(), source_observed_at: clocks.length && clocks.every(Number.isFinite) ? new Date(Math.min(...clocks)).toISOString() : null,
+    market_status: worst?.market_status || 'unverified', freshness: worst?.freshness || 'UNVERIFIED',
+    reason_code: worst?.reason_code || null, actionable: !!rows.length && rows.every((q) => q.actionable), max_age_ms: LIVE_MAX_AGE_MS };
+}
+function refreshLive(parsed, games, receivedAt) {
+  const playing = new Set(games.filter((g) => g.state === 'Live').map((g) => Number(g.pk)));
+  const next = new Map();
+  for (const [pk, patch] of parsed) if (playing.has(Number(pk)) && Object.keys(patch.live || {}).length) next.set(Number(pk), { books: patch.live, receivedAt });
+  for (const pk of new Set([...liveQuotes.keys(), ...next.keys()])) {
+    const p = pending.get(pk) || { price: false };
+    pending.set(pk, { ...p, live: true }); // includes explicit removal updates
+  }
+  liveQuotes.clear();
+  for (const [pk, row] of next) { liveQuotes.set(pk, row); knownLivePks.add(pk); }
+}
+function publicOdds(D, pk, now = Date.now()) {
+  const day = ctx?.today(), game = day?.games.get(Number(pk)) || day?.games.get(String(pk));
+  const cached = D?.date === day?.date ? liveQuotes.get(Number(pk)) : null;
+  const base = D?.pub(pk) || (D?.date === day?.date && knownLivePks.has(Number(pk)) ? { pk: Number(pk), books: {}, open: null, close: null, moves: [], spark: { ml: [], t: [] }, at: 0 } : null);
+  if (!base) return null;
+  const live = game?.state === 'Live' && cached ? Object.fromEntries(Object.entries(cached.books).map(([key, L]) => [key, liveBookView(L, cached.receivedAt, now)])) : {};
+  return { ...base, live, live_max_age_ms: LIVE_MAX_AGE_MS };
+}
+
 // ---------------------------------------------------------------- sources
 async function pollAN() {
   const D = current();
@@ -86,13 +138,15 @@ async function pollAN() {
   const games = dayGames();
   if (!games.length) return;
   const j = await AN.fetchAN(D.date);
+  if (ctx?.today()?.date !== D.date) return; // discard a response crossing the baseball-day rollover
   const now = Date.now();
   const parsed = AN.parseAN(j, games);
+  refreshLive(parsed, dayGames(), now);
   const byPk = new Map(games.map((g) => [g.pk, g]));
   for (const [pk, p] of parsed) {
     const g = byPk.get(pk);
     if (!g) continue;
-    if (openFor(D, g, 'an')) apply(D, pk, 'an', p.books, now);
+    if (openFor(D, g, 'an') && Object.keys(p.books || {}).length) apply(D, pk, 'an', p.books, now);
     if (p.splits && D.setSplits(pk, p.splits)) pending.set(pk, pending.get(pk) || { price: false });
     if (p.tt && D.setTT(pk, p.tt)) pending.set(pk, pending.get(pk) || { price: false });
   }
@@ -202,17 +256,19 @@ function flush() {
   for (const [pk, p] of pending) {
     const last = sentAt.get(pk) || 0;
     if (now - last < PUSH_MIN) continue;
-    if (!p.price && now - last < SEEN_PUSH) continue;
+    if (!p.price && !p.live && now - last < SEEN_PUSH) continue;
     pending.delete(pk);
     sentAt.set(pk, now);
-    const O = D.pub(pk);
+    const O = publicOdds(D, pk);
     if (O) ctx.emit('odds', O);
   }
 }
 
+function anInterval(games) { return games.some((g) => g.state === 'Preview' || g.state === 'Live') ? EVERY.an : EVERY.anIdle; }
+
 function start(c) {
   ctx = c;
-  const anEvery = () => (dayGames().some((g) => g.state === 'Preview') ? EVERY.an : EVERY.anIdle);
+  const anEvery = () => anInterval(dayGames());
   loop('an', pollAN, anEvery)();
   setTimeout(loop('espn', pollEspn, EVERY.espn), 3000);
   setTimeout(loop('pin', pollPin, EVERY.pin), 5000);
@@ -231,13 +287,16 @@ function saveNow() { try { cur?.save(true); } catch (e) { log('odds save', e.mes
 function bookList(D) {
   const fed = new Set();
   for (const G of Object.values(D?.games || {})) for (const k of Object.keys(G.books || {})) fed.add(k);
+  if (D?.date === ctx?.today()?.date) for (const row of liveQuotes.values()) for (const key of Object.keys(row.books)) fed.add(key);
   return BOOKS.map(({ key, name, short, nv, sharp, link, ios }) => ({ key, name, short, nv: !!nv, sharp: !!sharp, feed: fed.has(key), site: link || null, ios: ios || null }));
 }
 
 // { games, books, moves } for the snapshot (today, or a past day from history).
 function snapshot(date) {
   const D = date ? dayFor(date) : current();
-  return { games: D ? D.all() : {}, books: bookList(D), moves: D ? D.moves() : [] };
+  const pks = new Set(Object.keys(D?.games || {}));
+  if (D?.date === ctx?.today()?.date) for (const pk of knownLivePks) pks.add(String(pk));
+  return { games: Object.fromEntries([...pks].map((pk) => [pk, publicOdds(D, pk)])), books: bookList(D), moves: D ? D.moves() : [] };
 }
 
 function forDate(date) {
@@ -246,8 +305,8 @@ function forDate(date) {
 
 function game(pk) {
   const D = current();
-  if (D?.has(pk)) return { odds: D.pub(pk), hist: D.full(pk) };
-  for (const P of past.values()) if (P.has(pk)) return { odds: P.pub(pk), hist: P.full(pk) };
+  if (D && (D.has(pk) || knownLivePks.has(Number(pk)))) return { odds: publicOdds(D, pk), hist: D.full(pk) };
+  for (const P of past.values()) if (P.has(pk)) return { odds: publicOdds(P, pk), hist: P.full(pk) };
   return null;
 }
 
@@ -270,7 +329,7 @@ function closeOf(pk, start) {
 }
 
 function healthInfo() {
-  return { status, hosts: health(), games: cur ? Object.keys(cur.games).length : 0, date: cur?.date || null };
+  return { status, hosts: health(), liveGames: liveQuotes.size, liveMaxAgeMs: LIVE_MAX_AGE_MS, games: cur ? Object.keys(cur.games).length : 0, date: cur?.date || null };
 }
 
 module.exports = { start, snapshot, forDate, game, closeOf, healthInfo, saveNow, keys };

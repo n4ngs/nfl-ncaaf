@@ -410,16 +410,17 @@ function returnFromSlip(r) {
 
 function openSlip(opts = {}) {
   let slip;
-  if (opts.parlay) slip = { legs: S.parlay.map((l) => ({ ...l })), stake: S.unit, book: S.parlay.find((l) => l.book)?.book || '', parlay: true };
+  if (opts.parlay) slip = { legs: S.parlay.map((l) => ({ ...l })), stake: null, book: S.parlay.find((l) => l.book)?.book || '', parlay: true };
   else if (opts.gid) {
     const g = gameById(opts.gid);
     const l = legFrom(g, opts.mkt, opts.side, opts.book);
-    slip = { legs: [l], stake: S.unit, book: l.book, odds: l.odds };
-  } else slip = { legs: [], stake: S.unit, book: '', pick: true };
+    slip = { legs: [l], stake: null, book: l.book, odds: l.odds };
+  } else slip = { legs: [], stake: null, book: '', pick: true };
   slip.placed = new Date(serverNow()).toISOString();
   S.sheet = { kind: 'slip', slip, returnTo: sheetOrigin() };
   paintSlip();
   showSheet('slip', true);
+  if (slip.pick) return ensurePickerGames(slip);
 }
 
 // Book icons shipped in public/icons/books; books without one get a clean monogram.
@@ -486,18 +487,21 @@ function paintSlip() {
     <h2 id="dlgTitle">${single ? 'Log this bet' : `${legs.length}-leg parlay`}</h2>
     <p class="lede">${single ? esc(MKT_NAME[legs[0].l.mkt] || '') : 'Every leg has to win. Pushes drop out.'}</p>
     ${legs.map(({ l, g }, i) => `<div class="card slip-pick" style="margin-top:12px"><div><b class="num">${esc(legLabel(g, l))}</b><span>${esc(g.away.abbr)} @ ${esc(g.home.abbr)} · ${esc(isLive(g) ? `live, ${clockLabel(g)}` : `${dayLabel(g.start)} ${timeLabel(g.start)}`)}${rotOf(g, l.side === 'home' ? 'home' : 'away') ? ` · rot ${rotOf(g, l.side === 'home' ? 'home' : 'away')}` : ''}</span></div>${single ? '' : `<span class="num" style="font-weight:600">${esc(fmtOdds(l.odds))}</span><button class="ibtn" type="button" data-rmleg="${i}" aria-label="Remove ${esc(legLabel(g, l))}">✕</button>`}</div>`).join('')}
-    ${single && !sl.parlay ? slipBooksHTML(legs[0].g, legs[0].l, sl.book) : ''}
-    <div class="fgrid">
+
+    <div class="fgrid portfolio-entry-primary">
       ${single && legs[0].l.mkt !== 'ml' ? `<label class="fld">Line<input class="inp" id="slLine" inputmode="text" autocomplete="off" value="${esc(lineVal)}"></label>` : ''}
       <label class="fld">${single ? 'Odds' : 'Ticket odds'}<input class="inp" id="slOdds" inputmode="text" autocomplete="off" value="${esc(Number.isFinite(odds) ? String(odds) : '')}"></label>
-      <label class="fld">Stake ($)<input class="inp" id="slStake" inputmode="decimal" autocomplete="off" value="${esc(Number.isFinite(sl.stake) ? String(sl.stake) : '')}"></label>
-      ${single && !sl.parlay && sl.book !== 'other' ? '' : `<label class="fld">Book<select class="inp" id="slBook">${bookOpts}</select></label>`}
+      <label class="fld">Stake ($)<input class="inp" id="slStake" inputmode="decimal" autocomplete="off" placeholder="${esc(String(S.unit))}" value="${esc(Number.isFinite(sl.stake) ? String(sl.stake) : '')}"></label>
+      <label class="fld">Book on your ticket<select class="inp" id="slBook">${bookOpts}</select></label>
+    </div>
+    <details class="portfolio-entry-more"><summary>Wager time &amp; note <span>Recorded ${esc(timeLabel(sl.placed))}</span></summary><div class="fgrid">
       <label class="fld full">Actual wager time (your timezone)<input class="inp" id="slPlaced" type="datetime-local" step="1" value="${esc(integrityLocalInput(sl.placed))}"><span class="hint">Use the time shown on your ticket. Earlier bets without captured quote evidence remain unverified.</span></label>
       <label class="fld full">Note<input class="inp" id="slNote" style="font-weight:500;font-size:15px" placeholder="Optional: why you like it" value="${esc(sl.note || '')}"></label>
-    </div>
-    <div id="slCalc">${slipCalcHTML()}</div>
+    </div></details>
     <div class="err" id="slErr" role="alert"></div>
-    <div id="slBtns">${slipBtnsHTML()}</div>`;
+    <div id="slBtns">${slipBtnsHTML()}</div>
+    ${single && !sl.parlay ? `<details class="portfolio-entry-more"><summary>Compare available prices</summary><div>${slipBooksHTML(legs[0].g, legs[0].l, sl.book)}</div></details>` : ''}
+    <details class="portfolio-entry-more"><summary>Payout &amp; price analysis</summary><div id="slCalc">${slipCalcHTML()}</div></details>`;
   // Keep the chosen book's tile in view.
   const on = body.querySelector('.bk-tile.on');
   if (on) on.parentElement.scrollLeft = Math.max(0, on.offsetLeft - on.parentElement.offsetLeft - 16);
@@ -582,10 +586,77 @@ function updateSlipCalc() {
   showSlipProblems([]);
 }
 
+// Manual entry can need the next calendar week before the board has visited it.
+// Share one request across picker openings without changing the active board or tab.
+const pickerWeekLoads = new Map();
+function pickerGames(sl = S.sheet?.slip) {
+  // allGames deliberately contains only stream-tracked weeks. Include this picker's
+  // explicitly fetched week without changing tracking or the board's active week.
+  const extra = S.weeks.get(sl?.pickerWeekId)?.games;
+  const games = new Map([...allGames(), ...(extra ? [...extra.values()] : [])].map((g) => [g.id, g]));
+  return [...games.values()].filter((g) => !isFinal(g)).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+}
+function pickerNextWeek() {
+  const calendar = S.cal || [];
+  let index = calendar.findIndex((c) => c.id === S.def);
+  if (index < 0) index = calendar.findIndex((c) => c.id === S.cur);
+  if (index < 0) index = calendar.findIndex((c) => c.id === S.boardWeek);
+  const next = index >= 0 ? calendar[index + 1] : null;
+  return next && Number.isInteger(next.type) && Number.isInteger(next.week) && Number.isInteger(S.season) ? next : null;
+}
+function pickerStatusText(sl, games) {
+  if (sl.pickerState === 'loading') return `No selectable games are loaded. Loading ${sl.pickerWeekLabel || 'the next calendar week'}…`;
+  if (sl.pickerState === 'error') return games.length ? 'Additional games could not be loaded. You can choose a loaded game.' : 'Games could not be loaded. Close this form and try again, or choose a week on the Board.';
+  if (!games.length) return 'No non-final games are available in the loaded weeks. Try again later or choose a different week on the Board.';
+  return '';
+}
+function pickerOptionsHTML(games, query = '') {
+  const q = query.trim().toLowerCase();
+  return `<option value="">${games.length ? 'Choose a game' : 'No games available'}</option>${games.map((g) => {
+    const label = `${dayLabel(g.start)} ${timeLabel(g.start)} · ${g.away.short} @ ${g.home.short}`;
+    return `<option value="${esc(g.id)}"${q && !label.toLowerCase().includes(q) ? ' hidden' : ''}>${esc(label)}</option>`;
+  }).join('')}`;
+}
+function refreshPickerOptions(sl) {
+  if (S.sheet?.kind !== 'slip' || S.sheet.slip !== sl || !sl.pick || sl.legs.length || !dlg()?.open) return;
+  const select = $('#pkGame'), search = $('#pkSearch'), status = $('#pkStatus');
+  // Choosing a game or side owns the form from this point; a late request cannot replace it.
+  if (!select || select.value) return;
+  const games = pickerGames(sl);
+  select.innerHTML = pickerOptionsHTML(games, search?.value || '');
+  select.disabled = !games.length;
+  if (status) { status.textContent = pickerStatusText(sl, games); status.hidden = !status.textContent; }
+}
+async function ensurePickerGames(sl) {
+  if (pickerGames(sl).length) return;
+  const next = pickerNextWeek();
+  if (!next) { sl.pickerState = 'empty'; refreshPickerOptions(sl); return; }
+  sl.pickerWeekId = next.id;
+  sl.pickerWeekLabel = next.label || 'the next calendar week';
+  if (S.weeks.has(next.id)) { sl.pickerState = pickerGames(sl).length ? 'ready' : 'empty'; refreshPickerOptions(sl); return; }
+  sl.pickerState = 'loading';
+  refreshPickerOptions(sl);
+  const season = S.season, key = `${season}:${next.type}:${next.week}`;
+  try {
+    if (!pickerWeekLoads.has(key)) {
+      const pending = api(`/api/week?season=${season}&type=${next.type}&week=${next.week}`).then((j) => {
+        if (S.season !== season || !j.week || j.week.id !== next.id || !Array.isArray(j.week.games)) throw new Error('Week response unavailable');
+        putWeek(j.week, { tracked: j.tracked });
+      }).finally(() => pickerWeekLoads.delete(key));
+      pickerWeekLoads.set(key, pending);
+    }
+    await pickerWeekLoads.get(key);
+    sl.pickerState = pickerGames(sl).length ? 'ready' : 'empty';
+  } catch { sl.pickerState = 'error'; }
+  refreshPickerOptions(sl);
+}
+
 function pickerHTML() {
-  const games = allGames().filter((g) => !isFinal(g)).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
-  return `<h2 id="dlgTitle">Log a bet</h2><p class="lede">Pick the game, then the side. Or tap any price on the board.</p>
-    <div class="fgrid"><label class="fld full">Game<select class="inp" id="pkGame"><option value="">Choose a game</option>${games.map((g) => `<option value="${g.id}">${esc(`${dayLabel(g.start)} ${timeLabel(g.start)} · ${g.away.short} @ ${g.home.short}`)}</option>`).join('')}</select></label></div>
+  const games = pickerGames(), sl = S.sheet?.slip || {};
+  const status = pickerStatusText(sl, games);
+  return `<h2 id="dlgTitle">Log a bet</h2><p class="lede">Choose a game and side, then enter the details from your ticket.</p>
+    <p class="note" id="pkStatus" role="status" aria-live="polite"${status ? '' : ' hidden'}>${esc(status)}</p>
+    <div class="fgrid"><label class="fld full">Find a team<input class="inp" id="pkSearch" type="search" placeholder="Search teams" autocomplete="off"></label><label class="fld full">Game<select class="inp" id="pkGame"${games.length ? '' : ' disabled'}>${pickerOptionsHTML(games)}</select></label></div>
     <div id="pkSides" style="margin-top:16px"></div>`;
 }
 function pickerSides(gid) {
@@ -613,7 +684,9 @@ function readSlip() {
   if (line !== undefined && sl.legs.length === 1) { if (sl.legs[0].line !== line) sl.legs[0].entry_snapshot_id = null; sl.legs[0].line = line; }
   if (odds !== undefined) { if (sl.legs.length === 1) { if (sl.legs[0].odds !== odds) sl.legs[0].entry_snapshot_id = null; sl.legs[0].odds = odds; } sl.odds = odds; }
   if (stake !== undefined) sl.stake = stake;
-  sl.book = $('#slBook')?.value ?? sl.book;
+  const selectedBook = $('#slBook')?.value ?? sl.book;
+  if (selectedBook !== sl.book) sl.legs.forEach((leg) => { leg.entry_snapshot_id = null; });
+  sl.book = selectedBook;
   sl.note = $('#slNote')?.value ?? sl.note;
   if ($('#slPlaced')) { const at = new Date($('#slPlaced').value).getTime(); sl.placed = Number.isFinite(at) ? new Date(at).toISOString() : null; }
 }
@@ -637,7 +710,7 @@ function showSlipProblems(list) {
     el.setAttribute('aria-invalid', 'true');
     el.insertAdjacentHTML('afterend', `<span class="hint err">${esc(msg)}</span>`);
   }
-  if (list.length) $(list[0][0])?.focus();
+  if (list.length) { const el = $(list[0][0]); const detail = el?.closest('details'); if (detail) detail.open = true; el?.focus(); }
 }
 
 async function saveBet() {

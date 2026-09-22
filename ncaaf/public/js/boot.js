@@ -214,3 +214,13 @@ route();
 connect();
 loadMine().then(remergeMine);
 loadKeys().then(() => invalidate());
+
+// Filter the native game picker without discarding the selected game or typed ticket.
+document.addEventListener('input', (event) => {
+  if (event.target.id !== 'pkSearch') return;
+  const q = event.target.value.trim().toLowerCase();
+  document.querySelectorAll('#pkGame option').forEach((option) => { option.hidden = !!option.value && !option.textContent.toLowerCase().includes(q); });
+  const picker = document.querySelector('#pkGame');
+  const matches = [...(picker?.options || [])].filter((option) => option.value && !option.hidden);
+  if (q && matches.length === 1 && picker.value !== matches[0].value) { picker.value = matches[0].value; picker.dispatchEvent(new Event('change', { bubbles: true })); }
+});

@@ -37,6 +37,7 @@ const Tel = require('./lib/telemetry');
 const BetMGM = require('./lib/betmgm');
 const { margins } = require('./lib/margins');
 const { IntegrityStore, freshness } = require('../shared/clv-integrity');
+const { KeyedPoller } = require('../shared/poll-scheduler');
 const integrity = new IntegrityStore({ dataDir: U.DATA, sport: 'nfl', config: { pregame_max_age_ms: process.env.CLV_PREGAME_MAX_AGE_MS, live_max_age_ms: process.env.CLV_LIVE_MAX_AGE_MS, closing_max_age_ms: process.env.CLV_CLOSING_MAX_AGE_MS, aging_ratio: process.env.CLV_AGING_RATIO } });
 Bets.configureIntegrity(integrity, gameById);
 
@@ -370,6 +371,7 @@ function flush(W) {
 // ---------------------------------------------------------------- ESPN
 async function pollEspn(W) {
   const j = await ESPN.fetchScoreboard(W.k);
+  const knownIds = new Set(W.games.keys());
   const seen = new Set();
   integrity.batch(() => {
   for (const e of j.events || []) {
@@ -387,6 +389,7 @@ async function pollEspn(W) {
   });
   for (const id of W.games.keys()) if (!seen.has(id) && j.events?.length) W.games.delete(id);
   W.at.espn = Date.now();
+  if ([...seen].some((id) => !knownIds.has(id))) replayGlobalQuotes(W);
   // Games that started before this server did still need a closing line.
   for (const g of W.games.values()) if (g.state !== 'pre' && !W.lines.full(g.id)?.close) onKickoff(W, g);
   Bets.refresh(gameById, closeById);
@@ -468,51 +471,65 @@ function recordBooks(W, G, now = Date.now()) {
 // ---------------------------------------------------------------- Vegas windows (VSiN) and Pinnacle
 // Both feeds list games across days, so each poll is matched against every tracked week.
 const VSIN_AT = { t: 0, stamp: null };
+// Retain the latest global payload so a later scoreboard response can acquire its prices without
+// another provider request. Rematching keeps the original receipt and source timestamps.
+const globalQuotes = { vsin: null, pin: null };
 async function pollVsin() {
   const v = await VSIN.fetchVsin();
   if (v.same && VSIN_AT.stamp) return false;
   VSIN_AT.stamp = v.stamp;
   VSIN_AT.t = VSIN.stampTime(v.stamp);
-  const { all, weekOf } = trackedGames();
+  globalQuotes.vsin = { games: v.games, receivedAt: Date.now() };
+  applyVsin(globalQuotes.vsin);
+  return true;
+}
+function applyVsin(cache, selected = tracked()) {
+  const { all, weekOf } = trackedGames(selected);
   integrity.batch(() => {
-  for (const [gid, patch] of VSIN.matchAll(v.games, all)) {
+  for (const [gid, patch] of VSIN.matchAll(structuredClone(cache.games), all)) {
     const W = weekOf.get(gid);
     const G = W.games.get(gid);
-    patch.books = retainBooks(G, patch.books, 'vsin', Date.now(), false, 'full_game');
-    patch.h1 = retainBooks(G, patch.h1, 'vsin', Date.now(), false, 'first_half');
-    for (const [book, reported] of Object.entries(patch.open || {})) retainObservation(G, `reported_open:${book}`, { ...reported, market_status: 'unverified' }, 'vsin_reported_open', Date.now(), false);
+    patch.books = retainBooks(G, patch.books, 'vsin', cache.receivedAt, false, 'full_game');
+    patch.h1 = retainBooks(G, patch.h1, 'vsin', cache.receivedAt, false, 'first_half');
+    for (const [book, reported] of Object.entries(patch.open || {})) retainObservation(G, `reported_open:${book}`, { ...reported, market_status: 'unverified' }, 'vsin_reported_open', cache.receivedAt, false);
     W.vs.set(gid, patch);
-    if (G.state === 'pre') recordBooks(W, G);
+    if (G.state === 'pre') recordBooks(W, G, cache.receivedAt);
   }
   });
-  for (const W of tracked()) W.at.vsin = Date.now();
-  return true;
+  for (const W of selected) W.at.vsin = cache.receivedAt;
 }
 
 async function pollPin() {
   const pg = await PIN.fetchPinnacle();
-  const { all, weekOf } = trackedGames();
+  globalQuotes.pin = { games: pg, receivedAt: Date.now() };
+  applyPin(globalQuotes.pin);
+}
+function applyPin(cache, selected = tracked()) {
+  const { all, weekOf } = trackedGames(selected);
   integrity.batch(() => {
-  for (const [gid, patch] of PIN.matchPinnacle(pg, all)) {
+  for (const [gid, patch] of PIN.matchPinnacle(structuredClone(cache.games), all)) {
     const W = weekOf.get(gid);
     const prev = W.pin.get(gid);
     const G = W.games.get(gid);
-    const now = Date.now();
+    const now = cache.receivedAt;
     if (patch.line) patch.line = retainObservation(G, 'pin', patch.line, 'pin', now, false);
     if (patch.h1) patch.h1 = retainObservation(G, 'pin', patch.h1, 'pin', now, false, 'first_half');
     if (patch.liveLine) patch.liveLine = retainObservation(G, 'pin', patch.liveLine, 'pin', now, true);
     // A live child may not refresh the timestamp or provenance of its retained pregame parent.
     W.pin.set(gid, patch.line ? { ...patch, at: patch.line.source_observed_at || null }
       : { ...prev, ...patch, line: prev?.line ?? null, h1: prev?.h1 ?? null, limit: prev?.limit ?? null, at: prev?.at || null });
-    if (G.state === 'pre' && patch.line) recordBooks(W, G);
+    if (G.state === 'pre' && patch.line) recordBooks(W, G, now);
   }
   });
-  for (const W of tracked()) W.at.pin = Date.now();
+  for (const W of selected) W.at.pin = cache.receivedAt;
 }
-
-function trackedGames() {
+function replayGlobalQuotes(W) {
+  if (globalQuotes.vsin) applyVsin(globalQuotes.vsin, [W]);
+  if (globalQuotes.pin) applyPin(globalQuotes.pin, [W]);
+}
+function trackedGames(selected = tracked()) {
   const all = [], weekOf = new Map();
-  for (const W of tracked()) for (const G of W.games.values()) { all.push(G); weekOf.set(G.id, W); }
+  for (const W of selected) for (const G of W.games.values()) { all.push(G); weekOf.set(G.id, W); }
   return { all, weekOf };
 }
 
@@ -618,6 +635,7 @@ function pickDefault() {
 }
 
 // ---------------------------------------------------------------- loops
+const polls = new KeyedPoller({ onError: (key, error) => log(key, error.message) });
 const busy = new Set();
 async function once(key, fn) {
   if (busy.has(key)) return;
@@ -639,34 +657,39 @@ function every(fn, msFor) {
 }
 
 function startLoops() {
-  every(async () => {
-    await Promise.all(tracked().map((W) => once(`espn ${W.id}`, async () => {
+  // Dispatch independently: a timeout in another week must not hold the live week's next poll.
+  // Each key owns its in-flight promise, completion cadence and failure backoff.
+  every(() => {
+    for (const W of tracked()) {
       const ms = liveish(W) ? LIVE_MS : today(W) ? 45000 : 5 * 60e3;
-      if (Date.now() - W.at.espn < ms - 500) return;
-      await pollEspn(W);
-      flush(W);
-    })));
-    pickDefault();
+      polls.run(`espn ${W.id}`, async () => {
+        await pollEspn(W);
+        flush(W);
+        pickDefault();
+      }, { intervalMs: ms, lastSuccessAt: W.at.espn || null });
+    }
   }, () => 2000);
 
-  every(async () => {
-    await Promise.all(tracked().map((W) => once(`an ${W.id}`, async () => {
-      if (!W.games.size) return;
+  every(() => {
+    for (const W of tracked()) {
+      if (!W.games.size) continue;
       const ms = hot(W) ? HOT_MS : liveish(W) ? ODDS_MS : today(W) ? 30000 : 3 * 60e3;
-      if (Date.now() - W.at.an < ms - 500) return;
-      await pollAn(W);
-      flush(W);
-    })));
+      polls.run(`an ${W.id}`, async () => {
+        await pollAn(W);
+        flush(W);
+      }, { intervalMs: ms, lastSuccessAt: W.at.an || null });
+    }
   }, () => 2000);
 
-  every(async () => {
-    await Promise.all(tracked().map((W) => once(`an1 ${W.id}`, async () => {
-      if (!W.games.size) return;
+  every(() => {
+    for (const W of tracked()) {
+      if (!W.games.size) continue;
       const ms = liveish(W) || today(W) ? 90000 : 5 * 60e3;
-      if (Date.now() - W.at.a1 < ms - 500) return;
-      await pollAn1(W);
-      flush(W);
-    })));
+      polls.run(`an1 ${W.id}`, async () => {
+        await pollAn1(W);
+        flush(W);
+      }, { intervalMs: ms, lastSuccessAt: W.at.a1 || null });
+    }
   }, () => 5000);
 
   every(async () => {
@@ -675,8 +698,17 @@ function startLoops() {
     }
   }, () => 2500);
 
-  if (!OFF.has('vsin')) every(() => once('vsin', async () => { if (await pollVsin()) tracked().forEach(flush); }), () => (tracked().some(hot) ? Math.max(60000, Math.round(VSIN_MS / 2)) : VSIN_MS));
-  if (!OFF.has('pinnacle')) every(() => once('pinnacle', async () => { await pollPin(); tracked().forEach(flush); }), () => PIN_MS);
+  // Wait for scoreboard identities before the first global feed fetch; startup no longer waits
+  // for all weeks. Subsequent requests keep the original source cadence and share retry backoff.
+  if (!OFF.has('vsin')) every(() => {
+    if (!tracked().some((W) => W.games.size)) return;
+    const ms = tracked().some(hot) ? Math.max(60000, Math.round(VSIN_MS / 2)) : VSIN_MS;
+    polls.run('vsin', async () => { if (await pollVsin()) tracked().forEach(flush); }, { intervalMs: ms, retryMinMs: ms });
+  }, () => 2000);
+  if (!OFF.has('pinnacle')) every(() => {
+    if (!tracked().some((W) => W.games.size)) return;
+    polls.run('pinnacle', async () => { await pollPin(); tracked().forEach(flush); }, { intervalMs: PIN_MS, retryMinMs: PIN_MS });
+  }, () => 2000);
 
   every(async () => {
     for (const W of tracked()) await once(`wx ${W.id}`, async () => { if (Date.now() - W.at.wx > 3600e3 && W.games.size) { await pollWx(W); flush(W); } });
@@ -701,8 +733,13 @@ async function loadWeek(k) {
   if (tracked().includes(W) || Date.now() - W.at.espn < 10 * 60e3) return W;
   if (!W.loading) {
     W.loading = (async () => {
-      await pollEspn(W);
-      await Promise.allSettled([pollAn(W), pollAn1(W)]);
+      const score = await polls.run(`espn ${W.id}`, async () => { await pollEspn(W); flush(W); });
+      if (score && !score.ok) throw score.error;
+      if (!W.at.espn) throw new Error('Week data retry pending');
+      await Promise.all([
+        polls.run(`an ${W.id}`, async () => { await pollAn(W); flush(W); }),
+        polls.run(`an1 ${W.id}`, async () => { await pollAn1(W); flush(W); }),
+      ]);
     })().finally(() => { W.loading = null; });
   }
   await W.loading;
@@ -1224,8 +1261,8 @@ const server = http.createServer(async (req, res) => {
         stash = `<script>try{localStorage.setItem('ps.key',${JSON.stringify(t)});sessionStorage.removeItem('ps.heal')}catch(e){}</script>`;
       }
     }
-    // Take the credential back out of the address bar as soon as it has done its job.
-    stash += '<script>try{if(location.search)history.replaceState(null,"",location.pathname)}catch(e){}</script>';
+    // Remove credential/query parameters while preserving only the portfolio mode and current tab.
+    stash += '<script>try{if(location.search){const p=new URLSearchParams(location.search).get("portfolio");history.replaceState(null,"",location.pathname+(p==="new"||p==="mine"?"?portfolio="+p:"")+location.hash)}}catch(e){}</script>';
     let html = indexHTML().replace('<link rel="manifest" href="manifest.webmanifest">', link + stash);
     if (BASE) { html = html.replace('<head>', `<head><base href="${BASE}/">`).replace('<body>', '<body>' + SPORTBAR); }
     return sendBody(res, 200, html, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store', vary: 'cookie' });
@@ -1624,7 +1661,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/lan') return sendJSON(res, 200, { urls: PUBLIC_URL ? [PUBLIC_URL] : lanUrls(), public: !!PUBLIC_URL, port: PORT });
     if (p === '/api/health') {
       return sendJSON(res, 200, {
-        integrity: integrity.health(),
+        integrity: integrity.health(), polling: polls.health(),
         ok: true, season: cal.season, def: defId, cur: curId, clients: clients.size, sources: U.health(), vsin: VSIN_AT,
         weeks: tracked().map((W) => ({ id: W.id, games: W.games.size, matched: W.an.size, at: W.at, live: [...W.games.values()].filter((g) => g.state === 'in').length })),
       });
@@ -1683,14 +1720,12 @@ process.on('SIGTERM', shutdown);
       await U.sleep(Math.min(30000, 2000 * 2 ** i));
     }
   }
-  for (const W of tracked()) {
-    try { await pollEspn(W); } catch (e) { log('espn', e.message); }
-    await Promise.allSettled([pollAn(W), pollAn1(W)]);
-  }
   pickDefault();
   emitSnapshot();
+  // Calendar and week objects are ready. Hydrate every tracked week independently and stream
+  // completed updates immediately, including while another week or source is still fetching.
   startLoops(); // VSiN and Pinnacle load in the first loop pass
   margins(cal.season - 1); // warm the key-number table in the background
   const W = weeks.get(defId);
-  log(`loaded ${W?.label || '?'}: ${W?.games.size || 0} games, ${W?.an.size || 0} with multi-book lines`);
+  log(`polling ${W?.label || '?'}: ${W?.games.size || 0} games, ${W?.an.size || 0} with multi-book lines`);
 })();

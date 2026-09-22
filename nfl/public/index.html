@@ -38,6 +38,7 @@
 <link rel="stylesheet" href="vas.css">
 <link rel="stylesheet" href="security.css">
 <link rel="stylesheet" href="/_board/broadcast.css">
+<link rel="stylesheet" href="/_board/portfolio.css">
 </head>
 <body>
 <div class="wrap" id="app">
@@ -183,6 +184,8 @@ var h=location.hash.slice(1);if(h==='admin'||h==='security')go(h);
 addEventListener('hashchange',function(){var x=location.hash.slice(1);if(x==='admin'||x==='security')go(x)});
 addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('[data-tab="admin"],[data-tab="security"],[href="#security"],[href="#admin"],[data-open-security]');if(!a)return;e.preventDefault();e.stopPropagation();go(a.matches('[data-tab="security"],[href="#security"],[data-open-security]')?'security':'admin')},true)})();
 </script>
+<script src="/_board/portfolio.js"></script>
+<script src="/_board/portfolio-view.js"></script>
 <script src="js/core.js"></script>
 <script src="js/integrity.js"></script>
 <script src="js/live.js"></script>

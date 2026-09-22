@@ -1,0 +1,163 @@
+/* THE.BOARD — unified ticket log. All selectors are scoped to the portfolio so
+   existing boards, bet editors and settlement controls keep their own layouts. */
+.portfolio{width:100%;max-width:1120px;min-width:0;margin:0 auto;padding:12px 0 24px;color:var(--ink);font-size:14px;line-height:1.45}
+.portfolio *, .portfolio *::before, .portfolio *::after{box-sizing:border-box}
+.portfolio .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0}
+.portfolio-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:end;margin-bottom:16px}
+.portfolio-head > div{min-width:0}
+.portfolio-eyebrow{grid-column:1;margin:0 0 4px;color:var(--ink-2);font-size:12px;font-weight:500;letter-spacing:.025em}
+.portfolio-head h1{grid-column:1;margin:0;font-size:30px;font-weight:650;line-height:1.12;letter-spacing:-.035em;overflow-wrap:anywhere}
+.portfolio-head p:not(.portfolio-eyebrow){margin:6px 0 0;color:var(--ink-2);font-size:13px;line-height:1.45}
+.portfolio-actions{grid-column:2;grid-row:1/span 2;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px}
+.portfolio-actions :is(a,button){display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;padding:0 14px;
+  border:1px solid var(--edge);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+.portfolio-actions svg{width:16px;height:16px;flex:none}
+.portfolio-actions .btn{width:auto;margin:0}
+select.portfolio-entry-sport{min-width:0;width:90px;min-height:44px;margin:0;padding:0 10px;border:1px solid var(--edge);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:13px;cursor:pointer}
+@media (max-width:359px){select.portfolio-entry-sport{width:78px}}
+
+/* A compact balance strip leaves the page to the tickets. */
+.portfolio-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;margin:0;padding:12px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.portfolio-stat{min-width:0;padding:0 12px}
+.portfolio-stat:first-child{padding-left:0}
+.portfolio-stat:last-child{padding-right:0}
+.portfolio-stat + .portfolio-stat{border-left:1px solid var(--line)}
+.portfolio-stat :is(label,.portfolio-stat-label){display:block;margin:0;color:var(--ink-2);font-size:11px;font-weight:500;line-height:1.3}
+.portfolio-stat :is(strong,.portfolio-stat-value){display:block;margin-top:4px;color:var(--ink);font-size:22px;font-weight:650;line-height:1.15;letter-spacing:-.03em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.portfolio-stat :is(small,.portfolio-stat-detail){display:block;margin-top:4px;color:var(--ink-2);font-size:11px;line-height:1.35;overflow-wrap:anywhere}
+
+/* Native controls keep keyboard and touch behavior predictable. */
+.portfolio-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 126px;gap:8px;align-items:center;margin:16px 0 12px}
+.portfolio-tabs{grid-column:1/-1;grid-row:1;display:flex;min-width:0;gap:2px;padding:3px;border-radius:13px;background:var(--fill)}
+.portfolio-tabs button{flex:1;min-width:0;min-height:44px;padding:0 9px;border:0;border-radius:10px;background:transparent;color:var(--ink-2);font:inherit;font-size:13px;font-weight:500;white-space:nowrap;cursor:pointer}
+.portfolio-tabs button[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:inset 0 0 0 1px var(--edge)}
+.portfolio-tabs button small{margin-left:4px;font:inherit;color:var(--ink-2)}
+.portfolio-search{grid-column:1;grid-row:2;min-width:0}
+.portfolio-sport{grid-column:2;grid-row:2;min-width:0}
+input.portfolio-search,.portfolio-search input,select.portfolio-sport,.portfolio-sport select{display:block;width:100%;min-width:0;min-height:44px;margin:0;padding:0 12px;border:1px solid var(--edge);border-radius:12px;
+  background:var(--surface);color:var(--ink);font:inherit;font-size:16px;line-height:1.4;box-shadow:none}
+select.portfolio-sport,.portfolio-sport select{padding-right:8px;font-size:13px;cursor:pointer}
+.portfolio-search input::placeholder,input.portfolio-search::placeholder{color:var(--ink-3);opacity:1}
+.portfolio :is(button,a,input,select,summary):focus-visible{outline:2px solid var(--focus,var(--brand-text));outline-offset:3px}
+.portfolio :is(button,input,select):disabled{opacity:.55;cursor:default}
+
+.portfolio-notice,.portfolio-status{margin:12px 0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink-2);font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.portfolio-notice:empty,.portfolio-status:empty{display:none}
+.portfolio-notice :is(a,button),.portfolio-status :is(a,button){min-height:44px;color:var(--ink);font:inherit;font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.portfolio-list{min-width:0}
+.portfolio-group-label{display:block;margin:20px 0 8px;padding:0;color:var(--ink-2);font-size:12px;font-weight:600;line-height:1.4;letter-spacing:.01em}
+.portfolio-group-label:first-child{margin-top:16px}
+
+/* One flat row per ticket, with provenance available in its own disclosure. */
+.portfolio-ticket{min-width:0;margin:0 0 8px;padding:14px;border:1px solid var(--edge);border-radius:14px;background:var(--surface);color:var(--ink);box-shadow:none;overflow-wrap:anywhere}
+.portfolio-ticket > *{min-width:0}
+.portfolio-ticket-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 9px;color:var(--ink-2);font-size:11px;line-height:1.35}
+.portfolio-ticket-top > :first-child{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.portfolio-ticket-top > :last-child{min-width:0;text-align:right;overflow-wrap:anywhere}
+.portfolio-meta{color:var(--ink-2);font-size:11px;line-height:1.4}
+.portfolio-badge{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:3px 7px;border:1px solid var(--line);border-radius:6px;background:var(--fill);color:var(--ink-2);font-size:10px;font-weight:600;line-height:1.2;letter-spacing:.02em}
+.portfolio-badge.is-live{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 25%,var(--line));background:transparent}
+.portfolio-badge.is-win{color:var(--win,var(--ink));background:transparent}
+.portfolio-badge.is-muted{background:transparent}
+.portfolio-pick{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0;font-size:16px;font-weight:600;line-height:1.35;letter-spacing:-.015em}
+.portfolio-pick strong{min-width:0;font-size:inherit;font-weight:650;overflow-wrap:anywhere}
+.portfolio-odds{flex:none;color:var(--ink-2);font-size:14px;font-weight:500;letter-spacing:0;font-variant-numeric:tabular-nums;white-space:nowrap}
+.portfolio-matchup{margin-top:3px;color:var(--ink-2);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.portfolio-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
+.portfolio-values > *{min-width:0}
+.portfolio-values :is(label,small,.portfolio-value-label){display:block;margin:0;color:var(--ink-2);font-size:11px;font-weight:400;line-height:1.35}
+.portfolio-values :is(strong,b,.portfolio-value-amount){display:block;margin-top:3px;color:var(--ink);font-size:17px;font-weight:600;line-height:1.25;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.portfolio-values .is-positive,.portfolio-values .portfolio-result.is-win{color:var(--win,var(--ink))}
+.portfolio-signal{margin-top:10px;padding-left:8px;border-left:2px solid var(--line);color:var(--ink-2);font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.portfolio-signal strong{color:var(--ink-2);font-weight:600}
+.portfolio-signal:empty{display:none}
+
+.portfolio-details{min-width:0;margin-top:10px;border-top:1px solid var(--line)}
+.portfolio-details > summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:8px 0;list-style:none;color:var(--ink-2);font-size:12px;font-weight:500;line-height:1.4;cursor:pointer}
+.portfolio-details > summary::-webkit-details-marker{display:none}
+.portfolio-details > summary::after{content:"";flex:none;width:7px;height:7px;margin-right:3px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg)}
+.portfolio-details[open] > summary::after{transform:rotate(225deg)}
+.portfolio-leg{min-width:0;padding:12px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.portfolio-leg > :is(strong,b){display:block;font-size:14px;font-weight:600}
+.portfolio-leg p{margin:4px 0;color:var(--ink-2)}
+.portfolio-leg small{color:var(--ink-2);line-height:1.5}
+.portfolio .integrity-leg{margin:6px 0 0;font-size:12px;line-height:1.5}
+.portfolio .integrity-leg summary{min-height:44px;padding:10px 0}
+.portfolio .integrity-detail{padding-bottom:8px;overflow-wrap:anywhere}
+.portfolio-manage{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;margin-top:4px;padding:0 2px;color:var(--ink);font-size:12px;font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.portfolio-manage svg{width:14px;height:14px}
+.portfolio-empty{margin:16px 0;padding:28px 20px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink-2);text-align:center;font-size:14px;line-height:1.5}
+.portfolio-empty :is(h2,h3,strong){display:block;margin:0;color:var(--ink);font-size:18px;font-weight:600;letter-spacing:-.02em}
+.portfolio-empty p{max-width:42ch;margin:8px auto 0}
+.portfolio-empty :is(a,button){display:inline-flex;align-items:center;justify-content:center;min-height:44px;margin-top:12px;padding:0 14px;border:1px solid var(--edge);border-radius:10px;color:var(--ink);font:inherit;font-weight:600;text-decoration:none}
+
+@media (min-width:760px){
+  .portfolio{padding-top:20px}
+  .portfolio-head{margin-bottom:20px}
+  .portfolio-head h1{font-size:36px}
+  .portfolio-summary{max-width:660px}
+  .portfolio-stat{padding:0 24px}
+  .portfolio-stat :is(strong,.portfolio-stat-value){font-size:24px}
+  .portfolio-toolbar{grid-template-columns:minmax(280px,1fr) 140px minmax(220px,1fr);gap:12px}
+  .portfolio-tabs{grid-column:1;grid-row:1}
+  .portfolio-sport{grid-column:2;grid-row:1}
+  .portfolio-search{grid-column:3;grid-row:1}
+  .portfolio-ticket{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,34%);column-gap:24px;padding:16px 18px}
+  .portfolio-ticket > .portfolio-ticket-top{grid-column:1/-1}
+  .portfolio-ticket > .portfolio-pick{grid-column:1;grid-row:2;justify-content:flex-start}
+  .portfolio-ticket > .portfolio-matchup{grid-column:1;grid-row:3}
+  .portfolio-ticket > .portfolio-values{grid-column:2;grid-row:2/span 2;align-self:center;margin-top:0;padding-left:24px;border-left:1px solid var(--line)}
+  .portfolio-ticket > :is(.portfolio-signal,.portfolio-details,.portfolio-manage){grid-column:1/-1}
+}
+@media (max-width:359px){
+  .portfolio-head{grid-template-columns:minmax(0,1fr)}
+  .portfolio-actions{grid-column:1;grid-row:2;justify-content:flex-start;margin-top:8px}
+  .portfolio-head h1{font-size:28px}
+  .portfolio-actions :is(a,button){padding:0 10px;font-size:12px}
+  .portfolio-stat{padding:0 8px}
+  .portfolio-stat :is(strong,.portfolio-stat-value){font-size:20px}
+  .portfolio-toolbar{grid-template-columns:minmax(0,1fr) 112px}
+  .portfolio-tabs button{padding:0 2px;font-size:11px}
+  .portfolio-ticket{padding:12px}
+  .portfolio-values{gap:8px}
+  .portfolio-values :is(strong,b,.portfolio-value-amount){font-size:16px}
+}
+@media (hover:hover){
+  .portfolio-actions :is(a,button):hover,.portfolio-empty :is(a,button):hover{background:var(--fill)}
+  .portfolio-tabs button:not([aria-pressed="true"]):hover{color:var(--ink)}
+  .portfolio-details > summary:hover{color:var(--ink)}
+}
+@media (prefers-reduced-motion:reduce){
+  .portfolio *,.portfolio *::before,.portfolio *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+
+/* The shared log supplies its own heading; entry fields stay ahead of optional analysis. */
+#view-bets.portfolio-mode > .view-h,#view-following.portfolio-mode > .view-h{display:none}
+.portfolio-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0 12px}
+.portfolio-tools :is(button,a){display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:44px;min-height:44px;padding:0 12px;
+  border:1px solid var(--edge);border-radius:11px;background:var(--surface);color:var(--ink);font:inherit;font-size:13px;font-weight:500;text-decoration:none}
+.portfolio-tools .btn{width:auto;margin:0;box-shadow:none}
+.portfolio-tools .ibtn{width:44px;padding:0}
+.portfolio-tools .portfolio-notice{flex:1 1 100%;margin:0 0 2px;padding:0;border:0;background:transparent;font-size:12px}
+.portfolio-tools .portfolio-manage{margin:0;padding:0 10px;font-size:12px;white-space:nowrap}
+.portfolio-export{flex:none;min-width:0}
+.portfolio-export > summary{display:flex;align-items:center;gap:8px;width:max-content;min-height:44px;padding:0 10px;border:1px solid var(--edge);border-radius:11px;background:var(--surface);color:var(--ink);list-style:none;font-size:12px;line-height:1.4;cursor:pointer}
+.portfolio-export > summary::-webkit-details-marker{display:none}
+.portfolio-export > summary::after{content:"";width:6px;height:6px;margin:0 2px 3px 0;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg)}
+.portfolio-export[open]{flex-basis:100%}
+.portfolio-export[open] > summary::after{transform:rotate(225deg);margin-top:4px}
+.portfolio-export > a.portfolio-manage{margin:8px 6px 0 0;min-height:44px}
+
+.portfolio-tools :is(button,a):focus-visible,.portfolio-entry-more > summary:focus-visible{outline:2px solid var(--focus,var(--brand-text));outline-offset:3px}
+.portfolio-entry-primary{min-width:0;margin-top:16px}
+.portfolio-entry-primary .fgrid{gap:12px;margin-top:12px}
+.portfolio-entry-primary .fld{min-width:0}
+.portfolio-entry-primary .inp{min-width:0;min-height:48px}
+.portfolio-entry-primary .btn{min-height:48px;margin-top:16px}
+.portfolio-entry-more{min-width:0;margin-top:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.portfolio-entry-more > summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:12px 14px;list-style:none;color:var(--ink-2);font-size:13px;font-weight:500;line-height:1.4;cursor:pointer}
+.portfolio-entry-more > summary::-webkit-details-marker{display:none}
+.portfolio-entry-more > summary::after{content:"";flex:none;width:7px;height:7px;margin-right:3px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg)}
+.portfolio-entry-more[open] > summary::after{transform:rotate(225deg)}
+.portfolio-entry-more > :is(div,section,.portfolio-entry-content){min-width:0;padding:0 14px 14px;overflow-wrap:anywhere}
+.portfolio-entry-more > :is(div,section) > :first-child{margin-top:0}

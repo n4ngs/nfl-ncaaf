@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { retryAfterMs } = require('../../shared/poll-scheduler');
 
 const DATA = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data');
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
@@ -23,12 +24,16 @@ async function getJSON(url, { timeout = 15000, headers = {}, text = false } = {}
   const host = hostOf(url);
   const h = hosts.get(host) || { ok: 0, fail: 0, lastOk: 0, lastErr: null, until: 0 };
   hosts.set(host, h);
-  if (h.until > Date.now()) throw new Error(`${host} paused after errors`);
+  if (h.until > Date.now()) throw Object.assign(new Error(`${host} paused after errors`), { retryAfterMs: h.until - Date.now() });
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeout);
   try {
     const r = await fetch(url, { signal: ctl.signal, headers: { accept: 'application/json', 'user-agent': UA, ...headers } });
-    if (r.status === 429 || r.status >= 500) throw Object.assign(new Error(`HTTP ${r.status} ${host}`), { retry: true });
+    if (r.status === 429 || r.status >= 500) {
+      const delay = retryAfterMs(r.headers.get('retry-after'));
+      if (delay) h.until = Math.max(h.until, Date.now() + delay);
+      throw Object.assign(new Error(`HTTP ${r.status} ${host}`), { retry: true, retryAfterMs: delay });
+    }
     if (!r.ok) throw new Error(`HTTP ${r.status} ${url.split('?')[0]}`);
     const body = text ? await r.text() : await r.json();
     h.ok++; h.fail = 0; h.lastOk = Date.now(); h.lastErr = null;
@@ -37,7 +42,7 @@ async function getJSON(url, { timeout = 15000, headers = {}, text = false } = {}
     h.fail++;
     h.lastErr = `${new Date().toISOString()} ${e.name === 'AbortError' ? 'timeout' : e.message}`;
     // Back off a host that keeps failing: 5 s, 10 s, 20 s … up to 2 min.
-    if (h.fail >= 3) h.until = Date.now() + Math.min(120000, 5000 * 2 ** (h.fail - 3));
+    if (h.fail >= 3) h.until = Math.max(h.until, Date.now() + Math.min(120000, 5000 * 2 ** (h.fail - 3)));
     throw e;
   } finally {
     clearTimeout(timer);
