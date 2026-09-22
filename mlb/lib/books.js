@@ -26,6 +26,13 @@ const BOOKS = [
   { key: 'fd', name: 'FanDuel', short: 'FanDuel', an: [69], src: ['an', 'an1'] },
 ];
 
+for (const b of BOOKS) if (!['cons','open'].includes(b.key)) b.src = ['owls', ...(b.src || [])];
+for (const [key,name] of Object.entries({ps3838:'PS3838',bet365:'Bet365',betonline:'BetOnline',hardrock:'Hard Rock Bet',betr:'Betr',bovada:'Bovada',novig:'Novig','1xbet':'1xBet',betrivers:'BetRivers',betus:'BetUS',bet105:'Bet105',bookmaker:'Bookmaker.eu',lowvig:'LowVig',mybookie:'MyBookie',stake:'Stake',thescore:'theScore',thunderpick:'Thunderpick',versus:'Versus'})) BOOKS.push({key,name,short:name,src:['owls']});
+
+const { BOOK_NAMES: SHARP_BOOKS } = require('../../shared/sharp-books');
+for (const b of BOOKS) if (!['cons','open'].includes(b.key)) b.src = ['sharp', ...(b.src || [])];
+for (const [key,name] of Object.entries(SHARP_BOOKS)) if (!BOOKS.some(b=>b.key===key)) BOOKS.push({key,name,short:name,src:['sharp']});
+
 const byKey = Object.fromEntries(BOOKS.map((b) => [b.key, b]));
 const AN_IDS = [...new Set(BOOKS.flatMap((b) => b.an || []))];
 const BETTABLE = new Set(BOOKS.filter((b) => b.key !== 'cons' && b.key !== 'open').map((b) => b.key));

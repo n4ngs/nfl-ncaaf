@@ -97,7 +97,7 @@ function gameSheet() {
       </div>
       <div>${numbersPanel(g)}</div>
     </div>
-    <div class="gs-sec"><div class="sub-h">Every book <span class="bt-note">Tap a price to log a bet</span><span class="seg bt-seg" role="group" aria-label="Book table market"><button type="button" data-tm="s" aria-pressed="${(S.sheet.tableMkt || 's') === 's'}">Spread</button><button type="button" data-tm="t" aria-pressed="${S.sheet.tableMkt === 't'}">Total</button><button type="button" data-tm="ml" aria-pressed="${S.sheet.tableMkt === 'ml'}">Money</button></span></div>${bookTable(g)}</div>
+    <div class="gs-sec"><div class="sub-h">Every book <span class="bt-note">Tap a price to open its sportsbook</span><span class="seg bt-seg" role="group" aria-label="Book table market"><button type="button" data-tm="s" aria-pressed="${(S.sheet.tableMkt || 's') === 's'}">Spread</button><button type="button" data-tm="t" aria-pressed="${S.sheet.tableMkt === 't'}">Total</button><button type="button" data-tm="ml" aria-pressed="${S.sheet.tableMkt === 'ml'}">Money</button></span></div>${bookTable(g)}</div>
     <div class="gs-grid gs-sec even">
       <div>${splitsPanel(g)}</div>
       <div>${keysPanel(g)}</div>
@@ -250,10 +250,10 @@ function bookTable(g) {
     const old = isOld(L);
     const cls = `px num${isBest ? ' best' : ''}${L?.m ? ' man' : ''}${flash.cls}${k === 'open' ? ' na' : ''}${old ? ' old' : ''}`;
     const inner = `${esc(main)}${m !== 'ml' && p.odds != null ? `<small>${esc(fmtOdds(p.odds))}</small>` : ''}${k !== 'open' ? quoteStatusHTML(L, g, m, side) : ''}`;
-    if (k === 'open' || isFinal(g) || !quoteCanAct(L, g, m, side)) return `<span class="${cls}"${flash.style}>${inner}</span>`;
     const who = side === 'over' ? 'Over' : side === 'under' ? 'Under' : teamName(g[side]);
     const label = [bookFull(k), `${who} ${main}`, m !== 'ml' ? fmtOdds(p.odds) : '', isBest ? 'best price' : '', L?.m ? 'typed in' : '', flash.label, quoteFreshness(L, g, m, side).status].filter(Boolean).join(', ');
-    return `<button type="button" class="${cls}"${flash.style} data-bet="${g.id}|${m}|${side}|${k}" aria-label="${esc(label)}">${inner}</button>`;
+    if (k === 'open' || isFinal(g) || !quoteCanAct(L, g, m, side)) return sportsbookPrice(g,L,m,side,k,label,`<span class="${cls}"${flash.style}>${inner}</span>`);
+    return sportsbookPrice(g,L,m,side,k,label,`<button type="button" class="${cls}"${flash.style} data-bet="${g.id}|${m}|${side}|${k}" aria-label="${esc(label)}">${inner}</button>`);
   };
   const rows = keys.map((k) => {
     const b = S.books.find((x) => x.key === k);
@@ -336,7 +336,7 @@ function halfPanel(g) {
       const who = side === 'over' ? 'First-half over' : side === 'under' ? 'First-half under' : `${teamName(g[side])} first half`;
       const detail = `${esc(main)}<small>${esc(fmtOdds(p.odds))}</small>${quoteStatusHTML(L,g,m,side)}`;
       if (isFinal(g) || !quoteCanAct(L,g,m,side)) return `<span class="px num old">${detail}</span>`;
-      return `<button type="button" class="px num" data-bet="${g.id}|${m}|${side}|${k}" aria-label="${esc(`${bookFull(k)}, ${who} ${main}, ${fmtOdds(p.odds)}`)}">${detail}</button>`;
+      return sportsbookPrice(g,L,m,side,k,`${bookFull(k)}, ${who} ${main}`,`<button type="button" class="px num" data-bet="${g.id}|${m}|${side}|${k}" aria-label="${esc(`${bookFull(k)}, ${who} ${main}, ${fmtOdds(p.odds)}`)}">${detail}</button>`);
     };
     return `<tr><td><div class="bk">${esc(bookName(k))}</div></td><td>${c('h1s', 'away')}</td><td>${c('h1s', 'home')}</td><td>${c('h1t', 'over')}</td><td>${c('h1t', 'under')}</td></tr>`;
   }).join('');

@@ -129,7 +129,8 @@ function oddsLiveQuote(g, O, book, mkt, side) {
   else if (q.actionable !== true || q.freshness !== 'FRESH') freshness = 'UNVERIFIED';
   return { line: mkt === 'ml' ? null : q.line_value ?? null, odds: q.american_odds ?? null, book,
     freshness, actionable: freshness === 'FRESH', seen: Number.isFinite(sourceAt) ? sourceAt : null,
-    source_observed_at: q.source_observed_at, source: q.source || L.source || L.src || null };
+    source_observed_at: q.source_observed_at, source: q.source || L.source || L.src || null, provider_received_at:q.provider_received_at || null,
+    feedOnly:freshness==='UNVERIFIED' && (q.source || q.src)==='sharp' && q.timestamp_kind==='FEED_DELIVERY' && q.market_status==='active' && q.is_live===true && q.reason_code==='MISSING_SOURCE_TIMESTAMP' };
 }
 function oddsLiveBest(g, O, mkt, side) {
   let best = null;
@@ -144,12 +145,12 @@ function oddsLiveCell(g, O, mkt, side, book, best = null, actionable = true) {
   const p = oddsLiveQuote(g, O, book, mkt, side);
   if (!p) return '<span class="odds-px na">—<small>Live unavailable</small></span>';
   const { main, sub } = oddsTwoLine(mkt, side, p);
-  const state = p.actionable ? 'Live' : p.freshness.charAt(0) + p.freshness.slice(1).toLowerCase();
+  const state = p.feedOnly ? 'Feed quote' : p.actionable ? 'Live' : p.freshness.charAt(0) + p.freshness.slice(1).toLowerCase();
   const isBest = p.actionable && best?.book === book;
   const label = `${oddsBookFull(book)}, ${oddsWho(g, mkt, side)} ${oddsSpokenPrice(mkt, side, p)}, live ${state.toLowerCase()}`;
   const inner = `<span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small>${esc(state)}${isBest ? ' · Best' : ''}</small>`;
-  if (!actionable || !p.actionable || ODDS_NOT_BETTABLE.has(book)) return `<span class="odds-px na${p.actionable ? '' : ' old'}" aria-label="${esc(label)}">${inner}</span>`;
-  return `<button type="button" class="odds-px${isBest ? ' best' : ''}" data-odds-bet="${g.pk}|${mkt}|${side}|${book}" aria-label="${esc(label + '. Opens a bet slip.')}" data-fk="live${g.pk}${book}${mkt}${side}">${inner}</button>`;
+  if (!actionable || !p.actionable || ODDS_NOT_BETTABLE.has(book)) return oddsHandoff(g,O?.live?.[book],mkt,side,book,label,`<span class="odds-px na${p.actionable ? '' : ' old'}" aria-label="${esc(label)}">${inner}</span>`);
+  return oddsHandoff(g,O?.live?.[book],mkt,side,book,label,`<button type="button" class="odds-px${isBest ? ' best' : ''}" data-odds-bet="${g.pk}|${mkt}|${side}|${book}" aria-label="${esc(label + '. Opens a bet slip.')}" data-fk="live${g.pk}${book}${mkt}${side}">${inner}</button>`);
 }
 // Better for the bettor: the better number first, then the better price.
 function oddsBetter(mkt, side, a, b) {
@@ -173,6 +174,7 @@ function oddsQuote(L, mkt, side) {
   else if (q.freshness !== 'FRESH' || q.actionable !== true) freshness = 'UNVERIFIED';
   return { ...p, freshness, actionable: freshness === 'FRESH', seen: Number.isFinite(at) ? at : null,
     source: q?.source || q?.src || L?.market_sources?.[mkt] || L?.src || null,
+    provider_received_at:q?.provider_received_at || null, feedOnly:freshness==='UNVERIFIED' && (q?.source || q?.src)==='sharp' && q?.timestamp_kind==='FEED_DELIVERY' && q?.market_status==='active' && q?.is_live===false && q?.reason_code==='MISSING_SOURCE_TIMESTAMP',
     source_observed_at: q?.source_observed_at || null, reason_code: q?.reason_code || (Number.isFinite(at) ? freshness : 'SOURCE_TIME_UNAVAILABLE') };
 }
 function oddsPairFresh(L, mkt) {
@@ -181,8 +183,9 @@ function oddsPairFresh(L, mkt) {
   return !!(a?.actionable && b?.actionable && a.source && a.source === b.source && a.source_observed_at === b.source_observed_at && (mkt === 'ml' || (mkt === 't' ? a.line === b.line : a.line === -b.line)));
 }
 const oddsStale = (L) => !['ml', 'rl', 't'].some((m) => (m === 't' ? ['over', 'under'] : ['home', 'away']).some((sd) => oddsQuote(L, m, sd)?.actionable));
-const oddsStateLabel = (p) => ({ FRESH: 'Fresh', AGING: 'Aging', STALE: 'Stale', UNVERIFIED: 'Unverified', SUSPENDED: 'Suspended', CONFLICTED: 'Conflict' }[p?.freshness] || 'Unavailable');
+const oddsStateLabel = (p) => p?.feedOnly ? 'Feed quote' : ({ FRESH: 'Fresh', AGING: 'Aging', STALE: 'Stale', UNVERIFIED: 'Unverified', SUSPENDED: 'Suspended', CONFLICTED: 'Conflict' }[p?.freshness] || 'Unavailable');
 function oddsQuoteNote(p) {
+  if(p?.feedOnly) return `Sharp feed quote · delivered ${oddsAgo(oddsStamp(p.provider_received_at))} · sportsbook observation time unavailable`;
   return p ? `${oddsStateLabel(p)} · ${p.source || 'Source unavailable'} · ${p.seen ? 'source ' + oddsAgo(p.seen) : 'source time unavailable'}` : 'No quote supplied';
 }
 // The bettable books with a price, in the display order.
@@ -439,7 +442,7 @@ function oddsCoverage(games, mkt) {
 }
 function oddsOverview(games, mkt) {
   const c = oddsCoverage(games, mkt), unknown = c.UNVERIFIED + c.SUSPENDED + c.CONFLICTED;
-  return `<div class="odds-overview" aria-label="Selected market quote coverage"><span class="odds-health" data-state="FRESH"><b>${c.FRESH}</b> fresh prices</span><span class="odds-health" data-state="AGING"><b>${c.AGING}</b> aging</span><span class="odds-health" data-state="STALE"><b>${c.STALE}</b> stale</span><span class="odds-health"><b>${unknown}</b> unverified / unavailable</span><span class="odds-coverage-books">${c.books} books · ${games.length} games</span></div>`;
+  return `<div class="odds-overview" aria-label="Selected market quote coverage"><span class="odds-health" data-state="FRESH"><b>${c.FRESH}</b> current prices</span><span class="odds-health" data-state="AGING"><b>${c.AGING}</b> aging</span><span class="odds-health" data-state="STALE"><b>${c.STALE}</b> stale</span><span class="odds-health"><b>${unknown}</b> unverified / unavailable</span><span class="odds-coverage-books">${c.books} books · ${games.length} games</span></div>`;
 }
 function oddsRefreshFeedback(refresh) {
   if (!refresh || refresh.in_progress) return '';
@@ -455,16 +458,16 @@ function oddsSourceStatus() {
   const status = ODDS.status.get(S.date);
   if (!status?.sources) return '';
   const open = document.getElementById('oddsSourceStatus')?.open;
-  const names = { an: 'Action', an1: 'Action v1', espn: 'ESPN', pin: 'Pinnacle', vsin: 'VSiN' };
+  const names = { sharp: 'Sharp API', owls: 'Owls Insight', an: 'Action', an1: 'Action v1', espn: 'ESPN', pin: 'Pinnacle', vsin: 'VSiN' };
   const rows = Object.entries(status.sources).map(([key, source]) => {
     const at = oddsStamp(source.source_observed_at), receipt = oddsStamp(source.received_at);
-    const state = { loading: 'Checking', ok: 'Responding', error: 'Unavailable', waiting: 'Waiting', idle: 'Idle' }[source.state] || 'Unavailable';
+    const state = ['sharp','owls'].includes(key) ? (source.streamHealthy ? 'Streaming' : source.enabled ? (source.connection === 'polling' ? 'Polling' : 'Connecting') : 'Not connected') : { loading: 'Checking', ok: 'Responding', error: 'Unavailable', waiting: 'Waiting', idle: 'Idle' }[source.state] || 'Unavailable';
     return `<div class="odds-source-row"><strong>${esc(names[key] || key)}</strong><span>${state}</span><small>Last check: ${Number.isFinite(receipt) ? esc(oddsAgo(receipt)) : 'not recorded'}<br>Newest source quote: ${Number.isFinite(at) ? esc(oddsAgo(at)) : 'time unavailable'}</small></div>`;
   }).join('');
   const missing = status.coverage?.missing?.length;
   return `<details class="odds-source-status" id="oddsSourceStatus"${open ? ' open' : ''}><summary>Feed coverage <span>${Number.isFinite(missing) ? `${missing} incomplete book markets · ` : ''}Source checks ${ICON.chev}</span></summary><div>${rows}</div><p>A responding feed can contain old quotes. Source clocks determine each price’s status; a refresh never resets that clock.</p></details>`;
 }
-function oddsFreshText(games) { const c = oddsCoverage(games, ODDS.mkt); return `${c.FRESH} fresh prices · ${c.STALE} stale · source timestamps required`; }
+function oddsFreshText(games) { const c = oddsCoverage(games, ODDS.mkt); return `${c.FRESH} current prices · ${c.STALE} stale · source timestamps required`; }
 
 function oddsMktSeg(mkt) {
   const one = ([k, label]) => `<button type="button" data-odds-mkt="${k}" aria-pressed="${mkt === k}">${esc(label)}</button>`;
@@ -549,7 +552,7 @@ function oddsBestCell(g, O, mkt, side, pre) {
   const sub = base === 'ml' ? oddsBookCode(best.book) : `${oddsFmt(best.odds)} ${oddsBookCode(best.book)}`;
   const fl = oddsFlash(g.pk, `b|${mkt}|${side}`);
   const label = `${oddsWho(g, base, side)} ${ODDS_MKT_WORD[mkt]}, best price ${oddsSpokenPrice(base, side, best)} at ${oddsBookFull(best.book)}.${fl.label} Opens a bet slip.`;
-  return `<button type="button" class="odds-px best${fl.cls}"${fl.style} data-fk="b${g.pk}${mkt}${side}" data-odds-bet="${g.pk}|${oddsBetMkt(mkt)}|${side}|${best.book}" aria-label="${esc(label)}"><span class="num">${esc(main)}</span><small class="num">${esc(sub)}</small></button>`;
+  return oddsHandoff(g,(g.state==='Live'?O.live:oddsBooksFor(O,mkt))?.[best.book],oddsBetMkt(mkt),side,best.book,label,`<button type="button" class="odds-px best${fl.cls}"${fl.style} data-fk="b${g.pk}${mkt}${side}" data-odds-bet="${g.pk}|${oddsBetMkt(mkt)}|${side}|${best.book}" aria-label="${esc(label)}"><span class="num">${esc(main)}</span><small class="num">${esc(sub)}</small></button>`);
 }
 // One book's own price, for the wide table.
 function oddsBookCell(g, O, mkt, side, book, best, pre) {
@@ -566,12 +569,12 @@ function oddsBookCell(g, O, mkt, side, book, best, pre) {
   const label = `${oddsBookFull(book)}, ${oddsWho(g, base, side)} ${oddsSpokenPrice(base, side, p)}${isBest ? ', best price' : ''}${L.m ? `, typed in ${oddsAgo(L.seen)}` : old ? `, last seen ${oddsAgo(L.seen)}` : ''}.${fl.label}${canAct ? ' Opens a bet slip.' : ''} ${pre ? oddsQuoteNote(q) : 'Recorded pregame price.'}`;
   const cls = `odds-px${isBest ? ' best' : ''}${old ? ' old' : ''}${L.m ? ' mine' : ''}${fl.cls}`;
   const inner = `<span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small class="odds-px-state" data-state="${q?.freshness || 'UNVERIFIED'}">${pre ? oddsStateLabel(q) : 'Recorded'}</small>`;
-  if (!canAct) return `<span class="${cls}"${fl.style} title="${esc(label)}" aria-label="${esc(label)}">${inner}</span>`;
+  if (!canAct) return oddsHandoff(g,L,oddsBetMkt(mkt),side,book,label,`<span class="${cls}"${fl.style} title="${esc(label)}" aria-label="${esc(label)}">${inner}</span>`);
   // BetMGM Nevada is the one book this board links into: a real anchor, so one tap goes straight to a
   // prefilled slip. It carries data-mgmbet rather than data-odds-bet, because the odds click handler
   // calls preventDefault on everything it matches, which would kill the navigation.
-  if (book === 'mgm') return `<a class="${cls}"${fl.style} href="api/betmgm/go?g=${encodeURIComponent(g.pk)}&m=${encodeURIComponent(mkt)}&s=${encodeURIComponent(side)}" target="_blank" rel="noopener" data-fk="k${g.pk}${book}${mkt}${side}" data-mgmbet="${g.pk}|${oddsBetMkt(mkt)}|${side}|${book}" aria-label="${esc(label)}, bet at BetMGM">${inner}</a>`;
-  return `<button type="button" class="${cls}"${fl.style} data-fk="k${g.pk}${book}${mkt}${side}" data-odds-bet="${g.pk}|${oddsBetMkt(mkt)}|${side}|${book}" aria-label="${esc(label)}">${inner}</button>`;
+  if (book === 'mgm') return oddsHandoff(g,L,oddsBetMkt(mkt),side,book,label,`<a class="${cls}"${fl.style} href="api/betmgm/go?g=${encodeURIComponent(g.pk)}&m=${encodeURIComponent(mkt)}&s=${encodeURIComponent(side)}" target="_blank" rel="noopener" data-fk="k${g.pk}${book}${mkt}${side}" data-mgmbet="${g.pk}|${oddsBetMkt(mkt)}|${side}|${book}" aria-label="${esc(label)}, bet at BetMGM">${inner}</a>`);
+  return oddsHandoff(g,L,oddsBetMkt(mkt),side,book,label,`<button type="button" class="${cls}"${fl.style} data-fk="k${g.pk}${book}${mkt}${side}" data-odds-bet="${g.pk}|${oddsBetMkt(mkt)}|${side}|${book}" aria-label="${esc(label)}">${inner}</button>`);
 }
 
 function oddsSpark(O, g) {
@@ -818,7 +821,7 @@ function oddsHistAppend(h, O) {
 }
 function oddsSheetRefresh() {
   if (S.dlgKind !== 'odds' || ODDS.sheetPk == null) return;
-  const wait = 1500 - (Date.now() - ODDS.sheetPaint);
+  const wait = 50 - (Date.now() - ODDS.sheetPaint);
   if (wait > 0) { if (!ODDS.sheetTimer) ODDS.sheetTimer = setTimeout(() => { ODDS.sheetTimer = 0; oddsSheetRefresh(); }, wait); return; }
   oddsSheetPaint();
 }
@@ -939,7 +942,7 @@ function oddsFiveHTML(pk) {
     const label = `${oddsBookFull(k)}, first five innings, ${who} ${oddsSpokenPrice(m, side, p)}${isBest ? ', best price' : ''}. Opens a bet slip.`;
     const q = oddsQuote(f5[k], m, side);
     if (!oddsIsPre(g) || !q?.actionable || ODDS_NOT_BETTABLE.has(k)) return `<span class="odds-px na" title="${esc(oddsQuoteNote(q))}"><span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small>${oddsIsPre(g) ? oddsStateLabel(q) : 'Recorded'}</small></span>`;
-    return `<button type="button" class="odds-px${isBest ? ' best' : ''}" data-odds-bet="${pk}|f5${m}|${side}|${k}" aria-label="${esc(label)}"><span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}</button>`;
+    return oddsHandoff(g,f5[k],'f5'+m,side,k,label,`<button type="button" class="odds-px${isBest ? ' best' : ''}" data-odds-bet="${pk}|f5${m}|${side}|${k}" aria-label="${esc(label)}"><span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}</button>`);
   };
   const rows = keys.map((k) => `<tr><td><div class="odds-bk">${esc(oddsBookName(k))}</div></td><td>${cell(k, 'ml', 'away')}</td><td>${cell(k, 'ml', 'home')}</td><td>${cell(k, 'rl', 'away')}</td><td>${cell(k, 'rl', 'home')}</td><td>${cell(k, 't', 'over')}</td><td>${cell(k, 't', 'under')}</td></tr>`).join('');
   const ttCards = tt ? ['away', 'home'].filter((sd) => tt[sd]?.pts != null).map((sd) => `<div><div class="odds-tt-k">${esc(oddsTeam(g, sd).abbr)} team total</div><div class="odds-tt-v num">${oddsTrim(tt[sd].pts)}</div><div class="odds-tt-x">o ${esc(oddsFmt(tt[sd].over))} · u ${esc(oddsFmt(tt[sd].under))}</div></div>`).join('') : '';
@@ -1106,8 +1109,8 @@ function oddsTableHTML(pk) {
     const fl = oddsFlash(pk, `k|${k}|${mkt}|${side}`);
     const spoken = `${oddsBookFull(k)}, ${who} ${ODDS_MKT_WORD[mkt]} ${oddsSpokenPrice(mkt, side, p)}${isBest ? ', best price' : ''}.${fl.label}`;
     const q = oddsQuote(L, mkt, side), state = k === 'open' || !pre ? 'Recorded' : oddsStateLabel(q);
-    if (!pre || ODDS_NOT_BETTABLE.has(k) || !q?.actionable) return `<span class="odds-tp na${isBest ? ' best' : ''}${fl.cls}"${fl.style} role="img" title="${esc(oddsQuoteNote(q))}" aria-label="${esc(spoken + ' ' + state)}"><span class="num">${esc(txt)}</span><small>${state}</small></span>`;
-    return `<button type="button" class="odds-tp${isBest ? ' best' : ''}${fl.cls}"${fl.style} data-fk="t${k}${mkt}${side}" data-odds-bet="${pk}|${mkt}|${side}|${k}" aria-label="${esc(`${spoken} Opens a bet slip.`)}"><span class="num">${esc(txt)}</span><small>${isBest ? 'Best · fresh' : 'Fresh'}</small></button>`;
+    if (!pre || ODDS_NOT_BETTABLE.has(k) || !q?.actionable) return oddsHandoff(g,L,mkt,side,k,spoken,`<span class="odds-tp na${isBest ? ' best' : ''}${fl.cls}"${fl.style} role="img" title="${esc(oddsQuoteNote(q))}" aria-label="${esc(spoken + ' ' + state)}"><span class="num">${esc(txt)}</span><small>${state}</small></span>`);
+    return oddsHandoff(g,L,mkt,side,k,spoken,`<button type="button" class="odds-tp${isBest ? ' best' : ''}${fl.cls}"${fl.style} data-fk="t${k}${mkt}${side}" data-odds-bet="${pk}|${mkt}|${side}|${k}" aria-label="${esc(`${spoken} Opens a bet slip.`)}"><span class="num">${esc(txt)}</span><small>${isBest ? 'Best · fresh' : 'Fresh'}</small></button>`);
   };
   const rows = keys.map((k) => {
     const L = k === 'open' ? O.open || O.books?.open : O.books[k];
@@ -1368,7 +1371,7 @@ function oddsEdgeOpen() {
 }
 function oddsEdgeRefresh() {
   if (S.dlgKind !== 'edges') return;
-  const wait = 1500 - (Date.now() - ODDS.edgePaint);
+  const wait = 50 - (Date.now() - ODDS.edgePaint);
   if (wait > 0) { if (!ODDS.edgeTimer) ODDS.edgeTimer = setTimeout(() => { ODDS.edgeTimer = 0; oddsEdgeRefresh(); }, wait); return; }
   oddsEdgePaint();
 }
@@ -1482,3 +1485,9 @@ document.addEventListener('change', (ev) => {
 });
 
 document.addEventListener('bbl:odds_status', (ev) => { const d = ev.detail; if (!d?.date) return; ODDS.status.set(d.date, { sources: d.sources, coverage: d.coverage, refresh: d.refresh }); oddsRepaint(); });
+
+function oddsHandoff(g,L,mkt,side,book,label,html) {
+ if(typeof betHandoffCell!=='function'||!S.isToday||!g||L?.m||!(oddsIsPre(g)||oddsIsLive(g)))return html;
+ const base=mkt.replace(/^f5/,'')||'ml',q=L?.quote_meta?.[base]?.[side];if(!q||q.is_live!==oddsIsLive(g))return html;
+ return betHandoffCell(q,book,g.pk,mkt,side,label,html);
+}

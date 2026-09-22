@@ -35,6 +35,7 @@ function engine(initial = feed()) {
     console, setTimeout: () => 0, setInterval: () => 0,
     testContext: { today: () => day, emit: (type, data) => events.push({ type, data: copy(data) }) },
     require(id) {
+      if (id === '../../shared/bet-links') return require('../shared/bet-links');
       if (id === './util') return { ...util, log: () => {} };
       if (id === './lines') return { OddsDay };
       if (id === './books') return books;

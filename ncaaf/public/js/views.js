@@ -486,13 +486,13 @@ function pxCell(g, mkt, side, book, best, opts = {}) {
   const old = isOld(L);
   const label = [bookFull(book), `${who} ${m === 'ml' ? fmtOdds(p.odds) : mkt === 't' ? fmtTot(p.line) : fmtPts(p.line)}`, m === 'ml' ? '' : fmtOdds(p.odds), isBest ? 'best price' : '', L?.m ? 'typed in' : '', flash.label, quoteFreshness(L, g, m, side).status].filter(Boolean).join(', ');
   const cls = `px num${isBest ? ' best' : ''}${L?.m ? ' man' : ''}${flash.cls}${old ? ' old' : ''}`;
-  if (isFinal(g) || !quoteCanAct(L, g, m, side)) return `<span class="${cls}"${flash.style} aria-label="${esc(label)}">${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}${quoteStatusHTML(L, g, m, side)}</span>`;
+  if (isFinal(g) || !quoteCanAct(L, g, m, side)) return sportsbookPrice(g,L,m,side,book,label,`<span class="${cls}"${flash.style} aria-label="${esc(label)}">${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}${quoteStatusHTML(L, g, m, side)}</span>`);
   const inner = `${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}${quoteStatusHTML(L, g, m, side)}${typeof edgeBadge === 'function' && !(typeof limBreak === 'function' && limBreak()) ? edgeBadge(g, m, side, book) : ''}`;
   // BetMGM Nevada: a real link, so one tap goes straight there. A popup blocker can stop
   // window.open, but it can never stop an anchor. boot.js still opens the slip off data-mgmbet
   // (deliberately without preventDefault) so the bet can be logged here at the same time.
-  if (book === 'mgm') return `<a class="${cls}"${flash.style} href="api/betmgm/go?g=${encodeURIComponent(g.id)}&m=${m}&s=${side}" target="_blank" rel="noopener" data-mgmbet="${g.id}|${m}|${side}|${book}" aria-label="${esc(label)}, bet at BetMGM" title="${esc(label)} \u2014 tap to bet at BetMGM">${inner}</a>`;
-  return `<button type="button" class="${cls}"${flash.style} data-bet="${g.id}|${m}|${side}|${book}" aria-label="${esc(label)}" title="${esc(label)}">${inner}</button>`;
+  if (book === 'mgm') return sportsbookPrice(g,L,m,side,book,label,`<a class="${cls}"${flash.style} href="api/betmgm/go?g=${encodeURIComponent(g.id)}&m=${m}&s=${side}" target="_blank" rel="noopener" data-mgmbet="${g.id}|${m}|${side}|${book}" aria-label="${esc(label)}, bet at BetMGM" title="${esc(label)} \u2014 tap to bet at BetMGM">${inner}</a>`);
+  return sportsbookPrice(g,L,m,side,book,label,`<button type="button" class="${cls}"${flash.style} data-bet="${g.id}|${m}|${side}|${book}" aria-label="${esc(label)}" title="${esc(label)}">${inner}</button>`);
 }
 function bestFor(g, mkt, side) {
   const books = mkt === 'h1' ? g.h1 : isLive(g) ? g.live : g.books;

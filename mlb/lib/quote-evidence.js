@@ -1,4 +1,5 @@
 'use strict';
+const {attachLink}=require('../../shared/bet-links');
 // A quote's clock belongs to its provider; a successful HTTP fetch is a different observation.
 const SIDES = { ml: ['home', 'away'], rl: ['home', 'away'], t: ['over', 'under'] };
 const requestedMax = Number(process.env.MLB_PREGAME_MAX_AGE_MS), requestedFresh = Number(process.env.MLB_PREGAME_FRESH_MS);
@@ -99,6 +100,15 @@ function missingLine(L, src, receivedAt) {
     { ...q, missing_from_source: true }]))]));
   return out;
 }
+// Display fallbacks still require a coherent pair; withdrawal is never a preferred source.
+function marketDisplayRank(L, market, live = false) {
+  const rows = SIDES[market].map(side=>L.quote_meta?.[market]?.[side]);
+  if (!rows.every(q=>q && !q.missing_from_source && !q.conflicted && q.is_live===live && Number.isFinite(q.american_odds) && Math.abs(q.american_odds)>=100 && (market==='ml' || Number.isFinite(q.line_value)))) return 90;
+  if (market!=='ml' && rows[0].line_value!==(market==='rl'?-rows[1].line_value:rows[1].line_value)) return 90;
+  if (rows.every(q=>q.market_status==='active')) return 0;
+  if (rows.some(q=>['suspended','removed'].includes(q.market_status))) return 80;
+  return 50;
+}
 function mergeMarkets(candidates, now = Date.now()) {
   const cands = candidates.filter(Boolean).map((L) => decorateLine(L, L.src, L.seen, now));
   if (!cands.length) return null;
@@ -107,11 +117,11 @@ function mergeMarkets(candidates, now = Date.now()) {
     const available = cands.filter((L) => L[market] || L.quote_meta[market]);
     if (!available.length) continue;
     const eligible = available.filter((L) => L[market] && SIDES[market].every((side) => L.quote_meta[market]?.[side]?.actionable));
-    const picked = eligible.sort((a, b) => Math.min(...Object.values(b.quote_meta[market]).map((q) => Date.parse(q.source_observed_at))) - Math.min(...Object.values(a.quote_meta[market]).map((q) => Date.parse(q.source_observed_at))))[0] || available[0];
-    out[market] = picked[market]; out.quote_meta[market] = picked.quote_meta[market] || {};
+    const picked = eligible.sort((a, b) => Math.min(...Object.values(b.quote_meta[market]).map((q) => Date.parse(q.source_observed_at))) - Math.min(...Object.values(a.quote_meta[market]).map((q) => Date.parse(q.source_observed_at))))[0] || available.sort((a,b)=>marketDisplayRank(a,market)-marketDisplayRank(b,market))[0];
+    out[market] = picked[market]; out.quote_meta[market] = Object.fromEntries(Object.entries(picked.quote_meta[market] || {}).map(([side,q])=>[side,attachLink(q,available.map(L=>L.quote_meta[market]?.[side]))]));
     out.market_sources[market] = picked.src; out.seen = Math.max(out.seen, picked.seen || 0);
   }
   const sources = [...new Set(Object.values(out.market_sources))]; out.src = sources.length === 1 ? sources[0] : 'mixed';
   return summarize(out, now);
 }
-module.exports = { SIDES, MAX_AGE_MS, FRESH_FOR_MS, sourceTime, marketState, lineMeta, flipMeta, captureLine, missingLine, decorateLine, mergeMarkets };
+module.exports = { SIDES, MAX_AGE_MS, FRESH_FOR_MS, sourceTime, marketState, lineMeta, flipMeta, captureLine, missingLine, decorateLine, mergeMarkets, marketDisplayRank };

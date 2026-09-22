@@ -3,7 +3,9 @@
    then national apps for reference). To add, rename, reorder or hide a book, edit this list.
    Each viewer can also hide books in the app.
 
-   Where a book's numbers come from (the first source that has a line wins):
+   Eligible source-timed quotes win; each provider stays explicit:
+     sharp   Sharp API streaming feed, delivery clocks distinct from source observations
+     owls    Owls Insight authenticated streaming feed, supplied by the terminal
      an      Action Network live odds feed, by book id: fast, and the only free source of live in-game lines
      an1     Action Network public-betting feed, by book id (Station Casinos)
      vsin    VSiN's Vegas line tracker, by column name: today's games, refreshed every few minutes
@@ -27,7 +29,34 @@ const BOOKS = [
   { key: 'wynn', color: '#B08968', name: 'Wynn', short: 'Wynn', vegas: true, vsin: 'Wynn', ios: 'https://apps.apple.com/us/app/wynn-sports-nevada/id6476514610' },
   { key: 'dk', color: '#53A318', name: 'DraftKings', short: 'DK', an: [68], espn: '100' },
   { key: 'fd', color: '#1493FF', name: 'FanDuel', short: 'FanDuel', an: [69] },
+  { key: 'bet365', color: '#128C69', name: 'bet365', short: 'bet365' },
+  { key: 'betonline', color: '#B52A2E', name: 'BetOnline', short: 'BetOnline' },
+  { key: 'hardrock', color: '#8860A4', name: 'Hard Rock Bet', short: 'Hard Rock' },
+  { key: 'betr', color: '#198BA7', name: 'betr', short: 'betr' },
+  { key: 'bovada', color: '#A4252B', name: 'Bovada', short: 'Bovada' },
+  { key: 'novig', color: '#485D77', name: 'Novig', short: 'Novig' },
+  { key: '1xbet', color: '#357A9B', name: '1xBet', short: '1xBet' },
+  { key: 'ps3838', name: 'PS3838', short: 'PS3838' },
+  { key: 'betrivers', name: 'BetRivers', short: 'BetRivers' },
+  { key: 'betus', name: 'BetUS', short: 'BetUS' },
+  { key: 'bet105', name: 'Bet105', short: 'Bet105' },
+  { key: 'bookmaker', name: 'Bookmaker.eu', short: 'Bookmaker.eu' },
+  { key: 'lowvig', name: 'LowVig', short: 'LowVig' },
+  { key: 'mybookie', name: 'MyBookie', short: 'MyBookie' },
+  { key: 'stake', name: 'Stake', short: 'Stake' },
+  { key: 'thescore', name: 'theScore', short: 'theScore' },
+  { key: 'thunderpick', name: 'Thunderpick', short: 'Thunderpick' },
+  { key: 'versus', name: 'Versus', short: 'Versus' },
 ];
+
+// Catalog coverage is independent of the plan's subscribed book limit. New
+// reference products carry no betting URL; regional identities stay distinct.
+const { BOOK_NAMES: SHARP_BOOK_NAMES } = require('../../shared/sharp-books');
+for (const [key, name] of Object.entries(SHARP_BOOK_NAMES)) {
+  const existing = BOOKS.find(book => book.key === key);
+  if (existing) existing.src = [...new Set([...(existing.src || []), 'sharp'])];
+  else BOOKS.push({ key, name, short: name, src: ['sharp'], catalogOnly: true });
+}
 
 // Not books you can bet at, but columns on the board.
 const CONSENSUS = { key: 'cons', name: 'Market consensus', short: 'Market', an: [15] };

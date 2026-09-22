@@ -42,9 +42,29 @@ function quotePairCanDevig(L, g, mkt) {
 function quoteSnapshotId(L, mkt, side) {
   return quoteEvidence(L, mkt, side)?.snapshot_id || L?.snapshot_ids?.[mkt]?.[side] || null;
 }
+function quoteIsDeliveryOnly(L, g, mkt, side) {
+  const q = quoteEvidence(L, mkt, side);
+  if (!q || L?.m || q.source !== 'sharp' || !q.snapshot_id || q.validation_status !== 'UNVERIFIED'
+      || q.reason_code !== 'MISSING_SOURCE_TIMESTAMP' || q.source_observed_at != null
+      || q.market_status !== 'active' || q.conflict || q.source_conflict || q.timestamp_conflict
+      || typeof q.is_live !== 'boolean' || g && q.is_live !== isLive(g)) return false;
+  const delivered = typeof q.provider_received_at === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/i.test(q.provider_received_at)
+    ? Date.parse(q.provider_received_at) : NaN;
+  if (!Number.isFinite(delivered) || delivered > serverNow() || !Number.isFinite(q.american_odds)
+      || Math.abs(q.american_odds) < 100 || q.market_type !== 'ml' && !Number.isFinite(q.line_value)) return false;
+  if (mkt && side && q !== L) {
+    const price = sideOf(L, mkt, side);
+    if (q.market_type !== mkt || q.selection !== side || !price || price.odds !== q.american_odds
+        || mkt !== 'ml' && price.line !== q.line_value) return false;
+  }
+  return true;
+}
 function quoteStatusHTML(L, g, mkt, side) {
   const f = quoteFreshness(L, g, mkt, side);
-  return `<small class="integrity-fresh" title="Age is measured from source observation time">${esc(f.status)}</small>`;
+  const feedOnly = f.status === 'UNVERIFIED' && quoteIsDeliveryOnly(L, g, mkt, side);
+  const title = feedOnly ? 'Provider delivery time is known; sportsbook observation time is unavailable. Not eligible for verified CLV.' : 'Age is measured from source observation time';
+  if(f.status==='FRESH')return '<small class="quote-status-dot" aria-label="Recent source quote" title="Recently observed by the source. Open source details for the exact time."></small>';
+  return `<small class="integrity-fresh" data-state="${esc(f.status)}" title="${esc(title)}">${esc(feedOnly ? 'Feed quote' : ({AGING:'Aging',STALE:'Stale',SUSPENDED:'Suspended',CONFLICTED:'Conflict',UNVERIFIED:'Unverified'}[f.status] || f.status))}</small>`;
 }
 function canonicalResolution(g, mkt, side) {
   return g?.integrity?.markets?.[`${mkt}:${side}`] || g?.integrity?.markets?.[mkt]?.[side] || null;
@@ -100,7 +120,7 @@ function provenanceBook(key) {
   return known[key] || (key ? bookName(key) : 'Sportsbook unavailable');
 }
 function provenanceSource(key) {
-  return { vsin: 'VSiN', an: 'Action Network', an1: 'Action Network', pin: 'Pinnacle', espn: 'ESPN', manual: 'Manual entry' }[key] || key || 'Source unavailable';
+  return { sharp: 'Sharp API', owls: 'Owls Insight', vsin: 'VSiN', an: 'Action Network', an1: 'Action Network', pin: 'Pinnacle', espn: 'ESPN', manual: 'Manual entry' }[key] || key || 'Source unavailable';
 }
 function provenanceTime(value) {
   const n = typeof value === 'number' ? value : Date.parse(value);
@@ -170,3 +190,9 @@ function recordDisplayedSignal(g, e, model = 'edge-existing-v1') {
 }
 
 function signalEvidenceMessage(status) { return status === 'PENDING' ? 'Recommendation pending: saving immutable entry evidence.' : 'Recommendation unavailable: immutable signal evidence could not be saved.'; }
+
+function sportsbookPrice(g,L,mkt,side,book,label,html) {
+ if(typeof betHandoffCell!=='function'||!g||isFinal(g)||L?.m)return html;
+ const q=quoteEvidence(L,mkt,side);if(!q||q.is_live!==isLive(g))return html;
+ return betHandoffCell({...q,freshness:quoteFreshness(L,g,mkt,side).status},book,g.id,mkt,side,label,html);
+}

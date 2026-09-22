@@ -10,7 +10,7 @@
  * The engines still validate the same cookies themselves (defense in depth) and derive owner vs guest from
  * them, so the whole per-sport model — bet ownership, the Security Center, guest tracking — keeps working.
  *
- * Zero dependencies. Node 18+. SSE is piped, never buffered.
+ * Node 18+. One shared upstream odds socket; SSE is piped, never buffered.
  */
 'use strict';
 const http = require('node:http');
@@ -19,6 +19,11 @@ const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { clientIp, forwardClientIpHeaders } = require('./shared/client-ip');
 const { adminPath, isSameOrigin } = require('./shared/admin-access');
+const { createOwlsFeed } = require('./shared/owls-feed');
+const { relayToChild } = require('./shared/owls-consumer');
+const { createSharpFeed } = require('./shared/sharp-feed');
+const betLinks = require('./shared/bet-links').createLinkResolver();
+const { relayToChild: relaySharpToChild } = require('./shared/sharp-consumer');
 
 const PORT = Number(process.env.PORT) || 4000;
 // Where everything durable lives: bets, names, share links, line history, the Admin Center log. On Railway
@@ -84,6 +89,12 @@ function pick(sportKey, name) {
 function childEnv(key) {
   const s = SPORTS[key], sib = SPORTS[s.sibling];
   const env = { ...process.env };
+  delete env.OWLS_INSIGHT_API_KEY;
+  delete env.OWLSINSIGHT_API_KEY;
+  env.OWLS_FEED_IPC = process.env.OWLS_INSIGHT_API_KEY ? '1' : '0';
+  delete env.SHARP_API_KEY;
+  delete env.SHARPAPI_API_KEY;
+  env.SHARP_FEED_IPC = process.env.SHARP_API_KEY ? '1' : '0';
   env.PORT = String(s.port);
   env.BASE_PATH = s.base;
   env.DATA_DIR = path.join(DATA_DIR, s.dir);
@@ -99,10 +110,26 @@ function childEnv(key) {
   return env;
 }
 const children = {};
+const oddsRelays = {};
+const sharpRelays = {};
+const owlsFeed = createOwlsFeed({
+  apiKey: process.env.OWLS_INSIGHT_API_KEY,
+  onUpdate: (sport, frame) => oddsRelays[sport]?.update(frame),
+  onStatus: status => Object.values(oddsRelays).forEach(relay => relay.status(status)),
+});
+const sharpFeed = createSharpFeed({
+  apiKey: process.env.SHARP_API_KEY,
+  onUpdate: (sport, frame) => sharpRelays[sport]?.update(frame),
+  onStatus: status => Object.values(sharpRelays).forEach(relay => relay.status(status)),
+});
 function launch(key) {
   const s = SPORTS[key];
-  const child = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, s.dir), env: childEnv(key), stdio: 'inherit' });
+  const child = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, s.dir), env: childEnv(key), stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
   children[key] = child;
+  oddsRelays[key]?.close();
+  oddsRelays[key] = relayToChild(child, key, owlsFeed);
+  sharpRelays[key]?.close();
+  sharpRelays[key] = relaySharpToChild(child, key, sharpFeed);
   child.on('exit', (code, sig) => { console.log(`[terminal] ${key} exited (code=${code} sig=${sig}); restarting in 1s`); setTimeout(() => launch(key), 1000); });
   console.log(`[terminal] ${key} -> 127.0.0.1:${s.port} base=${s.base}`);
 }
@@ -175,7 +202,7 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 // Read once at boot; an ETag lets phones revalidate cheaply instead of holding a stale copy.
 const fs = require('node:fs');
 const DESIGN = {};
-for (const f of ['broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js']) {
+for (const f of ['broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js']) {
   const body = fs.readFileSync(path.join(__dirname, 'design', f));
   DESIGN[f] = { body, etag: `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"` };
 }
@@ -194,6 +221,7 @@ function serveDesign(req, res, name, ext) {
    with a one-year immutable cache. The index is rewritten in flight to load just the two bundles. A deploy
    changes the hash, so phones pick up new code on the next open and never hold a stale mix. */
 const zlib = require('node:zlib');
+const { pipeEventStream } = require('./shared/event-stream');
 const BUNDLE = {};
 const CSS_TAG = /<link rel="stylesheet" href="([^"]+)">\n?/g;
 const JS_TAG = /<script src="([^"]+)"(?: defer)?><\/script>\n?/g;
@@ -209,8 +237,8 @@ function buildBundles() {
         raw: body, br: zlib.brotliCompressSync(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }), gz: zlib.gzipSync(body, { level: 9 }) };
     };
     try {
-      const css = pack([...html.matchAll(CSS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)), 'css', '\n');
-      const js = pack([...html.matchAll(JS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)), 'js', '\n;');
+      const css = pack([...html.matchAll(CSS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)).concat('/_board/feeds.css','/_board/handoff.css'), 'css', '\n');
+      const js = pack(['/_board/handoff.js', ...[...html.matchAll(JS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)).concat('/_board/feeds.js')], 'js', '\n;');
       BUNDLE[key] = { css, js };
       console.log(`[terminal] ${key} bundle: ${css.list.size} css -> ${Math.round(css.br.length / 1024)}KB br, ${js.list.size} js -> ${Math.round(js.br.length / 1024)}KB br`);
     } catch (e) { console.log(`[terminal] ${key} bundle skipped: ${e.message}`); }   // falls back to the separate files
@@ -260,9 +288,9 @@ const server = http.createServer((req, res) => {
   if (privateRoute && !GATED) return notFound();
 
   // terminal-owned endpoints -------------------------------------------------
-  if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"ok":true,"app":"nfl.ncaaf"}'); }
+  if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify({ ok: true, app: 'nfl.ncaaf', oddsFeed: owlsFeed.status(), feeds: { sharp: sharpFeed.status(), owls: owlsFeed.status() } })); }
   if (pathname === '/icon.svg' || pathname === '/favicon.ico') { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' }); return res.end(LOGO); }
-  const dm = /^\/_board\/((?:broadcast|portfolio)\.(?:css|js)|portfolio-view\.js|refined\.css)$/.exec(pathname);
+  const dm = /^\/_board\/((?:broadcast|portfolio|feeds)\.(?:css|js)|portfolio-view\.js|refined\.css)$/.exec(pathname);
   if (dm) return serveDesign(req, res, dm[1], dm[1].endsWith('.css') ? 'css' : 'js');
   if (pathname === '/manifest.webmanifest') { res.writeHead(200, { 'content-type': 'application/manifest+json; charset=utf-8' }); return res.end(MANIFEST); }
 
@@ -362,6 +390,7 @@ const server = http.createServer((req, res) => {
   // proxy to the engine (prefix stripped)
   const sp = m[1];
   const enginePath = m[2] || '/';
+  if(enginePath === '/api/bet-links') return betLinks.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(503,{'content-type':'application/json'});res.end('{"error":"Link lookup unavailable"}');});
   const forwardPath = enginePath + qs;
   const headers = { ...forwardClientIpHeaders(req, PEER_SECRET), host: `127.0.0.1:${s.port}` };
   const t0 = Date.now();
@@ -396,6 +425,7 @@ const server = http.createServer((req, res) => {
         });
         return;
       }
+      if (enginePath === '/api/stream' && pipeEventStream(pres,res,req.headers,h,pres.statusCode || 502)) return;
       res.writeHead(pres.statusCode || 502, h);
       pres.pipe(res);
     });
@@ -429,11 +459,13 @@ const ADMIN_PILL = `<a class="xadm" href="${ADMIN_PATH}" aria-label="Admin Cente
 server.requestTimeout = 0;
 server.headersTimeout = 0;
 server.keepAliveTimeout = 76000;
+owlsFeed.start();
+sharpFeed.start();
 server.listen(PORT, () => {
   console.log(`[terminal] data -> ${DATA_DIR}${process.env.RAILWAY_VOLUME_MOUNT_PATH && !DATA_DIR.startsWith(path.resolve(process.env.RAILWAY_VOLUME_MOUNT_PATH)) ? '  (WARNING: not on the volume)' : ''}`);
   console.log(`[terminal] ${BRAND} on :${PORT}  gated=${GATED} guest=${!!GUEST_HASH}${GUEST_LINK ? `  guest-link=/g/${GUEST_LINK}` : ''}`);
 });
 
 let down = false;
-function shutdown() { if (down) return; down = true; Board.close(); for (const k of Object.keys(children)) { const c = children[k]; if (c) { c.removeAllListeners('exit'); try { c.kill('SIGTERM'); } catch {} } } server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); }
+function shutdown() { if (down) return; down = true; owlsFeed.stop(); sharpFeed.stop(); Object.values(sharpRelays).forEach(relay => relay.close()); Object.values(oddsRelays).forEach(relay => relay.close()); Board.close(); for (const k of Object.keys(children)) { const c = children[k]; if (c) { c.removeAllListeners('exit'); try { c.kill('SIGTERM'); } catch {} } } server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); }
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, shutdown);
