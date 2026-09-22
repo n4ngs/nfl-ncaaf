@@ -136,29 +136,44 @@ function page(res, code, { wrong = false } = {}) {
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@600&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0B0B0D;--s:#161618;--ink:#F5F5F7;--i2:#9C9CA4;--i3:#6E6E76;--line:rgba(255,255,255,.09);--fill:rgba(255,255,255,.06);--a:#FF453A}
-@media (prefers-color-scheme:light){:root{--bg:#F4F4F6;--s:#fff;--ink:#0B0B0D;--i2:#62626B;--i3:#8A8A92;--line:rgba(11,11,13,.09);--fill:rgba(11,11,13,.045);--a:#EE3A2E}}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font-family:"Geist",ui-sans-serif,system-ui,sans-serif;padding:24px}
+:root{--bg:#060A13;--s:#0E1524;--ink:#F2F5FB;--i2:#9BA6BD;--i3:#7C88A1;--line:rgba(150,172,222,.14);--fill:rgba(150,172,222,.08);--a:#FF453A;--b:#FFB020}
+@media (prefers-color-scheme:light){:root{--bg:#EDF1F7;--s:#fff;--ink:#0A1224;--i2:#4B5670;--i3:#6B7690;--line:rgba(10,18,36,.1);--fill:rgba(10,18,36,.05);--a:#EE3A2E;--b:#E39A00}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(900px 420px at 15% -10%,rgba(56,104,255,.2),transparent 62%),radial-gradient(700px 380px at 100% -10%,rgba(255,176,32,.1),transparent 60%),var(--bg);color:var(--ink);font-family:"Geist",ui-sans-serif,system-ui,sans-serif;padding:24px}
 .card{width:100%;max-width:360px}.top{display:flex;align-items:center;gap:12px;margin-bottom:26px}.logo{width:44px;height:44px;border-radius:13px;overflow:hidden;flex:none;box-shadow:0 1px 2px rgba(0,0,0,.3)}.logo svg{display:block;width:100%;height:100%}
-.wm{font-family:"Geist Mono",ui-monospace,monospace;font-size:15px;font-weight:600;letter-spacing:.06em}.wm b{color:var(--a);font-weight:600}
+.wm{font-family:"Geist Mono",ui-monospace,monospace;font-size:15px;font-weight:600;letter-spacing:.06em}.wm b{color:var(--b);font-weight:600}
 h1{font-size:24px;letter-spacing:-.03em;margin:0 0 6px}p{color:var(--i2);font-size:15px;margin:0 0 22px;line-height:1.45}
 form{display:flex;flex-direction:column;gap:10px}input{height:52px;border-radius:14px;border:1px solid var(--line);background:var(--s);color:var(--ink);font:inherit;font-size:17px;padding:0 16px}
-input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;border-radius:999px;background:var(--ink);color:var(--bg);font:inherit;font-weight:600;cursor:pointer}
+input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;border-radius:999px;background:var(--b);color:#1B1200;font:inherit;font-weight:600;cursor:pointer}
 .e{color:var(--a);font-size:14px;min-height:18px;margin:2px 0 0}.f{color:var(--i3);font-size:12px;margin-top:18px;text-align:center}
 </style></head>
 <body><div class="card">
 <div class="top"><span class="logo">${LOGO}</span><span class="wm">THE<b>.</b>BOARD</span></div>
 <h1>${OWNER_NAME ? OWNER_NAME + "'s board" : 'Enter your code'}</h1>
-<p>NFL and NCAAF, one board. Enter the code you were given.</p>
+<p>NFL, college football and MLB on one board. Enter the code you were given.</p>
 <form method="post" action="/login" autocomplete="off">
 <input name="code" type="password" inputmode="text" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Access code" autofocus required>
 <button>Open the board</button>
 <div class="e">${wrong ? "That code didn't work. Check it and try again." : ''}</div>
 </form>
-<div class="f">One board · NFL &amp; NCAAF</div>
+<div class="f">One board · NFL · NCAAF · MLB</div>
 </div></body></html>`;
   res.writeHead(code, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
   res.end(html);
+}
+
+// ---- the shared broadcast design layer (design/), loaded by all three boards -------------
+// Read once at boot; an ETag lets phones revalidate cheaply instead of holding a stale copy.
+const fs = require('node:fs');
+const DESIGN = {};
+for (const f of ['broadcast.css', 'broadcast.js']) {
+  const body = fs.readFileSync(path.join(__dirname, 'design', f));
+  DESIGN[f] = { body, etag: `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"` };
+}
+function serveDesign(req, res, name, ext) {
+  const d = DESIGN[name];
+  const h = { 'content-type': ext === 'css' ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', etag: d.etag };
+  if (req.headers['if-none-match'] === d.etag) { res.writeHead(304, h); return res.end(); }
+  res.writeHead(200, h); res.end(d.body);
 }
 
 // ---- rate limit (per ip) --------------------------------------------------
@@ -184,6 +199,8 @@ const server = http.createServer((req, res) => {
   // terminal-owned endpoints -------------------------------------------------
   if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"ok":true,"app":"nfl.ncaaf"}'); }
   if (pathname === '/icon.svg' || pathname === '/favicon.ico') { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' }); return res.end(LOGO); }
+  const dm = /^\/_board\/(broadcast\.(css|js))$/.exec(pathname);
+  if (dm) return serveDesign(req, res, dm[1], dm[2]);
   if (pathname === '/manifest.webmanifest') { res.writeHead(200, { 'content-type': 'application/manifest+json; charset=utf-8' }); return res.end(MANIFEST); }
 
   // One device id for the whole board, minted silently on first sight (no prompt, no sign-out).

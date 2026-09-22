@@ -1,0 +1,144 @@
+/* THE.BOARD — broadcast layer. Loaded last by all three boards (NFL, NCAAF, MLB), so it restyles them as
+   one product without touching their layouts or logic.
+
+   Direction (owner, 2026-09-21): "team-colour broadcast". A deep navy board instead of pure black, every
+   game wearing its two teams' real colours (set per card by broadcast.js as --ta away / --th home), and one
+   brand accent — broadcast amber — for "act here": the active tab, the BetMGM lane, the best price, key
+   numbers. Colour keeps its meaning: red is live / alert, green is only ever a winning ticket of yours. */
+
+/* ── tokens ──────────────────────────────────────────────────────────────── */
+:root{
+  --bg:#EDF1F7; --surface:#FFFFFF; --surface-2:#F7F9FC;
+  --ink:#0A1224; --ink-2:#4B5670; --ink-3:#6B7690;
+  --line:rgba(10,18,36,.09); --fill:rgba(10,18,36,.05); --edge:rgba(10,18,36,.08);
+  --brand:#E39A00; --brand-ink:#1B1200; --brand-text:#9A5B00; --brand-wash:rgba(227,154,0,.12);
+  --glass:rgba(255,255,255,.84);
+  --glow:radial-gradient(1100px 420px at 12% -8%,rgba(40,90,220,.10),transparent 62%),radial-gradient(900px 380px at 100% -10%,rgba(227,154,0,.08),transparent 60%);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#060A13; --surface:#0E1524; --surface-2:#131C2F;
+    --ink:#F2F5FB; --ink-2:#9BA6BD; --ink-3:#7C88A1;
+    --line:rgba(150,172,222,.12); --fill:rgba(150,172,222,.075); --edge:rgba(150,172,222,.13);
+    --brand:#FFB020; --brand-ink:#1B1200; --brand-text:#FFBF45; --brand-wash:rgba(255,176,32,.12);
+    --glass:rgba(9,14,25,.82); --scrim:rgba(2,5,12,.6);
+    --lift:0 1px 2px rgba(0,0,0,.5),0 10px 26px -12px rgba(0,0,0,.7);
+    --sheen:inset 0 1px 0 rgba(190,210,255,.06);
+    --glow:radial-gradient(1200px 480px at 10% -10%,rgba(56,104,255,.20),transparent 62%),radial-gradient(900px 420px at 100% -12%,rgba(255,176,32,.10),transparent 60%);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#060A13; --surface:#0E1524; --surface-2:#131C2F;
+  --ink:#F2F5FB; --ink-2:#9BA6BD; --ink-3:#7C88A1;
+  --line:rgba(150,172,222,.12); --fill:rgba(150,172,222,.075); --edge:rgba(150,172,222,.13);
+  --brand:#FFB020; --brand-ink:#1B1200; --brand-text:#FFBF45; --brand-wash:rgba(255,176,32,.12);
+  --glass:rgba(9,14,25,.82); --scrim:rgba(2,5,12,.6);
+  --lift:0 1px 2px rgba(0,0,0,.5),0 10px 26px -12px rgba(0,0,0,.7);
+  --sheen:inset 0 1px 0 rgba(190,210,255,.06);
+  --glow:radial-gradient(1200px 480px at 10% -10%,rgba(56,104,255,.20),transparent 62%),radial-gradient(900px 420px at 100% -12%,rgba(255,176,32,.10),transparent 60%);
+}
+html,body{background:var(--bg)}
+body{background-image:var(--glow);background-repeat:no-repeat;background-attachment:fixed}
+
+/* ── the sport bar (THE.BOARD) and the board's own header read as one broadcast header ── */
+html #xsport{background:var(--glass);-webkit-backdrop-filter:saturate(1.4) blur(14px);backdrop-filter:saturate(1.4) blur(14px);
+  border-bottom:1px solid var(--line);position:relative;z-index:30}
+html #xsport .xseg{background:var(--fill)}
+html #xsport .xseg a{letter-spacing:.02em}
+html #xsport .xseg a.on{background:var(--brand);color:var(--brand-ink);box-shadow:0 6px 18px -8px color-mix(in srgb,var(--brand) 70%,transparent)}
+html #xsport .wm b{color:var(--brand)}
+/* Inside THE.BOARD the sport bar already carries the brand; the board's own name would be a second logo. */
+body:has(#xsport) .top .brand{display:none}
+body:has(#xsport) .top{min-height:52px}
+@media (max-width:899px){body:has(#xsport) .top{justify-content:flex-end}}
+.nav a{position:relative}
+.nav a.on{background:var(--brand-wash);color:var(--ink)}
+.nav a.on::after{content:"";position:absolute;left:14px;right:14px;bottom:3px;height:2px;border-radius:2px;background:var(--brand)}
+
+/* ── headings: a broadcast lower-third, not a magazine headline ── */
+.head h1,.view-h h1{font-weight:700;letter-spacing:-.035em}
+.head h1::after,.view-h h1::after{content:"";display:block;width:44px;height:4px;border-radius:2px;margin-top:12px;
+  background:linear-gradient(90deg,var(--brand),color-mix(in srgb,var(--brand) 30%,transparent))}
+.sec-h h2{display:flex;align-items:center;gap:10px}
+.sec-h h2::before{content:"";width:4px;height:.9em;border-radius:2px;background:var(--brand);flex:none}
+.sub-h{color:var(--brand-text)}
+.hero-lab b{text-transform:uppercase;letter-spacing:.08em;font-size:12px}
+
+/* ── surfaces ── */
+.card{background:linear-gradient(180deg,var(--surface-2),var(--surface));border:1px solid var(--edge)}
+.dlg,.dlg-in{background:var(--surface)}
+
+/* ── team colour: every tinted game card ── */
+[data-tint]{--ta-w:color-mix(in srgb,var(--ta) 36%,transparent);--th-w:color-mix(in srgb,var(--th) 36%,transparent)}
+/* the featured game and live cards: a split wash in both teams' colours with a two-tone crown */
+.hcard[data-tint],.lc[data-tint],.gcard[data-tint],.ab[data-tint]{position:relative;overflow:hidden;
+  background:
+    linear-gradient(100deg,var(--ta-w) 0%,transparent 38%,transparent 62%,var(--th-w) 100%),
+    linear-gradient(180deg,var(--surface-2),var(--surface))}
+.hcard[data-tint]::before,.lc[data-tint]::before,.gcard[data-tint]::before,.ab[data-tint]::before{content:"";position:absolute;left:0;right:0;top:0;height:4px;
+  background:linear-gradient(90deg,var(--ta) 0 50%,var(--th) 50% 100%);pointer-events:none}
+/* score chips and board rows: a two-tone edge — away on top, home below, like the rows themselves */
+.gm[data-tint],.br[data-tint],.mv[data-tint]{
+  background-image:linear-gradient(var(--ta),var(--ta)),linear-gradient(var(--th),var(--th)),
+    linear-gradient(90deg,color-mix(in srgb,var(--ta) 10%,transparent),transparent 45%);
+  background-size:3px 50%,3px 50%,100% 100%;background-position:left top,left bottom,0 0;background-repeat:no-repeat}
+.gm[data-tint]{background-color:var(--surface)}
+.gm.live[data-tint]{box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent),var(--lift)}
+.li[data-tint]{box-shadow:inset 3px 0 0 var(--th)}
+/* the odds table: one row per team, so each row takes its own team's edge and a faint wash */
+.bt tr.g0[data-tint] td:first-child{box-shadow:inset 3px 0 0 var(--ta);background-image:linear-gradient(90deg,color-mix(in srgb,var(--ta) 16%,transparent),transparent 70%)}
+.bt tr[data-tint]:not(.g0) td:first-child{box-shadow:inset 3px 0 0 var(--th);background-image:linear-gradient(90deg,color-mix(in srgb,var(--th) 16%,transparent),transparent 70%)}
+/* the field: turf tinted by the home side, brighter yard lines, bold end zones (already team-filled) */
+[data-tint] .fieldv .turf{fill:color-mix(in srgb,var(--th) 14%,#0A1220)}
+:root[data-theme="light"] [data-tint] .fieldv .turf{fill:color-mix(in srgb,var(--th) 10%,#F2F5FA)}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) [data-tint] .fieldv .turf{fill:color-mix(in srgb,var(--th) 10%,#F2F5FA)}}
+/* end zones in each team's (lifted) colour: home is drawn at x=0, away at x=110 */
+[data-tint] .fieldv rect.ez{opacity:.92}
+[data-tint] .fieldv rect.ez[x="0"]{fill:var(--th)}
+[data-tint] .fieldv rect.ez:not([x="0"]){fill:var(--ta)}
+[data-tint] .fieldv .yd{stroke:color-mix(in srgb,var(--ink) 22%,transparent)}
+[data-tint] .fieldv .ezl{fill:#fff;font-weight:800;letter-spacing:.08em}
+/* win probability: the bar is literally the two teams */
+[data-tint] .wpb{background:var(--th)}
+[data-tint] .wpb i{background:var(--ta)}
+/* the score bug: each side of the featured scoreboard sits on its own team-colour panel */
+[data-tint] .sb .t{padding:12px 14px;border-radius:16px;border:1px solid color-mix(in srgb,var(--ta) 45%,transparent);
+  background:linear-gradient(90deg,color-mix(in srgb,var(--ta) 46%,transparent),color-mix(in srgb,var(--ta) 8%,transparent))}
+[data-tint] .sb .t.h{border-color:color-mix(in srgb,var(--th) 45%,transparent);
+  background:linear-gradient(270deg,color-mix(in srgb,var(--th) 46%,transparent),color-mix(in srgb,var(--th) 8%,transparent))}
+[data-tint] .sb .t.trail{opacity:.82}
+/* scores get broadcast weight */
+.sb .t .sc,.lc-tr b{font-weight:800;letter-spacing:-.04em}
+.lc-tr .pos:not(.off),.poss-dot{background:var(--brand);box-shadow:0 0 0 3px var(--brand-wash)}
+
+/* ── the price is the action: amber means "act here" ── */
+.px{border-radius:9px;transition:background .15s var(--ease),box-shadow .15s var(--ease)}
+.px:hover{background:var(--brand-wash)}
+.px.best{background:var(--brand);color:var(--brand-ink);box-shadow:0 6px 16px -8px color-mix(in srgb,var(--brand) 80%,transparent)}
+.px.best small{color:var(--brand-ink);opacity:.75}
+.px.best.man::after{background:var(--brand-ink)}
+.bt th[data-bk="mgm"],.bt th[data-bk="betmgm"]{color:var(--brand-text);box-shadow:inset 0 -2px 0 var(--brand)}
+.bt td[data-bk="mgm"],.bt td[data-bk="betmgm"]{background:var(--brand-wash)}
+.tag.sharp{background:var(--brand-wash);color:var(--brand-text);border-color:transparent}
+.tag.hot{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.hist .on i{background:var(--brand)}
+.hist .on span{color:var(--brand-text)}
+.bar2 i:first-child{background:var(--brand)}
+
+/* ── controls ── */
+.btn:not(.ghost){background:var(--brand);color:var(--brand-ink)}
+.seg button[aria-pressed="true"],.pbtn[aria-pressed="true"],.chip[aria-pressed="true"],.lg[aria-pressed="true"]{background:var(--brand);color:var(--brand-ink)}
+.pbtn[aria-pressed="true"] .n{color:var(--brand-ink)}
+.ibtn.on{background:var(--brand-wash);color:var(--brand-text)}
+.inp:focus,.search:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-wash)}
+.badge{background:var(--brand);color:var(--brand-ink)}
+
+/* ── mobile tab bar: glass navy, amber for where you are ── */
+.tabbar{background:var(--glass);-webkit-backdrop-filter:saturate(1.4) blur(16px);backdrop-filter:saturate(1.4) blur(16px);border-top:1px solid var(--line)}
+.tabbar a.on{color:var(--brand-text)}
+.tabbar a.on svg{filter:drop-shadow(0 0 8px color-mix(in srgb,var(--brand) 55%,transparent))}
+
+/* ── MLB: the day strip ── */
+.days .on,.days [aria-current="true"],.days [aria-pressed="true"]{background:var(--brand);color:var(--brand-ink)}
+
+@media (prefers-reduced-motion:reduce){.px{transition:none}}
