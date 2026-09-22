@@ -178,9 +178,9 @@
 </dialog>
 
 <script>
-/* THE.BOARD: the per-sport Admin Center and Security Center are replaced by the board-wide one at /admin.
+/* THE.BOARD: the per-sport Admin Center and Security Center are replaced by the owner-only link injected by the terminal.
    Catch the tabs, the in-page links and any old bookmark, and go there (replace, so Back still works). */
-(function(){function go(h){location.replace('/admin'+(h==='security'?'#security':''))}
+(function(){function go(h){var a=document.querySelector('#xsport a.xadm');location.replace(a?a.getAttribute('href')+(h==='security'?'#security':''):'#board')}
 var h=location.hash.slice(1);if(h==='admin'||h==='security')go(h);
 addEventListener('hashchange',function(){var x=location.hash.slice(1);if(x==='admin'||x==='security')go(x)});
 addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('[data-tab="admin"],[data-tab="security"],[href="#security"],[href="#admin"],[data-open-security]');if(!a)return;e.preventDefault();e.stopPropagation();go(a.matches('[data-tab="security"],[href="#security"],[data-open-security]')?'security':'admin')},true)})();

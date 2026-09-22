@@ -1,20 +1,19 @@
 /*
- * THE.BOARD — the Admin Center page. One self-contained HTML document (inline CSS + JS, Geist from Google
- * Fonts), served owner-only by board.js. Everything it shows comes from /admin/api/*.
+ * THE.BOARD — the Admin Center page. One self-contained HTML document (inline CSS + JS),
+ * served owner-only by board.js. Its API lives beneath the configured private entry path.
  *
  * Built to answer, in this order: who is on right now, who is each device really (the full device string,
  * the IP, where it has connected from), and what exactly have they done — every screen, every tap, every
  * bet, with the second it happened. The owner's own devices are a separate lane ("You"), never in "Guests".
  */
 'use strict';
-module.exports = function page({ brand, logo, ownerName, sports }) {
+module.exports = function page({ brand, logo, ownerName, sports, adminPath }) {
+  if (typeof adminPath !== 'string' || !/^\/[a-z0-9][a-z0-9-]{23,79}$/.test(adminPath)) throw new Error('Invalid private admin path');
   const sportLinks = sports.map(([k, l]) => `<a href="/${k}/">${l}</a>`).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Admin Center · ${brand}</title><link rel="icon" href="/icon.svg" type="image/svg+xml"><meta name="theme-color" content="#0B0B0D">
-<meta name="robots" content="noindex">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<meta name="robots" content="noindex,nofollow,noarchive"><meta name="referrer" content="no-referrer">
 <style>
 :root{--bg:#0B0B0D;--s:#141416;--s2:#1C1C1F;--ink:#F5F5F7;--i2:#A1A1AA;--i3:#6E6E76;--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.14);--fill:rgba(255,255,255,.05);--a:#FF453A;--a-bg:rgba(255,69,58,.12);--w:#30D158;
   --font:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;--mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:dark}
@@ -102,11 +101,11 @@ td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}tr:la
 }
 </style></head><body>
 <header class="top">
-  <a class="brand" href="/admin">${logo}<b>THE<i>.</i>BOARD</b><span>Admin Center</span></a>
+  <a class="brand" href="${adminPath}">${logo}<b>THE<i>.</i>BOARD</b><span>Admin Center</span></a>
   <nav class="views" id="views"><a href="#people" data-view="people">People</a><a href="#security" data-view="security">Security</a></nav>
   <nav class="back" aria-label="Back to a board">${sportLinks}</nav>
   <div class="sp"></div>
-  <div class="dl"><a class="btn" href="/admin/api/export?fmt=csv" title="Every recorded event, every device">⤓ CSV</a><a class="btn" href="/admin/api/export?fmt=json">⤓ JSON</a></div>
+  <div class="dl"><a class="btn" href="${adminPath}/api/export?fmt=csv" title="Every recorded event, every device">⤓ CSV</a><a class="btn" href="${adminPath}/api/export?fmt=json">⤓ JSON</a></div>
 </header>
 <main>
   <section class="connection" aria-label="Your observed connection"><div id="connection">Checking your connection…</div><div class="note">The address this app sees. VPNs, Private Relay and shared networks can change or share it; an address hidden behind them cannot be recovered.</div></section>
@@ -165,7 +164,7 @@ function brLine(d){return [d.browser?(d.browser+' '+d.bVer).trim():'',d.inApp?'i
 function display0(d){if(d.who)return d.who;if(d.role==='owner')return (OWNER?OWNER+"'s ":'Your ')+d.device;return d.device+(d.browser?' · '+d.browser:'')}
 var DUP={};function display(d){var n=display0(d);return DUP[n]>1&&!d.who?n+' #'+d.id.slice(0,4):n}
 function segOf(d){return d.role==='owner'?'owner':d.role==='guest'?'guest':'none'}
-function api(u,o){o=o||{};o.headers=Object.assign({'x-board-admin':'1','content-type':'application/json'},o.headers||{});o.credentials='same-origin';return fetch(u,o).then(function(r){if(r.status===302||r.redirected){location.href='/';throw new Error('signed out')}return r.json()})}
+function api(u,o){o=o||{};o.headers=Object.assign({'x-board-admin':'1','content-type':'application/json'},o.headers||{});o.credentials='same-origin';return fetch(u,o).then(function(r){if(r.status===302||r.redirected||(r.status===404&&u==='${adminPath}/api/board')){location.href='${adminPath}/login';throw new Error('signed out')}return r.json()})}
 
 S.view=location.hash==='#security'?'security':'people';S.sec=null;
 function setView(v){S.view=v;$('#vPeople').hidden=v!=='people';$('#vSec').hidden=v!=='security';document.querySelectorAll('#views a').forEach(function(a){a.classList.toggle('on',a.dataset.view===v)});if(v==='security')loadSec();else loadBoard()}
@@ -184,7 +183,7 @@ function renderSec(){
   $('#blocked').innerHTML=D.blocked.length?'<table><tbody>'+D.blocked.map(function(b){var d=dv[b.id]||{};return '<tr class="click" data-dev="'+b.id+'"><td><b>'+esc(who2(d))+'</b><br><span class="dim">'+esc([d.device,d.browser].filter(Boolean).join(' · '))+'</span></td><td class="dim">since '+esc(exact(b.at))+'</td></tr>'}).join('')+'</tbody></table>':'<div class="empty" style="padding:16px">Nobody is blocked. Open any device and tap Block.</div>';
   $('#ips').innerHTML=D.ips.length?'<table><thead><tr><th>IP</th><th>Devices</th><th>Hits</th><th>Last</th><th></th></tr></thead><tbody>'+D.ips.map(function(x){return '<tr><td class="mono">'+esc(x.ip)+(x.shared?' <span class="tag bad">shared</span>':'')+'</td><td>'+x.devs.map(function(id){var d=dv[id]||{};return '<a href="#" data-dev="'+id+'">'+esc(who2(d))+'</a>'}).join('<br>')+'</td><td>'+x.n+'</td><td class="dim" style="white-space:nowrap">'+ago(x.last)+'</td><td>'+ipLookup(x.ip,x.lookup)+'</td></tr>'}).join('')+'</tbody></table>':'<div class="empty">No addresses yet.</div>';
 }
-function loadSec(){return api('/admin/api/security').then(function(d){S.sec=d;renderSec()}).catch(function(){})}
+function loadSec(){return api('${adminPath}/api/security').then(function(d){S.sec=d;renderSec()}).catch(function(){})}
 var SEGS=[['guest','Guests'],['owner','You'],['none','Signed out'],['all','Everyone']];
 function inSeg(d){return S.seg==='all'||segOf(d)===S.seg}
 
@@ -235,7 +234,7 @@ function row(d){
 // ---------------------------------------------------------------- the drawer
 function openDev(id){S.open=id;S.det=null;S.sess=null;S.f='all';S.exp={};S.armed=false;$('#drawer').classList.add('on');$('#scrim').classList.add('on');$('#dBody').innerHTML='<div class="empty">Loading…</div>';$('#dTitle').textContent='';loadDev()}
 function closeDev(){S.open=null;$('#drawer').classList.remove('on');$('#scrim').classList.remove('on')}
-function loadDev(){var id=S.open;if(!id)return;api('/admin/api/device/'+id).then(function(d){if(S.open!==id)return;if(d.error){$('#dBody').innerHTML='<div class="empty"><b>That device is gone</b>It was cleared.</div>';return}S.det=d;drawDev()}).catch(function(){})}
+function loadDev(){var id=S.open;if(!id)return;api('${adminPath}/api/device/'+id).then(function(d){if(S.open!==id)return;if(d.error){$('#dBody').innerHTML='<div class="empty"><b>That device is gone</b>It was cleared.</div>';return}S.det=d;drawDev()}).catch(function(){})}
 function fx(k,v){return '<div class="fx"><k>'+esc(k)+'</k><v>'+(v===''||v==null?'<span style="color:var(--i3)">—</span>':esc(v))+'</v></div>'}
 var KIND={all:'Everything',taps:'Taps',views:'Screens',money:'Bets',visits:'Visits & sign-ins'};
 function match(e){
@@ -255,7 +254,7 @@ function drawDev(){
   var h='';
   h+='<div class="ctl"><input id="lbl" maxlength="40" placeholder="Name this device (e.g. Hannah\\'s iPhone)" value="'+esc(d.label)+'"><button class="btn pri" data-act="label">Save name</button>'
     +'<div class="seg sm" title="Who this device belongs to">'+[['auto','Auto'],['owner','This is me'],['guest','Guest']].map(function(r){var on=(d.roleSet||'auto')===r[0];return '<button data-role="'+r[0]+'" class="'+(on?'on':'')+'">'+r[1]+'</button>'}).join('')+'</div>'
-    +'<a class="btn" href="/admin/api/export?fmt=csv&dev='+d.id+'">⤓ CSV</a><a class="btn" href="/admin/api/export?fmt=json&dev='+d.id+'">⤓ JSON</a>'
+    +'<a class="btn" href="${adminPath}/api/export?fmt=csv&dev='+d.id+'">⤓ CSV</a><a class="btn" href="${adminPath}/api/export?fmt=json&dev='+d.id+'">⤓ JSON</a>'
     +(d.role!=='owner'?''+'<button class="btn danger" data-act="'+(d.blocked?'unblock':'block')+'">'+(d.blocked?'Unblock':'Block')+'</button>':'')
     +'<button class="btn danger'+(S.armed?' armed':'')+'" data-act="clear">'+(S.armed?'Tap again to clear':'Clear')+'</button></div>'
     +(d.blocked?'<div class="banner">Blocked: this device only ever sees the sign-in screen, on all three sports, whatever code it tries. It is not told why.</div>':'')
@@ -300,18 +299,18 @@ document.addEventListener('click',function(ev){
   if(t.dataset.f){S.f=t.dataset.f;drawDev();return}
   if(t.dataset.sess){var p=t.dataset.sess.split(':').map(Number);S.sess=S.sess&&S.sess[0]===p[0]?null:p;drawDev();return}
   if(t.dataset.ev){if(ev.target.closest('pre'))return;S.exp[t.dataset.ev]=!S.exp[t.dataset.ev];drawDev();return}
-  if(t.dataset.role){api('/admin/api/device/'+S.open,{method:'POST',body:JSON.stringify({role:t.dataset.role})}).then(function(){loadDev();loadBoard()});return}
+  if(t.dataset.role){api('${adminPath}/api/device/'+S.open,{method:'POST',body:JSON.stringify({role:t.dataset.role})}).then(function(){loadDev();loadBoard()});return}
   var a=t.dataset.act;
   if(a==='allsess'){S.sess=null;drawDev();return}
-  if(a==='block'||a==='unblock'||a==='signout'){api('/admin/api/device/'+S.open,{method:'POST',body:JSON.stringify({action:a})}).then(function(r){if(r&&r.error)alert(r.error);loadDev();loadBoard();if(S.view==='security')loadSec()});return}
-  if(a==='label'){api('/admin/api/device/'+S.open,{method:'POST',body:JSON.stringify({label:$('#lbl').value})}).then(function(){loadDev();loadBoard()});return}
+  if(a==='block'||a==='unblock'||a==='signout'){api('${adminPath}/api/device/'+S.open,{method:'POST',body:JSON.stringify({action:a})}).then(function(r){if(r&&r.error)alert(r.error);loadDev();loadBoard();if(S.view==='security')loadSec()});return}
+  if(a==='label'){api('${adminPath}/api/device/'+S.open,{method:'POST',body:JSON.stringify({label:$('#lbl').value})}).then(function(){loadDev();loadBoard()});return}
   if(a==='clear'){if(!S.armed){S.armed=true;drawDev();setTimeout(function(){if(S.armed){S.armed=false;drawDev()}},4000);return}
-    S.armed=false;api('/admin/api/device/'+S.open,{method:'DELETE'}).then(function(){closeDev();loadBoard()});return}
+    S.armed=false;api('${adminPath}/api/device/'+S.open,{method:'DELETE'}).then(function(){closeDev();loadBoard()});return}
 });
 document.addEventListener('change',function(ev){if(ev.target.id==='bg'){S.bg=ev.target.checked;drawDev()}});
 document.addEventListener('keydown',function(ev){if(ev.key==='Escape')closeDev();if(ev.key==='Enter'&&ev.target.id==='lbl'){ev.preventDefault();document.querySelector('[data-act="label"]').click()}});
 
-function loadBoard(){return api('/admin/api/board').then(function(d){S.data=d;render()}).catch(function(){$('#connection').textContent='Connection check unavailable. Retrying automatically…'})}
+function loadBoard(){return api('${adminPath}/api/board').then(function(d){S.data=d;render()}).catch(function(){$('#connection').textContent='Connection check unavailable. Retrying automatically…'})}
 setView(S.view);if(S.view==='security')loadBoard();
 setInterval(function(){if(document.visibilityState!=='visible')return;loadBoard();if(S.view==='security')loadSec();if(S.open&&!document.activeElement.matches('#lbl'))loadDev()},8000);
 document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')loadBoard()});

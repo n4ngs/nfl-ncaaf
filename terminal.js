@@ -18,6 +18,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { clientIp, forwardClientIpHeaders } = require('./shared/client-ip');
+const { adminPath, isSameOrigin } = require('./shared/admin-access');
 
 const PORT = Number(process.env.PORT) || 4000;
 // Where everything durable lives: bets, names, share links, line history, the Admin Center log. On Railway
@@ -41,6 +42,9 @@ const BBL_GUEST = GUEST_CODE ? bblTok('guest:' + GUEST_CODE) : '';
 const GUEST_LINK = GUEST_CODE ? crypto.createHash('sha256').update(`guestlink:${GUEST_CODE}`).digest('hex').slice(0, 24) : '';
 const OWNER_NAME = (process.env.OWNER_NAME || '').trim().slice(0, 24);
 const GATED = !!ADMIN_CODE;
+const ADMIN_PATH = adminPath(process.env.ADMIN_PATH);
+const ADMIN_LOGIN = ADMIN_PATH ? `${ADMIN_PATH}/login` : '';
+const PRIVATE_HEADERS = { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow, noarchive', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'", 'x-content-type-options': 'nosniff' };
 /* Open boards (owner's call, 2026-09-21): guests should never meet a sign-in screen. A browser can't carry a
    sign-in to another browser, so anyone opening the site is quietly signed in as a guest; only Admin needs the
    code. OPEN_BOARDS=0 puts the guest lock back (the guest link/code then required again). */
@@ -66,7 +70,7 @@ const LOGO = // a terminal caret — the wordmark's icon, favicon and PWA icon
   + '<path d="M21 21 L33 32 L21 43" fill="none" stroke="#EE3A2E" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>'
   + '<rect x="34" y="38.5" width="15" height="5" rx="2.5" fill="#F5F5F7"/></svg>';
 // The owner's Admin Center: captures every request at the door, owner and guests kept apart (see board.js).
-const Board = require('./board')({ dataDir: DATA_DIR, sports: SPORTS, ownerName: OWNER_NAME, brand: BRAND, logo: LOGO });
+const Board = require('./board')({ dataDir: DATA_DIR, sports: SPORTS, ownerName: OWNER_NAME, brand: BRAND, logo: LOGO, adminPath: GATED ? ADMIN_PATH : '' });
 const MANIFEST = JSON.stringify({
   name: BRAND, short_name: BRAND, start_url: '/', scope: '/', display: 'standalone',
   background_color: '#0B0B0D', theme_color: '#0B0B0D',
@@ -135,7 +139,7 @@ function addCookies(res, list) {
 }
 
 // ---- login page -----------------------------------------------------------
-function page(res, code, { wrong = false } = {}) {
+function page(res, code, { wrong = false, admin = false } = {}) {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>${BRAND}</title><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#0B0B0D">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -153,16 +157,17 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 </style></head>
 <body><div class="card">
 <div class="top"><span class="logo">${LOGO}</span><span class="wm">THE<b>.</b>BOARD</span></div>
-<h1>${OPEN_BOARDS ? 'Admin sign-in' : OWNER_NAME ? OWNER_NAME + "'s board" : 'Enter your code'}</h1>
-<p>${OPEN_BOARDS ? 'The boards are open to everyone. This is only for the admin code.' : 'NFL, college football and MLB on one board. Enter your code, or paste the link you were sent.'}</p>
-<form method="post" action="/login" autocomplete="off">
+<h1>${admin ? 'Admin sign-in' : OWNER_NAME ? OWNER_NAME + "'s board" : 'Enter your code'}</h1>
+<p>${admin ? 'Use your owner code to open Admin.' : 'NFL, college football and MLB on one board. Enter your code, or paste the link you were sent.'}</p>
+<form method="post" action="${admin ? ADMIN_LOGIN : '/login'}" autocomplete="off">
 <input name="code" type="password" inputmode="text" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Code or link" placeholder="Code or link" autofocus required>
-<button>${OPEN_BOARDS ? 'Sign in' : 'Open the board'}</button>
-<div class="e">${wrong ? (OPEN_BOARDS ? "That code didn't work." : "That didn't work. Try opening the link you were sent in this browser.") : ''}</div>
+<button>${admin ? 'Sign in' : 'Open the board'}</button>
+<div class="e">${wrong ? (admin ? "That code didn't work." : "That didn't work. Try opening the link you were sent in this browser.") : ''}</div>
 </form>
-<div class="f">${OPEN_BOARDS ? '<a href="/" style="color:inherit">Just here for the boards? Go to the board &rsaquo;</a>' : 'One board · NFL · NCAAF · MLB'}</div>
+<div class="f">${admin ? '<a href="/" style="color:inherit">Just here for the boards? Go to the board &rsaquo;</a>' : 'One board · NFL · NCAAF · MLB'}</div>
 </div></body></html>`;
-  res.writeHead(code, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  // Forms need a real Origin for CSRF checks; send only the origin, never the private path.
+  res.writeHead(code, { 'content-type': 'text/html; charset=utf-8', ...PRIVATE_HEADERS, 'referrer-policy': 'strict-origin' });
   res.end(html);
 }
 
@@ -242,10 +247,17 @@ const OPEN = /^\/(nfl|ncaaf|mlb)\/(api\/health|manifest\.webmanifest|sw\.js|favi
 function lastSport(req) { const m = /(?:^|;\s*)sport=(nfl|ncaaf|mlb)/.exec(req.headers.cookie || ''); return m ? m[1] : 'nfl'; }
 
 const server = http.createServer((req, res) => {
-  const u = req.url || '/';
-  const qi = u.indexOf('?');
-  const pathname = qi >= 0 ? u.slice(0, qi) : u;
-  const qs = qi >= 0 ? u.slice(qi) : '';
+  let url;
+  try { url = new URL(req.url || '/', 'http://localhost'); } catch { res.writeHead(400); return res.end('Bad request'); }
+  // Match the same normalized path as the engines (including encoded dot segments).
+  const pathname = url.pathname, qs = url.search;
+  const notFound = () => { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', ...PRIVATE_HEADERS }); res.end('Not found'); };
+  const privateRoute = !!ADMIN_PATH && (pathname === ADMIN_PATH || pathname.startsWith(ADMIN_PATH + '/'));
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) return notFound();
+  if (pathname === '/login' && OPEN_BOARDS) return notFound();
+  if (/^\/(nfl|ncaaf|mlb)\/(login|access)(\/|$)/.test(pathname)) return notFound();
+  if (pathname.startsWith('/mlb/') && url.searchParams.has('code')) return notFound();
+  if (privateRoute && !GATED) return notFound();
 
   // terminal-owned endpoints -------------------------------------------------
   if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"ok":true,"app":"nfl.ncaaf"}'); }
@@ -261,17 +273,21 @@ const server = http.createServer((req, res) => {
   // sign-in screen (a blocked one keeps getting it, whatever code it tries).
   const verdict = Board.gate(who);
   if (verdict) {
+    if (privateRoute) Object.entries(PRIVATE_HEADERS).forEach(([name, value]) => res.setHeader(name, value));
     clearAuth(res, isHttps(req));
-    if (/^\/(nfl|ncaaf|mlb)\/api\//.test(pathname) || pathname.startsWith('/admin/api/')) { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Sign in"}'); }
+    if (/^\/(nfl|ncaaf|mlb)\/api\//.test(pathname) || (privateRoute && pathname.startsWith(ADMIN_PATH + '/api/'))) { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Sign in"}'); }
     if (verdict === 'signout' && pathname !== '/') { res.writeHead(303, { location: '/', 'cache-control': 'no-store' }); return res.end(); }
     return page(res, 200, {});
   }
 
   if (pathname === '/logout') { Board.entrance(who, role(req), 'logout'); clearAuth(res, isHttps(req)); res.writeHead(303, { location: '/' }); return res.end(); }
 
-  if (pathname === '/login' && req.method === 'POST') {
+  const ownerLogin = GATED && !!ADMIN_LOGIN && pathname === ADMIN_LOGIN;
+  if (ownerLogin && req.method === 'GET') return page(res, 200, { admin: true });
+  if ((ownerLogin || (pathname === '/login' && !OPEN_BOARDS)) && req.method === 'POST') {
+    if (!isSameOrigin(req)) { res.writeHead(403, PRIVATE_HEADERS); return res.end('Request origin not allowed'); }
     const ip = clientIp(req);
-    if (locked(ip)) { res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '900' }); return res.end('Too many tries. Wait 15 minutes.'); }
+    if (locked(ip)) { res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '900', ...PRIVATE_HEADERS }); return res.end('Too many tries. Wait 15 minutes.'); }
     let body = ''; req.on('data', (c) => { body += c; if (body.length > 2000) req.destroy(); });
     req.on('end', () => {
       const raw = new URLSearchParams(body).get('code') || '';
@@ -281,14 +297,14 @@ const server = http.createServer((req, res) => {
       const tries = [...new Set([raw, raw.trim(), raw.trim().toLowerCase()])].filter(Boolean);
       const tok = (/(?:\/g\/)?([a-f0-9]{24})\b/i.exec(raw.trim()) || [])[1];
       let kind = null;
-      if (OWNER_HASH && tries.some((c) => safeEq(hashCode(c), OWNER_HASH))) kind = 'owner';
-      else if (GUEST_HASH && tries.some((c) => safeEq(hashCode('guest:' + c), GUEST_HASH))) kind = 'guest';
-      else if (GUEST_LINK && tok && safeEq(tok.toLowerCase(), GUEST_LINK)) kind = 'guest';
-      if (!kind) { bad(ip); Board.entrance(who, null, 'wrong'); return page(res, 401, { wrong: true }); }
+      if (ownerLogin && OWNER_HASH && safeEq(hashCode(raw.trim()), OWNER_HASH)) kind = 'owner';
+      else if (!ownerLogin && GUEST_HASH && tries.some((c) => safeEq(hashCode('guest:' + c), GUEST_HASH))) kind = 'guest';
+      else if (!ownerLogin && GUEST_LINK && tok && safeEq(tok.toLowerCase(), GUEST_LINK)) kind = 'guest';
+      if (!kind) { bad(ip); Board.entrance(who, null, 'wrong'); return page(res, 401, { wrong: true, admin: ownerLogin }); }
       fails.delete(ip);
       Board.entrance(who, kind, kind === 'owner' ? 'code' : 'guest-code');
       setAuth(res, kind, isHttps(req));
-      res.writeHead(303, { location: `/${lastSport(req)}/`, 'cache-control': 'no-store' });
+      res.writeHead(303, { location: kind === 'owner' ? ADMIN_PATH : `/${lastSport(req)}/`, ...PRIVATE_HEADERS });
       res.end();
     });
     return;
@@ -303,7 +319,12 @@ const server = http.createServer((req, res) => {
   }
 
   let r = role(req);
-  if (Board.handle(req, res, pathname, qs, r)) return;
+  const privileged = /^\/(nfl|ncaaf|mlb)\/api\/(security|group|invites)(\/|$)/.test(pathname);
+  // Peers communicate directly over localhost, never through the public ingress.
+  if (/^\/(nfl|ncaaf|mlb)\/api\/security\/peer(\/|$)/.test(pathname)) return notFound();
+  if (privileged && (!GATED || r !== 'owner')) return notFound();
+  if (privileged && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !isSameOrigin(req)) { res.writeHead(403, PRIVATE_HEADERS); return res.end('Request origin not allowed'); }
+  if (Board.handle(req, res, pathname, qs, GATED ? r : null)) return;
 
   // Open boards: a browser with no sign-in becomes a guest on the spot — cookies set on this response and
   // added to this request, so the engine sees a guest now, not after a reload. Admin is never granted here.
@@ -348,7 +369,7 @@ const server = http.createServer((req, res) => {
   // The owner's copy of a board page gets an Admin Center link in the sport bar; ask for it uncompressed so
   // it can be edited in flight. Guests' pages pass through untouched.
   const isPage = req.method === 'GET' && (enginePath === '/' || enginePath === '/index.html');
-  if (isPage) headers['accept-encoding'] = 'identity';
+  if (isPage) { headers['accept-encoding'] = 'identity'; delete headers['if-none-match']; delete headers['if-modified-since']; }
   const send = (body) => {
     const pr = http.request({ host: '127.0.0.1', port: s.port, method: req.method, path: forwardPath, headers }, (pres) => {
       const h = { ...pres.headers };
@@ -362,7 +383,11 @@ const server = http.createServer((req, res) => {
         pres.on('data', (c) => parts.push(c));
         pres.on('end', () => {
           let html = useBundles(sp, Buffer.concat(parts).toString('utf8'));
-          if (r === 'owner') html = html.replace('</nav></div><style>', `</nav>${ADMIN_PILL}</div><style>`);
+          if (GATED && ADMIN_PATH && r === 'owner') html = html.replace('</nav></div><style>', `</nav>${ADMIN_PILL}</div><style>`);
+          h['cache-control'] = 'no-store';
+          h.vary = 'accept-encoding, cookie';
+          h['referrer-policy'] = 'no-referrer';
+          delete h.etag; delete h['last-modified'];
           let buf = Buffer.from(html);
           if (/\bbr\b/.test(String(req.headers['accept-encoding'] || ''))) { buf = zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } }); h['content-encoding'] = 'br'; h.vary = 'accept-encoding, cookie'; }
           h['content-length'] = String(buf.length);
@@ -396,7 +421,7 @@ const server = http.createServer((req, res) => {
 });
 
 // The owner-only way in, placed at the end of the sport bar. Styled from the board's own tokens.
-const ADMIN_PILL = '<a class="xadm" href="/admin" aria-label="Admin Center">Admin</a>'
+const ADMIN_PILL = `<a class="xadm" href="${ADMIN_PATH}" aria-label="Admin Center">Admin</a>`
   + '<style>#xsport .xadm{margin-left:auto;display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line);'
   + 'font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;background:var(--fill)}#xsport .xadm:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}'
   + '#xsport .xadm:hover{border-color:var(--ink-3,var(--line))}@media (max-width:560px){#xsport .xadm{padding:0 10px}}</style>';

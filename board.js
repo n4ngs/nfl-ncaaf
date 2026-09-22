@@ -25,6 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { resolveClientIp } = require('./shared/client-ip');
+const { isSameOrigin } = require('./shared/admin-access');
 
 const RING_MAX = 80000;            // events held in memory for the views; the files keep everything
 const WARM_DAYS = 21;              // how far back a boot re-reads into memory
@@ -36,7 +37,8 @@ const ENGINE_UID_RE = /^[a-f0-9]{32}$/;
 // Files a page pulls in by itself. Recording them would bury the log in noise without saying anything.
 const STATIC_RE = /\.(js|css|png|svg|ico|woff2?|ttf|webmanifest|map|jpe?g|gif|webp|txt|json)$/i;
 
-module.exports = function createBoard({ dataDir, sports, ownerName = '', brand = 'THE.BOARD', logo = '' }) {
+module.exports = function createBoard({ dataDir, sports, ownerName = '', brand = 'THE.BOARD', logo = '', adminPath = '' }) {
+  if (adminPath !== '' && (typeof adminPath !== 'string' || !/^\/[a-z0-9][a-z0-9-]{23,79}$/.test(adminPath))) throw new Error('Invalid private admin path');
   const DIR = path.join(dataDir, 'board');
   fs.mkdirSync(DIR, { recursive: true });
   const DEV_FILE = path.join(DIR, 'devices.json');
@@ -548,7 +550,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   }
 
   // ------------------------------------------------------------------ http
-  const sec = { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'", 'referrer-policy': 'same-origin', 'x-content-type-options': 'nosniff' };
+  const sec = { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'", 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow, noarchive', 'x-content-type-options': 'nosniff' };
   function json(res, code, v) { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', ...sec }); res.end(JSON.stringify(v)); }
   function readBody(req) {
     return new Promise((ok) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 4000) req.destroy(); }); req.on('end', () => { try { ok(JSON.parse(b || '{}')); } catch { ok({}); } }); req.on('error', () => ok({})); });
@@ -556,17 +558,18 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
 
   // Returns true if it answered. `role` is the terminal's door verdict for this request.
   function handle(req, res, pathname, qs, role) {
-    if (pathname !== '/admin' && !pathname.startsWith('/admin/')) return false;
+    if (!adminPath || (pathname !== adminPath && !pathname.startsWith(adminPath + '/'))) return false;
+    const route = pathname.slice(adminPath.length);
     if (role !== 'owner') {
-      if (pathname.startsWith('/admin/api/')) json(res, 404, { error: 'Not found' });
-      else { res.writeHead(302, { location: '/login', 'cache-control': 'no-store' }); res.end(); }
+      if ((route === '' || route === '/') && req.method === 'GET') { res.writeHead(302, { location: adminPath + '/login', ...sec }); res.end(); }
+      else json(res, 404, { error: 'Not found' });
       return true;
     }
     const M = req.method;
-    if ((pathname === '/admin' || pathname === '/admin/') && M === 'GET') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...sec }); res.end(PAGE); return true; }
-    if (pathname === '/admin/api/board' && M === 'GET') { json(res, 200, { ...boardJSON(), connection: resolveClientIp(req) }); return true; }
-    if (pathname === '/admin/api/security' && M === 'GET') { json(res, 200, securityJSON()); return true; }
-    if (pathname === '/admin/api/export' && M === 'GET') {
+    if ((route === '' || route === '/') && M === 'GET') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...sec }); res.end(PAGE); return true; }
+    if (route === '/api/board' && M === 'GET') { json(res, 200, { ...boardJSON(), connection: resolveClientIp(req) }); return true; }
+    if (route === '/api/security' && M === 'GET') { json(res, 200, securityJSON()); return true; }
+    if (route === '/api/export' && M === 'GET') {
       const q = new URLSearchParams(qs.replace(/^\?/, ''));
       const dev = DEV_RE.test(q.get('dev') || '') ? q.get('dev') : '';
       const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
@@ -581,10 +584,11 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
       }
       return true;
     }
-    const dm = /^\/admin\/api\/device\/([a-f0-9]{24})$/.exec(pathname);
+    const dm = /^\/api\/device\/([a-f0-9]{24})$/.exec(route);
     if (dm) {
       if (M === 'GET') { const d = deviceJSON(dm[1]); json(res, d ? 200 : 404, d || { error: 'Unknown device' }); return true; }
-      // A custom header a cross-site form cannot send: every write needs it.
+      // Keep both the explicit admin marker and same-origin browser evidence on privileged writes.
+      if ((M === 'POST' || M === 'DELETE') && !isSameOrigin(req)) { json(res, 403, { error: 'Invalid origin' }); return true; }
       if (req.headers['x-board-admin'] !== '1') { json(res, 403, { error: 'Missing header' }); return true; }
       if (M === 'POST') { readBody(req).then((b) => { const r = setDevice(dm[1], b); json(res, r === true ? 200 : r ? 400 : 404, r === true ? { ok: true } : r || { error: 'Unknown device' }); }); return true; }
       if (M === 'DELETE') { json(res, clearDevice(dm[1]) ? 200 : 404, { ok: true }); return true; }
@@ -595,6 +599,6 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
 
   function close() { if (dirty) save(); try { stream && stream.end(); } catch {} }
 
-  const PAGE = require('./board-page')({ brand, logo, ownerName, sports: SPORT_KEYS.map((k) => [k, sports[k].label]) });
+  const PAGE = adminPath ? require('./board-page')({ brand, logo, ownerName, adminPath, sports: SPORT_KEYS.map((k) => [k, sports[k].label]) }) : '';
   return { identify, gate, request, entrance, client, streamOpen, streamClose, handle, close, STATIC_RE };
 };
