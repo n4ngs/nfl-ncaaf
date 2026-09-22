@@ -40,6 +40,10 @@ const BBL_GUEST = GUEST_CODE ? bblTok('guest:' + GUEST_CODE) : '';
 const GUEST_LINK = GUEST_CODE ? crypto.createHash('sha256').update(`guestlink:${GUEST_CODE}`).digest('hex').slice(0, 24) : '';
 const OWNER_NAME = (process.env.OWNER_NAME || '').trim().slice(0, 24);
 const GATED = !!ADMIN_CODE;
+/* Open boards (owner's call, 2026-09-21): guests should never meet a sign-in screen. A browser can't carry a
+   sign-in to another browser, so anyone opening the site is quietly signed in as a guest; only Admin needs the
+   code. OPEN_BOARDS=0 puts the guest lock back (the guest link/code then required again). */
+const OPEN_BOARDS = process.env.OPEN_BOARDS !== '0';
 
 // A single peer secret shared by both children so the Security Center "All apps" toggle reads across the two
 // engines over localhost.
@@ -148,14 +152,14 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 </style></head>
 <body><div class="card">
 <div class="top"><span class="logo">${LOGO}</span><span class="wm">THE<b>.</b>BOARD</span></div>
-<h1>${OWNER_NAME ? OWNER_NAME + "'s board" : 'Enter your code'}</h1>
-<p>NFL, college football and MLB on one board. Enter your code, or paste the link you were sent.</p>
+<h1>${OPEN_BOARDS ? 'Admin sign-in' : OWNER_NAME ? OWNER_NAME + "'s board" : 'Enter your code'}</h1>
+<p>${OPEN_BOARDS ? 'The boards are open to everyone. This is only for the admin code.' : 'NFL, college football and MLB on one board. Enter your code, or paste the link you were sent.'}</p>
 <form method="post" action="/login" autocomplete="off">
 <input name="code" type="password" inputmode="text" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Code or link" placeholder="Code or link" autofocus required>
-<button>Open the board</button>
-<div class="e">${wrong ? "That didn't work. Try opening the link you were sent in this browser." : ''}</div>
+<button>${OPEN_BOARDS ? 'Sign in' : 'Open the board'}</button>
+<div class="e">${wrong ? (OPEN_BOARDS ? "That code didn't work." : "That didn't work. Try opening the link you were sent in this browser.") : ''}</div>
 </form>
-<div class="f">One board · NFL · NCAAF · MLB</div>
+<div class="f">${OPEN_BOARDS ? '<a href="/" style="color:inherit">Just here for the boards? Go to the board &rsaquo;</a>' : 'One board · NFL · NCAAF · MLB'}</div>
 </div></body></html>`;
   res.writeHead(code, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
   res.end(html);
@@ -251,8 +255,19 @@ const server = http.createServer((req, res) => {
     return page(res, 401, { wrong: true });
   }
 
-  const r = role(req);
+  let r = role(req);
   if (Board.handle(req, res, pathname, qs, r)) return;
+
+  // Open boards: a browser with no sign-in becomes a guest on the spot — cookies set on this response and
+  // added to this request, so the engine sees a guest now, not after a reload. Admin is never granted here.
+  if (GATED && !r && OPEN_BOARDS && GUEST_HASH && (pathname === '/' || /^\/(nfl|ncaaf|mlb)(\/|$)/.test(pathname))) {
+    setAuth(res, 'guest', isHttps(req));
+    req.headers.cookie = `${req.headers.cookie ? req.headers.cookie + '; ' : ''}ps_guest=${GUEST_HASH}; hl_guest=${GUEST_HASH}; bbl_guest=${BBL_GUEST}`;
+    r = 'guest';
+    Board.entrance(who, 'guest', 'open');
+  }
+  // Admin's own way in. Also where a blocked device ends up.
+  if (pathname === '/login' && req.method === 'GET') return page(res, 200, {});
 
   if (pathname === '/') {
     // A device we already know landing on the sign-in screen is worth a line; a stranger's first hit is not

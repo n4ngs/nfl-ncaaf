@@ -133,6 +133,8 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   function touch(who, role, sport) {
     const t = Date.now();
     let d = state.devices[who.dev];
+    // With open boards, scanners and link-preview bots walk straight in. Let them, but never make them a row.
+    if (!d && uaInfo(who.ua).bot) return null;
     if (!d) { d = state.devices[who.dev] = { first: t, last: t, role: role || null, roleSet: null, label: '', ua: '', ips: {}, links: {}, sports: {} }; dirty = true; }
     for (let i = pendingLinks.length - 1; i >= 0; i--) {
       const [dv, sp, u] = pendingLinks[i];
@@ -160,11 +162,11 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   // ------------------------------------------------------------------ capture (called by the terminal)
   function request(who, role, sport, method, p, status, ms) {
     if (STATIC_RE.test(p) || p === '/api/telemetry' || p === '/api/health') return;
-    touch(who, role, sport);
+    if (!touch(who, role, sport)) return;
     record({ t: Date.now(), dev: who.dev, role: role || 'none', ip: who.ip, sp: sport, k: 'req', m: method, p: p.slice(0, 160), s: status, ms });
   }
   function entrance(who, role, how) {
-    touch(who, role, null);
+    if (!touch(who, role, null)) return;
     record({ t: Date.now(), dev: who.dev, role: role || 'none', ip: who.ip, sp: '', k: 'enter', how });
   }
   const clip = (v, n = 120) => String(v == null ? '' : v).slice(0, n);
@@ -173,6 +175,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     try { batch = JSON.parse(body).events; } catch { return; }
     if (!Array.isArray(batch)) return;
     const d = touch(who, role, sport);
+    if (!d) return;
     const now = Date.now();
     for (const it of batch.slice(0, 50)) {
       if (!it || typeof it.kind !== 'string') continue;
@@ -260,7 +263,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   const ENTER = { code: 'Signed in with the admin code', 'guest-code': 'Signed in with the guest code', 'guest-link': 'Came in on the guest link',
     wrong: 'Typed a wrong code', gate: 'Saw the sign-in screen', logout: 'Signed out', 'bad-link': 'Tried a guest link that does not work',
     blocked: 'Turned away (blocked by you)', 'signed-out': 'Signed out by you (sent to the sign-in screen)', 'owner-block': 'You blocked this device',
-    'owner-unblock': 'You unblocked this device', 'owner-signout': 'You signed this device out' };
+    'owner-unblock': 'You unblocked this device', 'owner-signout': 'You signed this device out', open: 'Walked in (boards are open, no link needed)' };
   function describe(e) {
     if (e.k === 'req') { const [txt, lvl] = describeReq(e.m, e.p); return [e.s >= 400 ? `${txt} — failed (${e.s})` : txt, lvl]; }
     if (e.k === 'view') return [`Viewed ${tabName(e.r)}`, 1];
@@ -436,7 +439,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     return {
       now,
       stats: {
-        signinsToday: count((x) => x.t >= T && (x.how === 'code' || x.how === 'guest-code' || x.how === 'guest-link')),
+        signinsToday: count((x) => x.t >= T && (x.how === 'code' || x.how === 'guest-code' || x.how === 'guest-link' || x.how === 'open')),
         wrongToday: count((x) => x.t >= T && x.how === 'wrong'), badLinksToday: count((x) => x.t >= T && x.how === 'bad-link'),
         newDevicesWeek: Object.values(devs).filter((d) => now - d.first < WEEK).length,
         high: alerts.filter((a) => a.sev === 'high').length, failsDay: fails.filter((f) => now - f.t < DAY).length,
@@ -508,7 +511,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   function gate(who) {
     if (state.blocked[who.dev]) {
       const t = Date.now();
-      if (t - (lastBlockNote.get(who.dev) || 0) > 60e3) { lastBlockNote.set(who.dev, t); touch(who, null, null); record({ t, dev: who.dev, role: 'none', ip: who.ip, sp: '', k: 'enter', how: 'blocked' }); }
+      if (t - (lastBlockNote.get(who.dev) || 0) > 60e3 && state.devices[who.dev]) { lastBlockNote.set(who.dev, t); touch(who, null, null); record({ t, dev: who.dev, role: 'none', ip: who.ip, sp: '', k: 'enter', how: 'blocked' }); }
       return 'blocked';
     }
     if (state.signout[who.dev]) {
@@ -547,7 +550,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     if (pathname !== '/admin' && !pathname.startsWith('/admin/')) return false;
     if (role !== 'owner') {
       if (pathname.startsWith('/admin/api/')) json(res, 404, { error: 'Not found' });
-      else { res.writeHead(302, { location: '/', 'cache-control': 'no-store' }); res.end(); }
+      else { res.writeHead(302, { location: '/login', 'cache-control': 'no-store' }); res.end(); }
       return true;
     }
     const M = req.method;
