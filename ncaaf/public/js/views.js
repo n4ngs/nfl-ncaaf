@@ -47,7 +47,7 @@ const openLegs = () => S.bets.filter((b) => b.status === 'open').flatMap((b) => 
 
 // Covered or not, from the closing line: "ALA covered", "Over".
 function atsResult(g) {
-  const c = g.close || g.mkt;
+  const c = closeOf(g);
   if (!isFinal(g) || !c) return null;
   const out = {};
   if (c.s != null) {
@@ -150,7 +150,7 @@ function glanceNumbers(games) {
   // biggest upset: the longest moneyline underdog that won today
   let upset = null;
   for (const { g } of fin) {
-    const c = g.close || g.mkt;
+    const c = closeOf(g);
     if (!c?.ml) continue;
     const winner = g.home.score > g.away.score ? 'home' : 'away';
     const o = winner === 'home' ? c.ml[0] : c.ml[1];
@@ -434,7 +434,7 @@ function pxCell(g, mkt, side, book, best, opts = {}) {
     const q = isLive(g) && mkt !== 'h1' ? sideOf(g.books?.[book], m, side) : null;
     if (q && (q.line != null || q.odds != null)) {
       const qm = m === 'ml' ? fmtOdds(q.odds) : mkt === 't' ? `${side === 'over' ? 'o' : 'u'}${fmtTot(q.line)}` : fmtPts(q.line);
-      return `<span class="px num na pre" title="${esc(bookFull(book))} has no live feed. This was its last pregame number." aria-label="${esc(`${bookFull(book)}, no live feed, last pregame ${qm}`)}">${esc(qm)}<small>close</small></span>`;
+      return `<span class="px num na pre" title="${esc(bookFull(book))} has no live feed. This was its last pregame number." aria-label="${esc(`${bookFull(book)}, no live feed, last pregame ${qm}`)}">${esc(qm)}<small>last pregame</small></span>`;
     }
     return `<span class="px na" aria-hidden="true">—</span>`;
   }
@@ -445,10 +445,10 @@ function pxCell(g, mkt, side, book, best, opts = {}) {
   const sub = opts.sub ?? (m === 'ml' ? '' : fmtOdds(p.odds));
   const who = side === 'over' ? 'Over' : side === 'under' ? 'Under' : teamName(g[side]);
   const old = isOld(L);
-  const label = [bookFull(book), `${who} ${m === 'ml' ? fmtOdds(p.odds) : mkt === 't' ? fmtTot(p.line) : fmtPts(p.line)}`, m === 'ml' ? '' : fmtOdds(p.odds), isBest ? 'best price' : '', L?.m ? 'typed in' : '', flash.label, old ? `checked ${ago(L.seen)}` : ''].filter(Boolean).join(', ');
+  const label = [bookFull(book), `${who} ${m === 'ml' ? fmtOdds(p.odds) : mkt === 't' ? fmtTot(p.line) : fmtPts(p.line)}`, m === 'ml' ? '' : fmtOdds(p.odds), isBest ? 'best price' : '', L?.m ? 'typed in' : '', flash.label, quoteFreshness(L, g, m, side).status].filter(Boolean).join(', ');
   const cls = `px num${isBest ? ' best' : ''}${L?.m ? ' man' : ''}${flash.cls}${old ? ' old' : ''}`;
-  if (isFinal(g)) return `<span class="${cls}"${flash.style} aria-label="${esc(label)}">${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}</span>`;
-  const inner = `${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}${typeof edgeBadge === 'function' && !(typeof limBreak === 'function' && limBreak()) ? edgeBadge(g, m, side, book) : ''}`;
+  if (isFinal(g) || !quoteCanAct(L, g, m, side)) return `<span class="${cls}"${flash.style} aria-label="${esc(label)}">${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}${quoteStatusHTML(L, g, m, side)}</span>`;
+  const inner = `${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}${quoteStatusHTML(L, g, m, side)}${typeof edgeBadge === 'function' && !(typeof limBreak === 'function' && limBreak()) ? edgeBadge(g, m, side, book) : ''}`;
   // BetMGM Nevada: a real link, so one tap goes straight there. A popup blocker can stop
   // window.open, but it can never stop an anchor. boot.js still opens the slip off data-mgmbet
   // (deliberately without preventDefault) so the bet can be logged here at the same time.
@@ -536,7 +536,7 @@ function renderFreshness() {
   const t = at ? Math.max(at.an || 0, at.vsin || 0) : 0;
   if (!t) { el.textContent = ''; return; }
   const s = Math.max(0, Math.round((serverNow() - t) / 1000));
-  el.textContent = ` · lines checked ${s < 60 ? `${s}s` : `${Math.round(s / 60)} min`} ago`;
+  el.textContent = ` · feed polled ${s < 60 ? `${s}s` : `${Math.round(s / 60)} min`} ago`;
 }
 
 // ------------------------------------------------------------ MY BETS
@@ -555,7 +555,8 @@ function betCard(b) {
       prog = `<div class="leg-s"><span>${esc(g.away.abbr)} <b>${g.away.score}</b> · ${esc(g.home.abbr)} <b>${g.home.score}</b> · ${esc(clockLabel(g))}</span><span>${p != null ? `est. ${fmtPct(p)} to cash` : ''}</span></div><div class="prog"><i class="${now > 0 ? 'win' : ''}" style="${now >= 0 ? `left:50%;width:${pos - 50}%` : `left:${pos}%;width:${50 - pos}%`}"></i><b></b></div>`;
     } else if (g && isPre(g)) {
       // closing line value so far: your number vs the market now
-      const cur = sideOf(g.mkt, l.mkt, l.side);
+      const current = canonicalResolution(g, l.mkt, l.side)?.current;
+      const cur = current && quoteCanAct(current, g) ? {line: current.line_value, odds: current.american_odds} : null;
       let edge = '';
       if (cur && l.mkt === 's') edge = trim(l.line - cur.line);
       if (cur && l.mkt === 't') edge = trim(l.side === 'over' ? cur.line - l.line : l.line - cur.line);
@@ -564,8 +565,8 @@ function betCard(b) {
     } else if (g && isFinal(g)) {
       prog = `<div class="leg-s"><span>Final · ${esc(g.away.abbr)} ${g.away.score}, ${esc(g.home.abbr)} ${g.home.score}</span></div>`;
     }
-    const clv = l.clv ? (l.clv.pts != null ? `<span class="${l.clv.pts > 0 ? 'w' : ''}">${l.clv.pts > 0 ? '+' : l.clv.pts < 0 ? MINUS : ''}${trim(Math.abs(l.clv.pts))} vs close</span>` : l.clv.pct != null ? `<span class="${l.clv.pct > 0 ? 'w' : ''}" title="Expected return of your price if the no-vig closing price is right">${l.clv.pct > 0 ? '+' : ''}${l.clv.pct}% edge at the close</span>` : '') : '';
-    return `<div class="bet-leg" data-open="${l.gid}"><div class="leg-h">${esc(l.label)} ${fmtOdds(l.odds) && b.legs.length > 1 ? `<span>${esc(fmtOdds(l.odds))}</span>` : ''}${status}</div><div class="leg-s"><span>${esc(l.matchup)}</span>${clv}</div>${prog}</div>`;
+    const clv = clvLegHTML(l, b);
+    return `<div class="bet-leg" data-open="${l.gid}"><div class="leg-h">${esc(l.label)} ${fmtOdds(l.odds) && b.legs.length > 1 ? `<span>${esc(fmtOdds(l.odds))}</span>` : ''}${status}</div><div class="leg-s"><span>${esc(l.matchup)}</span></div>${clv}${prog}</div>`;
   }).join('');
   const st = b.status;
   const tag = st === 'open' ? (b.legs.some((l) => isLive(gameById(l.gid))) ? '<span class="tag hot">Live</span>' : '<span class="tag">Open</span>') : `<span class="tag ${st === 'won' ? 'ink' : ''}">${esc(st[0].toUpperCase() + st.slice(1))}</span>`;
@@ -579,7 +580,7 @@ function betStats(list) {
   const net = done.reduce((s, b) => s + (b.net || 0), 0);
   const risked = done.reduce((s, b) => s + b.stake, 0);
   const w = done.filter((b) => b.status === 'won').length, l = done.filter((b) => b.status === 'lost').length, p = done.filter((b) => b.status === 'push').length;
-  const clvs = list.flatMap((b) => (b.legs.length === 1 && b.legs[0].clv?.pts != null ? [b.legs[0].clv.pts] : []));
+  const clvs = list.flatMap((b) => (b.legs.length === 1 && b.legs[0].mkt === 's' && integrityMetric(b.legs[0], 'line_clv_points', true) != null ? [integrityMetric(b.legs[0], 'line_clv_points', true)] : []));
   const avgClv = clvs.length ? clvs.reduce((a, b) => a + b, 0) / clvs.length : null;
   const beat = clvs.length ? clvs.filter((x) => x > 0).length / clvs.length : null;
   const open = list.filter((b) => b.status === 'open');
@@ -593,7 +594,7 @@ function renderBets() {
   const top = `<div class="stats">
       <div><div class="v num ${st.net > 0 ? 'win' : ''}">${fmtMoney(st.net, true)}</div><div class="l">Net</div><div class="s">${esc(units(st.net))}${st.roi != null ? ` · ${(st.roi * 100).toFixed(1)}% ROI` : ''}</div></div>
       <div><div class="v num">${st.w}–${st.l}${st.p ? `–${st.p}` : ''}</div><div class="l">Record</div><div class="s">${st.w + st.l ? `${Math.round((st.w / (st.w + st.l)) * 100)}% winners` : 'No results yet'}</div></div>
-      <div><div class="v num">${st.avgClv == null ? '—' : `${st.avgClv > 0 ? '+' : ''}${st.avgClv.toFixed(1)}`}</div><div class="l">Avg. points vs close <i class="info" title="Closing line value: how your number compared with the final market number at kickoff">i</i></div><div class="s">${st.beat == null ? 'Tracked from kickoff' : `Beat the close ${fmtPct(st.beat)} of ${st.n}`}</div></div>
+      <div><div class="v num">${st.avgClv == null ? '—' : `${st.avgClv > 0 ? '+' : ''}${st.avgClv.toFixed(1)}`}</div><div class="l">Verified spread CLV <i class="info" title="Eligible immutable entries compared with a verified actual-kickoff close">i</i></div><div class="s">${st.beat == null ? 'Verified evidence required' : `Beat the close ${fmtPct(st.beat)} of ${st.n}`}</div></div>
       <div><div class="v num">${fmtMoney(st.openRisk)}</div><div class="l">At risk</div><div class="s">${plural(st.open, 'open bet')} · to win ${fmtMoney(st.openWin)}</div></div>
     </div>${typeof limBetsLine === 'function' ? limBetsLine() : ''}`;
   let list = '';
@@ -642,7 +643,7 @@ function renderTools() {
   const body = $('#toolsBody');
   if (body.dataset.built) { updateTools(); return; }
   body.dataset.built = '1';
-  body.innerHTML = `<div class="tools">
+  body.innerHTML = `<div class="tools"><div class="card tool"><h3>CLV integrity</h3><div class="note" id="integrityHealth"></div><p>Quotes show source-observation freshness. Suspended, stale or unverified quotes remain visible and cannot produce an actionable edge. Feed polling below confirms connectivity only.</p><p class="note">VERIFIED uses actual kickoff; PROVISIONAL uses scheduled start. Open-to-close history is RETROSPECTIVE MARKET MOVE.</p></div>
     <div class="card tool"><h3>Odds converter</h3><p>American odds to decimal, implied chance and payout.</p>
       <div class="fgrid"><label class="fld">American odds<input class="inp" id="tOdds" inputmode="text" value="-110"></label><label class="fld">Stake<input class="inp" id="tStake" inputmode="decimal" value="${S.unit}"></label></div>
       <div class="out" id="tOddsOut"></div></div>
@@ -706,6 +707,8 @@ function updateTools() {
 
   $('#bookTog').innerHTML = S.books.map((b) => `<button class="chip" type="button" data-hide="${b.key}" aria-pressed="${!S.hidden.has(b.key)}">${esc(b.short)}${b.sharp ? '<small>sharp</small>' : b.vegas ? '<small>NV</small>' : ''}</button>`).join('');
   const h = toolsState.health;
+  const ih = $('#integrityHealth');
+  if (ih) { const v = h?.integrity; ih.textContent = v ? `${v.ok ? 'Journal OK' : 'Journal unavailable'} · ${v.snapshots ?? '—'} snapshots · ${v.signals ?? '—'} signals · ${v.resolver_version || ''}` : 'Integrity journal health unavailable'; }
   const src = [
     ['ESPN', 'site.api.espn.com', 'Scores, field position, DraftKings, FPI'],
     ['Action Network', 'api.actionnetwork.com', 'Books, live lines, splits, rotation numbers'],

@@ -44,11 +44,14 @@ function parse(html) {
         const [tot, oj] = pair(r.td[c + 2]), [, uj] = pair(h.td[c + 2]);
         const L = {
           s: hs ?? (rs == null ? null : -rs), so: [hj, rj],
+          source_observed_at: stampTime(stamp), market_status: 'active',
+          provider_event_id: id ? id[0] : null,
           t: tot, to: [oj, uj],
           ml: [hml, rml],
+          integrityMeta: { s: { home: { line_value: hs, american_odds: hj }, away: { line_value: rs, american_odds: rj } }, t: { over: { line_value: tot, american_odds: oj }, under: { line_value: pair(h.td[c + 2])[0], american_odds: uj } } },
         };
         if (L.s == null && L.t == null && L.ml[0] == null) return;
-        if (half) G.h1[book] = { s: L.s, so: L.so, t: L.t, to: L.to };
+        if (half) G.h1[book] = { ...L, ml: [null, null] };
         else {
           G.books[book] = L;
           const os = pair(o.td[c])[0], oml = plain(o.td[c + 1]), ot = plain(o.td[c + 2]);
@@ -97,7 +100,7 @@ function matchAll(vgames, espnGames, teamScore = nameScore) {
       if (s >= 2 && (!best || s > best.s)) best = { s, g, swap: b > a };
     }
     if (!best) { log('vsin: no match for', v.road, '@', v.home); continue; }
-    const flip = (L) => (L && best.swap ? { ...L, s: L.s == null ? null : -L.s, so: L.so ? [L.so[1], L.so[0]] : L.so, ml: L.ml ? [L.ml[1], L.ml[0]] : L.ml } : L);
+    const flip = (L) => (L && best.swap ? { ...L, s: L.s == null ? null : -L.s, so: L.so ? [L.so[1], L.so[0]] : L.so, ml: L.ml ? [L.ml[1], L.ml[0]] : L.ml, integrityMeta: L.integrityMeta ? { ...L.integrityMeta, s: { home: L.integrityMeta.s?.away, away: L.integrityMeta.s?.home } } : undefined } : L);
     const map = (o) => Object.fromEntries(Object.entries(o).map(([k, L]) => [k, flip(L)]));
     out.set(best.g.id, { books: map(v.books), open: map(v.open), h1: map(v.h1) });
   }

@@ -31,8 +31,17 @@ async function fetchPinnacle() {
   }
   for (const k of markets || []) {
     const g = games.get(k.matchupId);
-    if (!g || k.isAlternate || (k.status && k.status !== 'open') || (k.period !== 0 && k.period !== 1)) continue;
+    if (!g || k.isAlternate || (k.period !== 0 && k.period !== 1)) continue;
     const L = k.period === 0 ? g.full : g.h1;
+    L.integrityMeta ||= { s: {}, t: {}, ml: {} };
+    L.provider_event_id = k.matchupId;
+    L.is_live = g.live;
+    const meta = { source_observed_at: k.updatedAt || k.updated_at || k.lastUpdated || null, market_status: k.status === 'open' ? 'active' : k.status || 'unverified', is_live: g.live, provider_event_id: k.matchupId, optionMarketId: k.key || k.id || null };
+    const mkt = { spread: 's', total: 't', moneyline: 'ml' }[k.type];
+    if (mkt) for (const sel of mkt === 't' ? ['over', 'under'] : ['home', 'away']) {
+      const raw = k.prices?.find((p) => p.designation === sel);
+      if (raw || meta.market_status !== 'active') L.integrityMeta[mkt][sel] = { ...meta, line_value: mkt === 'ml' ? null : num(raw?.points), american_odds: num(raw?.price) };
+    }
     const price = (d) => k.prices?.find((p) => p.designation === d);
     if (k.type === 'spread') {
       const h = price('home'), a = price('away');
@@ -48,7 +57,7 @@ async function fetchPinnacle() {
       if (g.limit == null) g.limit = num(k.limits?.find((x) => x.type === 'maxRiskStake')?.amount);
     }
   }
-  return [...games.values()].filter((g) => g.full.s != null || g.full.t != null || g.full.ml[0] != null);
+  return [...games.values()].filter((g) => g.full.s != null || g.full.t != null || g.full.ml[0] != null || [g.full, g.h1].some((L) => Object.values(L.integrityMeta || {}).some((sides) => Object.keys(sides).length)));
 }
 
 // Map Pinnacle games onto ESPN games by kickoff and team names.
@@ -65,7 +74,7 @@ function matchPinnacle(pgames, espnGames) {
       if (s >= 2 && (!best || s > best.s)) best = { s, g, swap: b > a };
     }
     if (!best) { log('pinnacle: no match for', p.away, '@', p.home); continue; }
-    const flip = (L) => (best.swap ? { ...L, s: L.s == null ? null : -L.s, so: [L.so[1], L.so[0]], ml: L.ml ? [L.ml[1], L.ml[0]] : L.ml } : L);
+    const flip = (L) => (best.swap ? { ...L, s: L.s == null ? null : -L.s, so: [L.so[1], L.so[0]], ml: L.ml ? [L.ml[1], L.ml[0]] : L.ml, integrityMeta: L.integrityMeta ? { ...L.integrityMeta, s: { home: L.integrityMeta.s?.away, away: L.integrityMeta.s?.home }, ml: { home: L.integrityMeta.ml?.away, away: L.integrityMeta.ml?.home } } : undefined } : L);
     const prev = out.get(best.g.id) || {};
     if (p.live) {
       // In play. Kept beside the pre-game number, never on top of it: `line` is what the game closed at
@@ -73,7 +82,7 @@ function matchPinnacle(pgames, espnGames) {
       // is a different bet from the one a pre-game H1 line prices, so it is left out entirely.
       out.set(best.g.id, { ...prev, line: prev.line ?? null, h1: prev.h1 ?? null, live: true, liveLine: flip(p.full), liveLimit: p.limit, liveAge: p.age });
     } else {
-      out.set(best.g.id, { ...prev, line: flip(p.full), h1: p.h1.s == null ? null : flip(p.h1), limit: p.limit, live: prev.live || false, age: p.age });
+      out.set(best.g.id, { ...prev, line: flip(p.full), h1: p.h1.s != null || p.h1.t != null || Object.values(p.h1.integrityMeta || {}).some((sides) => Object.keys(sides).length) ? flip(p.h1) : null, limit: p.limit, live: prev.live || false, age: p.age });
     }
   }
   return out;

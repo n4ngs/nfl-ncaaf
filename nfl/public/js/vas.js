@@ -187,7 +187,7 @@ function vasLiveNum(g, mkt) {
   const order = ['cons', 'czr', 'mgm', 'dk', 'fd', ...Object.keys(src)];
   for (const k of order) {
     const L = src[k];
-    if (!L || L.m) continue;
+    if (!L || L.m || !quoteCanAct(L, g)) continue;
     const v = mkt === 't' ? L.t : L.s;
     if (v != null) return v;
   }
@@ -262,7 +262,8 @@ function vasNotePrices(g) {
       if (!L || L.m || k === 'open') continue;
       const pa = sideOf(L, mkt, a), pb = sideOf(L, mkt, b);
       if (!pa || !pb || pa.odds == null || pb.odds == null) continue;
-      const p = vasDevig(mkt, pa.odds, pb.odds);
+      if (!quotePairCanDevig(L,g,mkt)) continue;
+    const p = vasDevig(mkt, pa.odds, pb.odds);
       if (p == null || !(p > 0 && p < 1)) continue;
       vasPushPrice(vasPriceKey(g.id, k, mkt), t, p);
       if (k !== 'cons') ps.push(p);
@@ -468,7 +469,7 @@ function vasLagRows(g) {
   const out = [];
   for (const k of vasBettable()) {
     const L = src[k];
-    if (!L || L.m) continue;
+    if (!L || L.m || !quoteCanAct(L, g)) continue;
     for (const mkt of ['ml', 's', 't']) {
       const mk = vasPriceTrail.get(vasPriceKey(g.id, '__mkt', mkt));
       const bk = vasPriceTrail.get(vasPriceKey(g.id, k, mkt));
@@ -487,6 +488,7 @@ function vasLagRows(g) {
       const [A, B] = mkt === 't' ? ['over', 'under'] : ['home', 'away'];
       const side = drift > 0 ? A : B;
       const px = sideOf(L, mkt, side);
+      if (!quoteCanAct(L, g, mkt, side) || !quoteSnapshotId(L, mkt, side)) continue;
       out.push({
         gid: g.id, book: k, mkt, side, behind, drift: Math.abs(drift) * 100, habit,
         line: px ? px.line : null, odds: px ? px.odds : null, quiet: false,
@@ -612,13 +614,10 @@ function vasLagStrip() {
 /* edgeFair() reads g.books, which on a live game is PREGAME data. Wiring it up as-is would silently
    cross-check a live price against kickoff lines, so the live anchor is computed here instead. */
 function vasTrueAge(g, L, key) {
-  if (L && Number.isFinite(L.age)) return { ms: Math.max(0, L.age), proven: true };
-  if (key === 'pin') return { ms: L && L.seen ? serverNow() - L.seen : null, proven: false }; // CDN-cached: our poll time proves nothing
-  const at = vasFeedAt(g);
-  if (at) return { ms: Math.max(0, serverNow() - at), proven: true };   // Action Network is a live feed
-  if (L && L.seen) return { ms: serverNow() - L.seen, proven: false };
-  return { ms: null, proven: false };
+  const f = quoteFreshness(L, g);
+  return { ms: f.age_ms, proven: quoteCanAct(L, g) };
 }
+
 function vasFeedAt(g) {
   const at = typeof S !== 'undefined' && S.at ? S.at[g?.wk] : null;
   const v = at && typeof at === 'object' ? at.an : at;
@@ -651,12 +650,13 @@ function vasPeerFair(g, mkt, exclude) {
   for (const k of Object.keys(src)) {
     if (k === exclude || k === 'cons' || k === 'open') continue;   // cons is an aggregate: it contains `exclude`
     const L = src[k];
-    if (!L || L.m) continue;
+    if (!L || L.m || !quoteCanAct(L, g)) continue;
     const age = vasTrueAge(g, L, k);
-    if (!age.proven || !Number.isFinite(age.ms) || age.ms > VAS_LIVE_FRESH) continue;   // gate 1 still applies
+    if (!age.proven || !Number.isFinite(age.ms)) continue;   // gate 1 still applies
     const pa = sideOf(L, mkt, a), pb = sideOf(L, mkt, b);
     if (!pa || !pb || pa.odds == null || pb.odds == null) continue;
     if (mkt !== 'ml' && pa.line == null) continue;
+    if (!quotePairCanDevig(L,g,mkt)) continue;
     const p = vasDevig(mkt, pa.odds, pb.odds);
     if (p == null || !(p > 0 && p < 1)) continue;
     // A book holding 12% is not quoting a considered price, it is quoting a wide one. De-vigging it
@@ -708,12 +708,13 @@ function vasLiveFair(g, mkt) {
   const [a, b] = mkt === 't' ? ['over', 'under'] : ['home', 'away'];
   for (const k of VAS_SHARP) {
     const L = src[k];
-    if (!L || L.m) continue;
+    if (!L || L.m || !quoteCanAct(L, g)) continue;
     const age = vasTrueAge(g, L, k);
-    if (!age.proven || !Number.isFinite(age.ms) || age.ms > VAS_LIVE_FRESH) continue;   // gate 1
+    if (!age.proven || !Number.isFinite(age.ms)) continue;   // gate 1
     const pa = sideOf(L, mkt, a), pb = sideOf(L, mkt, b);
     if (!pa || !pb || pa.odds == null || pb.odds == null) continue;
     if (mkt !== 'ml' && pa.line == null) continue;
+    if (!quotePairCanDevig(L,g,mkt)) continue;
     const p = vasDevig(mkt, pa.odds, pb.odds);
     if (p == null || !(p > 0 && p < 1)) continue;
     return { book: k, line: pa.line, p, sideA: a, age: age.ms, limit: vasLiveLimit(g, k) };
@@ -725,7 +726,7 @@ function vasNoFairTxt(g) {
   const src = vasLiveBooks(g);
   for (const k of VAS_SHARP) {
     const L = src[k];
-    if (!L || L.m) continue;
+    if (!L || L.m || !quoteCanAct(L, g)) continue;
     const age = vasTrueAge(g, L, k);
     if (!age.proven) return `${bookName(k)} is quoting, but nothing proves how old that price is — it is not a live feed.`;
     if (Number.isFinite(age.ms) && age.ms > VAS_LIVE_FRESH) return `${bookName(k)}'s live price is ${vasAgo(age.ms)} old — too old to measure against.`;
@@ -747,6 +748,7 @@ function vasLiveVeto(g, mkt, side, line, exclude) {
     const a = sideOf(L, mkt, side), b = sideOf(L, mkt, other);
     if (!a || !b || a.odds == null || b.odds == null) return null;
     if (mkt !== 'ml' && a.line !== line) return null;
+    if (!quotePairCanDevig(L,g,mkt)) return null;
     const p = vasDevig(mkt, a.odds, b.odds);
     return p != null && p > 0 && p < 1 ? p : null;
   };
@@ -788,10 +790,11 @@ function vasLiveEdges(g) {
       const A = sharp || vasPeerFair(g, mkt, k);
       if (!A || k === A.book) continue;
       const L = src[k];
-      if (!L || L.m) continue;
+      if (!L || L.m || !quoteCanAct(L, g)) continue;
       for (const side of mkt === 't' ? ['over', 'under'] : ['home', 'away']) {
         const srcLine = mkt === 'ml' ? null : mkt === 't' ? A.line : side === 'home' ? A.line : -A.line;
         const px = sideOf(L, mkt, side);
+      if (!quoteCanAct(L, g, mkt, side) || !quoteSnapshotId(L, mkt, side)) continue;
         if (!px || px.odds == null || Math.abs(px.odds) < 100) continue;
         if (mkt === 'ml') {
           if (px.odds > VAS_ML_LONG || px.odds < VAS_ML_SHORT) continue;          // gate 5
@@ -1269,6 +1272,7 @@ const vasStateTag = (s) => `<span class="vas-state vas-s-${s}">${VAS_STATE[s] ||
 
 // One trigger card. Header is the tap target; the why sits beside it so the markup stays valid.
 function vasCard(g, t) {
+  if (t && t.state === 'fired') { const status = recordDisplayedSignal(g, t.price || t, 'vas-existing-v1'); if (status !== 'RECORDED') return `<article class="vas-card"><p class="note">${esc(signalEvidenceMessage(status))}</p></article>`; }
   if (!g || !t) return '';
   const fired = t.state === 'fired';
   const stake = t.stakeOf || null;
@@ -1303,6 +1307,7 @@ function vasCard(g, t) {
 
 // One branch, as a line in the tree. Quiet by default, detail on tap.
 function vasBranchRow(g, b) {
+  if (b.state === 'fired') { const status = recordDisplayedSignal(g, b.price || b, 'vas-existing-v1'); if (status !== 'RECORDED') return `<li class="vas-branch">${esc(signalEvidenceMessage(status))}</li>`; }
   const fired = b.state === 'fired';
   const head = fired
     ? `<b class="vas-pick">${esc(vasPick(g, b.mkt, b.side, b.line))}</b> <span class="vas-odds num">${esc(fmtOdds(b.odds))}</span> <span class="vas-book">${esc(bookName(b.book))}</span> <span class="vas-ev num">${esc(b.evPct)}</span>`
@@ -1338,7 +1343,9 @@ function vasVectorRow(k, label, v) {
 
 // The quiet measured-edge rows: arithmetic, no card, no stake.
 function vasQuietRows(g) {
-  const rows = vasQuiet(g);
+  const candidates = vasQuiet(g);
+  const rows = candidates.filter(e => recordDisplayedSignal(g, e) === 'RECORDED');
+  if (candidates.length && !rows.length) return '<p class="note">Recommendations await immutable signal evidence.</p>';
   if (!rows.length) return '';
   return `<div class="vas-meas">
     <h4 class="vas-h4">Measured price edge</h4>

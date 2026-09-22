@@ -46,7 +46,8 @@ function tmModel(g, H, mkt) {
   const has = series.filter((s) => s.pts.length);
   const open = H.open?.[mkt] != null ? { t: H.open.at || null, v: conv(H.open[mkt]) } : null;
   const live = (H.l?.[mkt] || []).filter((p) => p[1] != null).map((p) => [p[0], conv(p[1])]);
-  const ko = Date.parse(g.start);
+  const resolution = canonicalResolution(g, mkt, mkt === 't' ? 'over' : 'home');
+  const ko = Date.parse(g.actual_start_at || g.start);
   const firstSeen = has.length ? Math.min(...has.map((s) => s.pts[0][0])) : null;
   const lastSeen = has.length ? Math.max(...has.map((s) => s.pts.at(-1)[0])) : null;
   if (firstSeen == null && !open?.t) return null;
@@ -55,7 +56,7 @@ function tmModel(g, H, mkt) {
   const t1 = Math.max(end, t0 + 60e3);
   const tEndPre = isPre(g) ? t1 : Math.min(ko, t1);
   const cons = has.find((s) => s.cons) || null;
-  const closeV = H.close?.[mkt] != null ? conv(H.close[mkt]) : !isPre(g) && cons ? stepAt(cons.pts, ko) : null;
+  const closeV = resolution?.close?.line_value != null ? conv(resolution.close.line_value) : null;
 
   const M = { g, H, mkt, favHome, conv, fav, dog, series, has, cons, open, live, ko, t0, t1, tEndPre, firstSeen, closeV };
   // your bets on this game
@@ -90,7 +91,7 @@ function tmLine(M, v) {
 }
 const tmNum = (M, v) => (v == null ? '—' : M.mkt === 't' ? fmtTot(v) : fmtPts(-v));
 
-// The market number at time t: in-game line after kickoff, else consensus, else the median book, else the open.
+// The market number at time t: in-game line after scheduled start, else consensus, else the median book, else the open.
 function tmMarketAt(M, t) {
   if (t > M.ko && M.live.length) { const v = stepAt(M.live, t); if (v != null) return { v, kind: 'live' }; }
   const tt = Math.min(t, M.tEndPre);
@@ -135,7 +136,7 @@ function tmEvents(M) {
     ev.push({ t: c.t, kind: 'mkt', label: 'Market', text: `${tmLine(M, c.from)} → ${tmLine(M, c.to)}`, lead: tmLeader(M, c.t, dir) });
   }
   for (const x of M.mine) if (x.placed) ev.push({ t: x.placed, kind: 'bet', label: 'Your bet', text: tmLegText(M.g, x.leg) });
-  if (M.ko >= M.t0 && M.ko <= M.t1) ev.push({ t: M.ko, kind: 'ko', label: 'Kickoff', text: M.closeV != null ? `Closed ${tmLine(M, M.closeV)}` : '' });
+  if (M.ko >= M.t0 && M.ko <= M.t1) ev.push({ t: M.ko, kind: 'ko', label: M.g.actual_start_at ? 'Actual kickoff' : 'Scheduled start', text: M.closeV != null ? `Closed ${tmLine(M, M.closeV)}` : '' });
   return ev.filter((e) => e.t >= M.t0 - 60e3 && e.t <= M.t1 + 60e3).sort((a, b) => a.t - b.t);
 }
 
@@ -287,7 +288,7 @@ function tmHTML() {
             <div class="tm-chips">${chips}</div>
           </div>
           <div class="tm-legend">${legend}</div>
-          <p class="tm-note">${esc(note)}${M.mkt === 's' ? ' Dashed rows are key numbers.' : ''}${M.live.length ? ' Dashed line after kickoff: the in-game line.' : ''}</p>
+          <p class="tm-note">${esc(note)}${M.mkt === 's' ? ' Dashed rows are key numbers.' : ''}${M.live.length ? ' Dashed line after scheduled start: the in-game line.' : ''}</p>
         </div>
         <section class="tm-sec tm-o4" aria-label="What moved">
           <div class="sub-h">What moved <span>${plural(M.events.length, 'event')} · tap to jump</span></div>
@@ -344,7 +345,7 @@ function tmDrawChart() {
   }
   if (M.mkt === 's') for (const k of TM_KEYS) for (const v of [k, -k]) if (v > M.lo && v < M.hi) grid += `<line class="kl" x1="${sc.L}" x2="${sc.R}" y1="${f(Y(v))}" y2="${f(Y(v))}"/>`;
 
-  // time axis: day or hour ticks, the squeezed pre-tracking gap, kickoff
+  // time axis: day or hour ticks, the squeezed pre-tracking gap, scheduled start
   const from = sc.gapEnd || M.t0;
   const ticks = [];
   if (M.t1 - from > 30 * 3600e3) {
@@ -392,7 +393,7 @@ function tmDrawChart() {
   const live = M.live.length ? `<path class="s live" d="${path(M.live, M.t1)}"/>` : '';
   const openDot = M.open?.t ? `<circle class="od" cx="${f(X(M.open.t))}" cy="${f(Y(M.open.v))}" r="4"><title>Opened ${esc(tmLine(M, M.open.v))}</title></circle>` : '';
   const koX = X(M.ko);
-  const ko = M.ko > M.t0 && M.ko < M.t1 ? `<line class="ko" x1="${f(koX)}" x2="${f(koX)}" y1="${T}" y2="${B}"/><text class="kol" x="${f(koX + (koX > sc.R - 60 ? -4 : 4))}" y="${T + 10}" text-anchor="${koX > sc.R - 60 ? 'end' : 'start'}">Kickoff</text>` : '';
+  const ko = M.ko > M.t0 && M.ko < M.t1 ? `<line class="ko" x1="${f(koX)}" x2="${f(koX)}" y1="${T}" y2="${B}"/><text class="kol" x="${f(koX + (koX > sc.R - 60 ? -4 : 4))}" y="${T + 10}" text-anchor="${koX > sc.R - 60 ? 'end' : 'start'}">${M.g.actual_start_at ? 'Actual kickoff' : 'Scheduled start'}</text>` : '';
   const bets = M.mine.filter((x) => x.placed >= M.t0 && x.placed <= M.t1).map((x) => { const bx = f(X(x.placed)); return `<path class="ybet" d="M${bx} ${f(Y(x.v) - 6)}l6 6-6 6-6-6z"><title>Your bet: ${esc(tmLegText(M.g, x.leg))}</title></path><text class="bl" x="${bx}" y="${f(Y(x.v) - 10)}" text-anchor="middle">You ${esc(tmNum(M, x.v))}</text>`; }).join('');
   const evs = M.events.filter((e) => ['steam', 'key', 'flip', 'move', 'bet'].includes(e.kind)).sort((a, b) => (a.kind === 'steam') - (b.kind === 'steam')).map((e) => `<g><title>${esc(`${e.label}: ${e.text}`)}</title>${tmMarker(e.kind, f(X(e.t)), EY)}</g>`).join('');
   const aria = `Line history for ${M.mkt === 't' ? 'the total' : `${M.fav.abbr}'s spread`} across ${plural(M.has.length, 'book')}, from ${tmWhen(M.t0)} to ${tmWhen(M.t1)}.`;
@@ -446,10 +447,10 @@ function tmUpdate(src) {
 
 function tmRel(t, M) {
   const ms = M.ko - t, a = Math.abs(ms);
-  if (a < 60e3) return 'at kickoff';
+  if (a < 60e3) return M.g.actual_start_at ? 'at actual kickoff' : 'at scheduled start';
   const m = Math.round(a / 60e3), h = Math.round(a / 3600e3), d = Math.round(a / 86400e3);
   const n = m < 90 ? `${m} min` : a < 40 * 3600e3 ? `${h} hr` : `${d} days`;
-  return `${n} ${ms > 0 ? 'before' : 'after'} kickoff`;
+  return `${n} ${ms > 0 ? 'before' : 'after'} scheduled start`;
 }
 
 function tmReadout(M, t, mk) {
@@ -457,7 +458,7 @@ function tmReadout(M, t, mk) {
   if (!el) return;
   const st = tmS;
   const now = st.atEnd && !isFinal(M.g);
-  const when = `<b>${now ? 'Now' : esc(tmWhen(t))}</b> · ${esc(M.g.tbd ? 'kickoff time TBA' : tmRel(t, M))}`;
+  const when = `<b>${now ? 'Now' : esc(tmWhen(t))}</b> · ${esc(M.g.tbd ? 'scheduled start time TBA' : tmRel(t, M))}`;
   const eye = !mk ? 'No line yet' : mk.kind === 'live' ? 'In-game line' : mk.kind === 'close' ? 'Closing line' : mk.kind === 'open' ? 'Opening line' : mk.kind === 'median' ? 'Middle of the books' : 'Market';
   let mv = '';
   if (mk && M.open) {
@@ -543,7 +544,7 @@ function tmBets(M, t) {
       <span class="tm-bw"><b class="num">${esc(tmLegText(M.g, l))}</b> <span class="num muted">${esc(fmtOdds(l.odds))}</span>${won ? ' <span class="tm-won">Won</span>' : ''}
         <small>${esc([book, x.placed ? `placed ${tmWhen(x.placed)}` : null].filter(Boolean).join(' · '))}</small></span>
       <span class="tm-cl"><b class="num">${esc(tmSigned(vsNow))}</b><small>vs playhead</small></span>
-      <span class="tm-cl"><b class="num">${esc(tmSigned(vsClose))}</b><small>${closed ? 'vs close' : 'vs now'}</small></span>
+      <span class="tm-cl"><b class="num">${esc(tmSigned(vsClose))}</b><small>${closed ? 'retrospective vs close' : 'retrospective vs now'}</small></span>
     </button>`;
   }).join('');
 }

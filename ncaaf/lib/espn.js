@@ -66,6 +66,8 @@ function dkOdds(o) {
   const n = (s) => num(String(s ?? '').replace(/^[ou]/, ''));
   const ps = o.pointSpread || {}, tot = o.total || {}, ml = o.moneyline || {};
   const cur = {
+    source_observed_at: o.lastUpdated || o.last_updated || o.updatedAt || null,
+    market_status: o.status || 'active',
     s: n(ps.home?.close?.line) ?? num(o.spread),
     so: [n(ps.home?.close?.odds), n(ps.away?.close?.odds)],
     t: n(tot.over?.close?.line) ?? num(o.overUnder),
@@ -73,6 +75,7 @@ function dkOdds(o) {
     ml: [n(ml.home?.close?.odds), n(ml.away?.close?.odds)],
   };
   const open = {
+    source_observed_at: null, market_status: 'unverified',
     s: n(ps.home?.open?.line), so: [n(ps.home?.open?.odds), n(ps.away?.open?.odds)],
     t: n(tot.over?.open?.line), to: [n(tot.over?.open?.odds), n(tot.under?.open?.odds)],
     ml: [n(ml.home?.open?.odds), n(ml.away?.open?.odds)],

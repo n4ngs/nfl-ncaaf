@@ -173,6 +173,7 @@ addEventListener('hashchange',function(){var x=location.hash.slice(1);if(x==='ad
 addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('[data-tab="admin"],[data-tab="security"],[href="#security"],[href="#admin"],[data-open-security]');if(!a)return;e.preventDefault();e.stopPropagation();go(a.matches('[data-tab="security"],[href="#security"],[data-open-security]')?'security':'admin')},true)})();
 </script>
 <script src="js/core.js"></script>
+<script src="js/integrity.js"></script>
 <script src="js/live.js"></script>
 <script src="js/views.js"></script>
 <script src="js/sheets.js"></script>

@@ -78,7 +78,7 @@ function shareModel(b) {
   const [awayAb, homeAb] = String(leg0.matchup || '').split(' @ ');
   const bk = S.books.find((x) => x.name === b.book || x.short === b.book || x.key === b.book);
   const when = (iso) => (iso ? `${new Date(iso).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} · ${timeLabel(iso).replace(/\u00a0/g, ' ')}` : '');
-  const clvTxt = (l) => (!l?.clv ? '' : l.clv.pts != null ? (l.clv.pts === 0 ? 'Same number as the close' : `${trim(Math.abs(l.clv.pts))} ${Math.abs(l.clv.pts) === 1 ? 'point' : 'points'} ${l.clv.pts > 0 ? 'better' : 'worse'} than the close`) : l.clv.pct != null ? `${l.clv.pct > 0 ? '+' : l.clv.pct < 0 ? MINUS : ''}${Math.abs(l.clv.pct)}% vs the closing price` : '');
+  const clvTxt = (l) => l ? integrityShort(l) : '';
   const finalTxt = (l) => (l?.final ? `Final · ${l.matchup ? `${shareAwayAb(l)} ${l.final.a}, ${shareHomeAb(l)} ${l.final.h}` : `${l.final.a}–${l.final.h}`}` : '');
   const pays = toWin(b.stake, b.odds);
   const amount = b.status === 'won' ? `Stake ${fmtMoney(b.stake)} · Paid ${fmtMoney(Math.round((b.stake + (b.net ?? pays ?? 0)) * 100) / 100)}`

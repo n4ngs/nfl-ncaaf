@@ -231,7 +231,7 @@ function bookTable(g) {
     const p = sideOf(L, m, side);
     if (!p || (p.line == null && p.odds == null)) {
       const q = live && k !== 'cons' && k !== 'open' ? sideOf(g.books?.[k], m, side) : null;
-      if (q && (q.line != null || q.odds != null)) return `<span class="px num na pre" title="No live feed for this book. Its last pregame number.">${esc(m === 'ml' ? fmtOdds(q.odds) : m === 't' ? `${side === 'over' ? 'o' : 'u'}${fmtTot(q.line)}` : fmtPts(q.line))}<small>close</small></span>`;
+      if (q && (q.line != null || q.odds != null)) return `<span class="px num na pre" title="No live feed for this book. Its last pregame number.">${esc(m === 'ml' ? fmtOdds(q.odds) : m === 't' ? `${side === 'over' ? 'o' : 'u'}${fmtTot(q.line)}` : fmtPts(q.line))}<small>last pregame</small></span>`;
       return '<span class="px na">—</span>';
     }
     const b = best[`${m}${side}`];
@@ -240,10 +240,10 @@ function bookTable(g) {
     const flash = flashAttr(g.id, live ? 'live' : 'pre', k, m);
     const old = isOld(L);
     const cls = `px num${isBest ? ' best' : ''}${L?.m ? ' man' : ''}${flash.cls}${k === 'open' ? ' na' : ''}${old ? ' old' : ''}`;
-    const inner = `${esc(main)}${m !== 'ml' && p.odds != null ? `<small>${esc(fmtOdds(p.odds))}</small>` : ''}`;
-    if (k === 'open' || isFinal(g)) return `<span class="${cls}"${flash.style}>${inner}</span>`;
+    const inner = `${esc(main)}${m !== 'ml' && p.odds != null ? `<small>${esc(fmtOdds(p.odds))}</small>` : ''}${k !== 'open' ? quoteStatusHTML(L, g, m, side) : ''}`;
+    if (k === 'open' || isFinal(g) || !quoteCanAct(L, g, m, side)) return `<span class="${cls}"${flash.style}>${inner}</span>`;
     const who = side === 'over' ? 'Over' : side === 'under' ? 'Under' : teamName(g[side]);
-    const label = [bookFull(k), `${who} ${main}`, m !== 'ml' ? fmtOdds(p.odds) : '', isBest ? 'best price' : '', L?.m ? 'typed in' : '', flash.label, old ? `checked ${ago(L.seen)}` : ''].filter(Boolean).join(', ');
+    const label = [bookFull(k), `${who} ${main}`, m !== 'ml' ? fmtOdds(p.odds) : '', isBest ? 'best price' : '', L?.m ? 'typed in' : '', flash.label, quoteFreshness(L, g, m, side).status].filter(Boolean).join(', ');
     return `<button type="button" class="${cls}"${flash.style} data-bet="${g.id}|${m}|${side}|${k}" aria-label="${esc(label)}">${inner}</button>`;
   };
   const rows = keys.map((k) => {
@@ -260,7 +260,7 @@ function bookTable(g) {
 
 function numbersPanel(g) {
   const out = [];
-  const m = g.mkt, c = g.close;
+  const m = g.mkt, c = closeOf(g);
   const fav = favSide(g);
   if (fav && m?.s != null) out.push([`${g[fav].abbr} spread`, fmtPts(-Math.abs(m.s)), g.open?.s != null ? `Opened ${fmtPts(fav === 'home' ? g.open.s : -g.open.s)}${c ? ` · closed ${fmtPts(fav === 'home' ? c.s : -c.s)}` : ''}` : '']);
   if (m?.t != null) out.push(['Total', fmtTot(m.t), g.open?.t != null ? `Opened ${fmtTot(g.open.t)}${c ? ` · closed ${fmtTot(c.t)}` : ''}` : '']);
@@ -268,11 +268,11 @@ function numbersPanel(g) {
   if (g.fpi != null) {
     const ms = spreadFromWin(g.fpi);
     const mf = ms < 0 ? 'home' : 'away';
-    const edge = m?.s != null ? Math.round((m.s - ms) * 10) / 10 : null;
-    out.push(['FPI model', `${g[mf].abbr} ${fmtPts(-Math.abs(ms))}`, `${fmtPct(g.fpi >= 0.5 ? g.fpi : 1 - g.fpi)} win chance for ${g[g.fpi >= 0.5 ? 'home' : 'away'].abbr}${edge ? ` · ${trim(Math.abs(edge))} pts ${edge > 0 ? `more on ${g.home.abbr}` : `more on ${g.away.abbr}`} than the market` : ''}`]);
+    const edge = null; // Upstream FPI creation/as-of evidence is absent, so no actionable market comparison.
+    out.push(['ESPN FPI reference', `${g[mf].abbr} ${fmtPts(-Math.abs(ms))}`, `${fmtPct(g.fpi >= 0.5 ? g.fpi : 1 - g.fpi)} win chance for ${g[g.fpi >= 0.5 ? 'home' : 'away'].abbr} · prediction timestamp unavailable; no earned signal CLV`]);
   }
   const pin = g.books?.pin;
-  if (pin?.ml?.[0] != null && pin?.ml?.[1] != null) {
+  if (pin?.ml?.[0] != null && pin?.ml?.[1] != null && quotePairCanDevig(pin, g, 'ml')) {
     const nv = noVig(pin.ml[0], pin.ml[1]);
     out.push(['Pinnacle fair', fmtPct(Math.max(nv.a, nv.b), 1), `No-vig win chance for ${g[nv.a >= nv.b ? 'home' : 'away'].abbr}${g.pinLimit ? ` · limit ${fmtMoney(g.pinLimit)}` : ''}`]);
   }
@@ -281,7 +281,7 @@ function numbersPanel(g) {
   else if (w.wind != null || w.temp != null) out.push(['Wind', w.wind != null ? `${w.wind}<small>mph</small>` : '—', [w.gust ? `gusts ${w.gust}` : null, w.dir, w.temp != null ? `${w.temp}°` : null, w.pop != null ? `${w.pop}% rain` : null, w.cond].filter(Boolean).join(' · ')]);
   if (g.tickets) out.push(['Bets tracked', g.tickets.toLocaleString(), 'Tickets in the public count']);
   const windy = w.wind >= 15 ? `<p class="quote"><b>Windy.</b> Sustained wind around ${w.wind} mph with gusts to ${w.gust} tends to cut deep passing and long kicks, which pulls scoring down.</p>` : '';
-  return `<div class="sub-h">The numbers</div><div class="kv" style="grid-template-columns:1fr 1fr">${out.slice(0, 6).map(([k, v, x]) => `<div><div class="k">${esc(k)}</div><div class="v num">${v}</div><div class="x">${esc(x)}</div></div>`).join('')}</div>${windy}`;
+  return `<div class="sub-h">The numbers</div><div class="kv" style="grid-template-columns:1fr 1fr">${out.slice(0, 6).map(([k, v, x]) => `<div><div class="k">${esc(k)}</div><div class="v num">${v}</div><div class="x">${esc(x)}</div></div>`).join('')}</div>${windy}${integrityGamePanel(g)}`;
 }
 
 function splitsPanel(g) {
@@ -325,11 +325,13 @@ function halfPanel(g) {
       if (p?.line == null) return '<span class="px na" aria-hidden="true">—</span>';
       const main = m === 'h1t' ? `${side === 'over' ? 'o' : 'u'}${fmtTot(p.line)}` : fmtPts(p.line);
       const who = side === 'over' ? 'First-half over' : side === 'under' ? 'First-half under' : `${teamName(g[side])} first half`;
-      return `<button type="button" class="px num" data-bet="${g.id}|${m}|${side}|${k}" aria-label="${esc(`${bookFull(k)}, ${who} ${main}, ${fmtOdds(p.odds)}`)}">${esc(main)}<small>${esc(fmtOdds(p.odds))}</small></button>`;
+      const detail = `${esc(main)}<small>${esc(fmtOdds(p.odds))}</small>${quoteStatusHTML(L,g,m,side)}`;
+      if (isFinal(g) || !quoteCanAct(L,g,m,side)) return `<span class="px num old">${detail}</span>`;
+      return `<button type="button" class="px num" data-bet="${g.id}|${m}|${side}|${k}" aria-label="${esc(`${bookFull(k)}, ${who} ${main}, ${fmtOdds(p.odds)}`)}">${detail}</button>`;
     };
     return `<tr><td><div class="bk">${esc(bookName(k))}</div></td><td>${c('h1s', 'away')}</td><td>${c('h1s', 'home')}</td><td>${c('h1t', 'over')}</td><td>${c('h1t', 'under')}</td></tr>`;
   }).join('');
-  const tt = g.tt ? ['away', 'home'].filter((s) => g.tt[s]).map((s) => `<div><div class="k">${esc(g[s].abbr)} team total</div><div class="v num">${fmtTot(g.tt[s].pts)}</div><div class="x">o ${esc(fmtOdds(g.tt[s].over))} · u ${esc(fmtOdds(g.tt[s].under))}</div></div>`).join('') : '';
+  const tt = g.tt ? ['away', 'home'].filter((s) => g.tt[s]).map((s) => `<div><div class="k">${esc(g[s].abbr)} team total</div><div class="v num">${fmtTot(g.tt[s].pts)}</div><div class="x">o ${esc(fmtOdds(g.tt[s].over))} · u ${esc(fmtOdds(g.tt[s].under))}${quoteStatusHTML(g.tt[s],g,'tt','over')}<small>${esc(integrityUTC(quoteEvidence(g.tt[s],'tt','over')?.source_observed_at))} · ${esc(quoteEvidence(g.tt[s],'tt','over')?.source || 'source unavailable')}</small></div></div>`).join('') : '';
   return `<div class="gs-grid">${rows ? `<div class="card" style="overflow-x:auto;padding-top:14px"><table class="btable"><thead><tr><th>1st half</th><th>${esc(g.away.abbr)}</th><th>${esc(g.home.abbr)}</th><th>Over</th><th>Under</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div></div>'}${tt ? `<div class="kv" style="grid-template-columns:1fr 1fr;align-self:start">${tt}</div>` : ''}</div>`;
 }
 
@@ -363,7 +365,7 @@ function legFrom(g, mkt, side, book) {
   const src = mkt.startsWith('h1') ? g.h1 : isLive(g) ? g.live : g.books;
   const L = book ? src?.[book] : null;
   const p = sideOf(L, mkt, side) || {};
-  return { gid: g.id, mkt, side, line: p.line ?? null, odds: p.odds ?? -110, book: book && book !== 'cons' && book !== 'open' ? book : '', live: isLive(g) };
+  return { gid: g.id, mkt, side, line: p.line ?? null, odds: p.odds ?? -110, book: book && book !== 'cons' && book !== 'open' ? book : '', live: isLive(g), entry_snapshot_id: quoteSnapshotId(L, mkt, side) };
 }
 function legLabel(g, l) {
   const t = l.side === 'home' || l.side === 'away' ? g[l.side] : null;
@@ -381,6 +383,7 @@ function legLabel(g, l) {
 function fairFor(g, l) {
   if (!g || !isPre(g) || typeof edgePrice !== 'function') return null;
   const r = edgePrice(g, l.mkt, l.side, l.mkt === 'ml' ? null : l.line, l.odds, l.book || null);
+  if (r && recordDisplayedSignal(g, { ...r, mkt: l.mkt, side: l.side, line: l.line, odds: l.odds, book: l.book }, 'edge-existing-v1') !== 'RECORDED') return null;
   return r ? { p: r.p, push: r.push, ev: r.ev, book: r.src, est: r.est, conf: r.conf } : null;
 }
 
@@ -413,6 +416,7 @@ function openSlip(opts = {}) {
     const l = legFrom(g, opts.mkt, opts.side, opts.book);
     slip = { legs: [l], stake: null, book: l.book, odds: l.odds };
   } else slip = { legs: [], stake: null, book: '', pick: true };
+  slip.placed = new Date(serverNow()).toISOString();
   S.sheet = { kind: 'slip', slip, returnTo: sheetOrigin() };
   paintSlip();
   showSheet('slip', true);
@@ -438,7 +442,7 @@ function slipBooksHTML(g, l, sel) {
     const L = src[b.key];
     const p = sideOf(L, m, l.side);
     if (!p || p.odds == null || (m !== 'ml' && p.line == null)) continue;
-    rows.push({ k: b.key, p, typed: !!L?.m, old: isOld(L) });
+    if (quoteCanAct(L, g, l.mkt, l.side)) rows.push({ k: b.key, p, typed: !!L?.m, old: isOld(L) });
   }
   if (!rows.length) return '';
   const best = bestOf(src, m, l.side)?.book;
@@ -488,6 +492,7 @@ function paintSlip() {
       <label class="fld">${single ? 'Odds' : 'Ticket odds'}<input class="inp" id="slOdds" inputmode="text" autocomplete="off" value="${esc(Number.isFinite(odds) ? String(odds) : '')}"></label>
       <label class="fld">Stake ($)<input class="inp" id="slStake" inputmode="decimal" autocomplete="off" placeholder="${esc(String(S.unit))}" value="${esc(Number.isFinite(sl.stake) ? String(sl.stake) : '')}"></label>
       ${single && !sl.parlay && sl.book !== 'other' ? '' : `<label class="fld">Book<select class="inp" id="slBook">${bookOpts}</select></label>`}
+      <label class="fld full">Actual wager time (your timezone)<input class="inp" id="slPlaced" type="datetime-local" step="1" value="${esc(integrityLocalInput(sl.placed))}"><span class="hint">Use the time shown on your ticket. Earlier bets without captured quote evidence remain unverified.</span></label>
       <label class="fld full">Note<input class="inp" id="slNote" style="font-weight:500;font-size:15px" placeholder="Optional: why you like it" value="${esc(sl.note || '')}"></label>
     </div>
     <div id="slCalc">${slipCalcHTML()}</div>
@@ -517,6 +522,7 @@ function slipCalcHTML() {
   const l0 = legs[0]?.l;
   const words = !single || !l0 ? '' : l0.mkt === 's' && Number.isFinite(l0.line) ? spreadWords(legs[0].g[l0.side], l0.line) : l0.mkt === 't' && Number.isFinite(l0.line) ? totalWords(l0.line) : l0.mkt === 'ml' && okOdds ? oddsWords(l0.odds) : '';
   return `<div class="calc"><div><div class="k">To win</div><div class="v num">${win == null ? '—' : fmtMoney(Math.round(win * 100) / 100)}</div></div><div><div class="k">Implied</div><div class="v num">${okOdds ? fmtPct(imp(odds), 1) : '—'}</div></div><div><div class="k">${fair ? `vs ${esc(bookName(fair.book))}${fair.est ? ' (est.)' : ''}` : 'vs sharp'}</div><div class="v num soft">${edge == null ? '—' : `${fair.est ? '≈ ' : ''}${edge >= 0 ? '+' : MINUS}${Math.abs(Math.round(edge * 100))}%`}</div></div></div>
+    ${single && !fair ? '<p class="note">Edge unavailable until a fresh quote and immutable signal evidence are verified.</p>' : ''}
     ${kellySlipHTML(fair, odds, okOdds, sl.stake)}
     ${words || fair ? `<p class="note">${esc(words)}${fair ? ` With the cut removed, ${esc(bookName(fair.book))}’s price implies about ${Math.round(fair.p * 100)}% for this side: the market’s estimate, not a sure thing. ${fair.ev > 0 ? `Reading: ${esc(EDGE_CONF[fair.conf] || '')}.` : 'This price is at or below the sharp price.'}` : ''}</p>` : ''}
     ${bookLinkHTML(single ? S.sheet.slip.book : '')}`;
@@ -604,17 +610,19 @@ function readSlip() {
     return t === '' ? NaN : n;
   };
   const line = num('#slLine'), odds = num('#slOdds'), stake = num('#slStake');
-  if (line !== undefined && sl.legs.length === 1) sl.legs[0].line = line;
-  if (odds !== undefined) { if (sl.legs.length === 1) sl.legs[0].odds = odds; sl.odds = odds; }
+  if (line !== undefined && sl.legs.length === 1) { if (sl.legs[0].line !== line) sl.legs[0].entry_snapshot_id = null; sl.legs[0].line = line; }
+  if (odds !== undefined) { if (sl.legs.length === 1) { if (sl.legs[0].odds !== odds) sl.legs[0].entry_snapshot_id = null; sl.legs[0].odds = odds; } sl.odds = odds; }
   if (stake !== undefined) sl.stake = stake;
   sl.book = $('#slBook')?.value ?? sl.book;
   sl.note = $('#slNote')?.value ?? sl.note;
+  if ($('#slPlaced')) { const at = new Date($('#slPlaced').value).getTime(); sl.placed = Number.isFinite(at) ? new Date(at).toISOString() : null; }
 }
 
 // Returns a list of [fieldId, message]; empty means the slip is good to save.
 function slipProblems() {
   const sl = S.sheet.slip;
   const out = [];
+  if (!Number.isFinite(Date.parse(sl.placed)) || Date.parse(sl.placed) > serverNow()) out.push(['#slPlaced', 'Enter the actual wager time, no later than now.']);
   if (!(sl.stake > 0) || !Number.isFinite(sl.stake)) out.push(['#slStake', 'Enter how much you risked.']);
   const odds = sl.legs.length === 1 ? sl.legs[0].odds : sl.odds;
   if (!Number.isFinite(odds) || Math.abs(odds) < 100) out.push(['#slOdds', 'Use American odds like −110 or +150.']);
@@ -622,7 +630,7 @@ function slipProblems() {
   return out;
 }
 function showSlipProblems(list) {
-  for (const id of ['#slStake', '#slOdds', '#slLine']) { const el = $(id); if (el) { el.removeAttribute('aria-invalid'); el.parentElement.querySelector('.hint')?.remove(); } }
+  for (const id of ['#slStake', '#slOdds', '#slLine', '#slPlaced']) { const el = $(id); if (el) { el.removeAttribute('aria-invalid'); el.parentElement.querySelector('.hint')?.remove(); } }
   for (const [id, msg] of list) {
     const el = $(id);
     if (!el) continue;
@@ -641,7 +649,7 @@ async function saveBet() {
   const sl = S.sheet.slip;
   const legs = sl.legs.map((l) => { const g = gameById(l.gid); return { ...l, label: legLabel(g, l), matchup: `${g.away.abbr} @ ${g.home.abbr}`, start: g.start }; });
   try {
-    const bet = await api('/api/bets', { method: 'POST', body: JSON.stringify({ legs, stake: sl.stake, odds: legs.length > 1 ? sl.odds : undefined, book: sl.book === 'other' ? 'Other' : sl.book ? bookFull(sl.book) : '', note: sl.note }) });
+    const bet = await api('/api/bets', { method: 'POST', body: JSON.stringify({ legs, placed: sl.placed, stake: sl.stake, odds: legs.length > 1 ? sl.odds : undefined, book: sl.book === 'other' ? 'Other' : sl.book ? bookFull(sl.book) : '', note: sl.note }) });
     if (sl.parlay) S.parlay = [];
     const back = S.sheet.returnTo;
     toastText('Bet saved. It grades itself when the game ends.', { label: 'Undo', run: () => api(`/api/bets/${bet.id}`, { method: 'DELETE' }).catch((e) => toastText(e.message)) });

@@ -36,6 +36,9 @@ const Group = require('./lib/group');
 const Tel = require('./lib/telemetry');
 const BetMGM = require('./lib/betmgm');
 const { margins } = require('./lib/margins');
+const { IntegrityStore, freshness } = require('../shared/clv-integrity');
+const integrity = new IntegrityStore({ dataDir: U.DATA, sport: 'ncaaf', config: { pregame_max_age_ms: process.env.CLV_PREGAME_MAX_AGE_MS, live_max_age_ms: process.env.CLV_LIVE_MAX_AGE_MS, closing_max_age_ms: process.env.CLV_CLOSING_MAX_AGE_MS, aging_ratio: process.env.CLV_AGING_RATIO } });
+Bets.configureIntegrity(integrity, gameById);
 
 const { log } = U;
 const PORT = Number(process.env.PORT) || 4848;
@@ -94,16 +97,122 @@ function nextId() {
   return n ? wid({ season: cal.season, type: n.type, week: n.week }) : null;
 }
 
+// CLV Integrity v1 keeps provider observations separate from this mutable display cache.
+// Legacy chart files remain intact; the append-only ledger is the authority for entries and closes.
+function retainObservation(G, book, L, source, receivedAt, isLive = false, period = 'full_game', providerEvent = null, extra = {}) {
+  if (!L) return L;
+  const metadata = { source, received_at: receivedAt, is_live: typeof L.is_live === 'boolean' ? L.is_live : isLive, period,
+    provider_event_id: providerEvent || L.provider_event_id || null, ...extra };
+  const observations = integrity.observeLine(G, book, L, metadata);
+  const mapped = {}, ids = {};
+  for (const q of observations) {
+    (mapped[q.market_type] ||= {})[q.selection] = q;
+    (ids[q.market_type] ||= {})[q.selection] = q.snapshot_id;
+  }
+  return { ...L, integrity: mapped, snapshot_ids: ids, src: source, is_live: metadata.is_live };
+}
+function retainBooks(G, books, source, receivedAt, isLive, period, providerEvent) {
+  return Object.fromEntries(Object.entries(books || {}).map(([book, L]) => [book,
+    retainObservation(G, book, L, source, receivedAt, isLive, period, providerEvent)]));
+}
+function quoteView(L) {
+  if (!L) return L;
+  const mapped = {}, states = [];
+  for (const [market, sides] of Object.entries(L.integrity || {})) {
+    mapped[market] = {};
+    for (const [side, q] of Object.entries(sides)) {
+      const f = freshness(q, Date.now(), integrity.config);
+      states.push({ ...f, source_observed_at: q.source_observed_at });
+      mapped[market][side] = { ...q, freshness: f.status, age_ms: f.age_ms, reason_code: f.reason_code };
+    }
+  }
+  const rank = { FRESH: 0, AGING: 1, STALE: 2, SUSPENDED: 3, UNVERIFIED: 4, CONFLICTED: 5 };
+  const worst = states.sort((a, b) => (rank[b.status] ?? 5) - (rank[a.status] ?? 5))[0];
+  const clocks = states.map((s) => Date.parse(s.source_observed_at));
+  return { ...L, integrity: mapped, freshness: worst?.status || 'UNVERIFIED',
+    age_ms: worst?.age_ms ?? null, reason_code: worst ? worst.reason_code : 'MISSING_SOURCE_TIMESTAMP',
+    source_observed_at: clocks.length && clocks.every(Number.isFinite) ? new Date(Math.min(...clocks)).toISOString() : null,
+    market_status: worst?.status === 'SUSPENDED' ? 'suspended' : L.market_status || 'active' };
+}
+const quoteViews = (books) => Object.fromEntries(Object.entries(books || {}).map(([k, L]) => [k, quoteView(L)]));
+function integrityThresholds() {
+  const c = integrity.config || {};
+  return { pregame_ms: c.pregame_max_age_ms,
+    live_ms: c.live_max_age_ms, aging_ratio: c.aging_ratio };
+}
+function resolvedMarkets(G, W, books) {
+  const markets = {};
+  for (const market of ['s', 't', 'ml', 'h1s', 'h1t']) {
+    const sourceBooks = market.startsWith('h1') ? mergedHalf(G, W) || {} : books;
+    const recorded = (integrity.byEvent.get(String(G.id)) || []).filter((q) => q.market_type === market).map((q) => q.sportsbook);
+    const available = new Set([...Object.keys(sourceBooks), ...recorded].filter((k) => k !== 'open' && !k.startsWith('reported_open:')));
+    const candidates = [...new Set(['cons', 'dk', 'pin', ...available])].filter((k) => available.has(k));
+    if (!candidates.length) candidates.push('cons');
+    for (const selection of market.endsWith('t') ? ['over', 'under'] : ['home', 'away']) {
+      let chosen = null;
+      for (const book of candidates) {
+        const sources = [...new Set([sourceBooks[book]?.src, ...(integrity.byEvent.get(String(G.id)) || []).filter((q) => q.sportsbook === book && q.market_type === market).map((q) => q.source)])].filter(Boolean);
+        if (!sources.length) sources.push(null);
+        const readings = sources.map((source) => integrity.resolve({ ...G, quote_source: source }, market, selection, book));
+        const newest = (kind) => readings.filter((r) => r[kind]).sort((a, b) => Date.parse(b[kind].source_observed_at) - Date.parse(a[kind].source_observed_at))[0];
+        const close = newest('close'), current = newest('current');
+        const opening = readings.filter((r) => r.open).sort((a, b) => Date.parse(a.open.source_observed_at) - Date.parse(b.open.source_observed_at))[0];
+        const r = { ...(close || current || readings[0]), close: close?.close || null,
+          current: current?.current || null, open: opening?.open || null,
+          open_snapshot_id: opening?.open?.snapshot_id || null, current_snapshot_id: current?.current?.snapshot_id || null,
+          current_freshness: (current || readings[0]).current_freshness };
+        if (!chosen || (!chosen.current && !chosen.close && (r.current || r.close || (!chosen.open && r.open)))) chosen = r;
+        if (r.current || r.close) break;
+      }
+      markets[`${market}:${selection}`] = chosen;
+    }
+  }
+  return markets;
+}
+function canonicalLine(markets, kind) {
+  const q = (m, s) => markets[`${m}:${s}`]?.[kind];
+  const s = q('s', 'home'), a = q('s', 'away'), t = q('t', 'over'), u = q('t', 'under');
+  const h = q('ml', 'home'), v = q('ml', 'away');
+  const points = [s, a, t, u, h, v].filter(Boolean);
+  if (!points.length) return null;
+  const at = points.map((x) => Date.parse(x.source_observed_at)).filter(Number.isFinite);
+  const resolutions = ['s:home', 's:away', 't:over', 't:under', 'ml:home', 'ml:away'].map((k) => markets[k]).filter((r) => r?.[kind]);
+  const coherent = (a, b, spread = false) => a && b && a.canonical_market_key === b.canonical_market_key && a.sportsbook === b.sportsbook && a.source === b.source && a.source_observed_at === b.source_observed_at && a.pair_id === b.pair_id && (spread ? a.line_value === -b.line_value : a.line_value === b.line_value);
+  const prices = (a, b, spread = false) => [a?.american_odds ?? null, !a || coherent(a, b, spread) ? b?.american_odds ?? null : null];
+  return { s: s?.line_value ?? (a?.line_value == null ? null : -a.line_value),
+    so: prices(s, a, true), t: t?.line_value ?? u?.line_value ?? null,
+    to: prices(t, u), ml: prices(h, v),
+    integrity: { s: { home: s || null, away: a || null }, t: { over: t || null, under: u || null }, ml: { home: h || null, away: v || null } },
+    at: at.length ? Math.max(...at) : null,
+    ...(kind === 'close' ? { close_status: resolutions.every((r) => r.close_status === 'VERIFIED') ? 'VERIFIED' : 'PROVISIONAL',
+      kickoff_basis: resolutions[0]?.kickoff_basis || null, resolver_version: resolutions[0]?.resolver_version || null } : {}) };
+}
+function integrityHistory(G, W) {
+  const legacy = W.lines.full(G.id);
+  const markets = resolvedMarkets(G, W, mergedBooks(G, W));
+  return { ...(legacy || {}), legacy_open: legacy?.open || null, legacy_close: legacy?.close || null,
+    open: canonicalLine(markets, 'open'), close: canonicalLine(markets, 'close'),
+    classification: 'RETROSPECTIVE_MARKET_MOVE', integrity: { markets } };
+}
+
 // ---------------------------------------------------------------- the public game object
-// One line per book. When several feeds carry the same book, the fastest wins:
+// One intact provider line per book. Prefer eligible source-timed observations; otherwise display:
 // Action Network, then VSiN, then Action's public-betting feed, then Pinnacle, then ESPN.
 // These are the feeds only. Numbers typed in at a counter belong to the device that typed them, so each
 // browser merges its own on top of this (see /api/manual) and the recorded history stays the real market.
 function mergedBooks(G, W) {
   const an = W.an.get(G.id), a1 = W.a1.get(G.id), vs = W.vs.get(G.id), pin = W.pin.get(G.id);
   const out = {};
-  // `seen` is when this app last confirmed the number with its source (the board dims old ones).
-  const put = (src, books, seen) => { for (const [k, L] of Object.entries(books || {})) if (!out[k] && L) out[k] = { ...L, src, seen: seen || null }; };
+  // Source timestamps and immutable snapshot evidence determine eligibility; receipt timestamps do not.
+  const eligibleAt = (L) => Math.max(-Infinity, ...Object.values(L?.integrity || {}).flatMap((sides) => Object.values(sides))
+    .filter((q) => ['FRESH', 'AGING'].includes(q.freshness)).map((q) => Date.parse(q.source_observed_at)));
+  const put = (src, books) => { for (const [k, L] of Object.entries(books || {})) {
+    if (!L) continue;
+    const candidate = quoteView({ ...L, src });
+    // Keep a complete provider line together. Unverified receipt-only feeds cannot hide a source-timed
+    // eligible quote for this sportsbook. Each selection still carries its own quality evidence.
+    if (!out[k] || eligibleAt(candidate) > eligibleAt(out[k])) out[k] = candidate;
+  } };
   put('an', an?.books, W.at.an);
   put('vsin', vs?.books, VSIN_AT.t);
   put('an1', a1?.books, W.at.a1);
@@ -118,7 +227,11 @@ function mergedHalf(G, W) {
   const pin = W.pin.get(G.id);
   // Each first-half price carries when its source last confirmed it, so stale ones can be dimmed and skipped.
   for (const [src, at] of [[W.a1.get(G.id)?.h1, W.at.a1], [W.vs.get(G.id)?.h1, VSIN_AT.t], [pin?.h1 ? { pin: pin.h1 } : null, pin?.at]]) {
-    for (const [k, L] of Object.entries(src || {})) if (!out[k] && L && (L.s != null || L.t != null)) out[k] = { ...L, seen: at || null };
+    for (const [k, L] of Object.entries(src || {})) if (L && (L.s != null || L.t != null)) {
+      const candidate = quoteView(L);
+      const score = (x) => Math.max(-Infinity, ...Object.values(x?.integrity || {}).flatMap((sides) => Object.values(sides)).filter((q) => ['FRESH', 'AGING'].includes(q.freshness)).map((q) => Date.parse(q.source_observed_at)));
+      if (!out[k] || score(candidate) > score(out[k])) out[k] = candidate;
+    }
   }
   return Object.keys(out).length ? out : null;
 }
@@ -140,6 +253,7 @@ function pub(G, W) {
   const P = W.pin.get(G.id) || {};
   const books = mergedBooks(G, W);
   const H = W.lines.full(G.id);
+  const canonical = resolvedMarkets(G, W, books);
   const wx = G.venue?.indoor ? { dome: true } : { ...(G.wx || {}), ...(W.wx.get(G.id) || {}) };
   const { dk, ...base } = G;
   const strip = ({ key, locKey, ...t }) => t;
@@ -150,10 +264,11 @@ function pub(G, W) {
     wk: W.id,
     rot: an.rot || null,
     books,
-    live: G.state === 'in' ? an.live || {} : null,
-    mkt: marketOf(books),
-    open: openOf(G, W, books),
-    close: H?.close || null,
+    live: G.state === 'in' ? quoteViews(an.live || {}) : null,
+    mkt: canonicalLine(canonical, 'current'),
+    open: canonicalLine(canonical, 'open'),
+    close: canonicalLine(canonical, 'close'),
+    integrity: { markets: canonical, thresholds: integrityThresholds(), retrospective_status: 'RETROSPECTIVE_MARKET_MOVE' },
     splits: an.splits || null,
     tt: an.tt || null,
     h1: mergedHalf(G, W),
@@ -165,7 +280,7 @@ function pub(G, W) {
     // price read as 300ms, fresh, which is the worst bug this could have. The guest feed is CDN-cached for
     // up to ~15 minutes, so most of the time this number is too old to use, and that is the honest answer.
     pinLive: P.liveLine
-      ? { line: P.liveLine, limit: P.liveLimit ?? null, age: Number.isFinite(P.liveAge) ? P.liveAge * 1000 : null }
+      ? { line: quoteView(P.liveLine), limit: P.liveLimit ?? null, age: Number.isFinite(P.liveAge) ? P.liveAge * 1000 : null }
       : null,
     prob: G.state === 'in' ? an.prob || null : null,
     tickets: an.bets || null,
@@ -221,7 +336,15 @@ function emit(type, data) {
 function emitBets() {
   if (!clients.size) return;
   const by = Bets.byOwner();
-  for (const res of clients) res.write(`event: bets\ndata: ${JSON.stringify(by.get(res.uid) || [])}\n\n`);
+  for (const res of clients) {
+    const list = by.get(res.uid) || [];
+    // Resolutions are read projections. A kickoff or new closing observation must reach connected
+    // tickets even without a grading change, while elapsed milliseconds must not repaint every poll.
+    const signature = JSON.stringify(list, (key, value) => key === 'resolved_at' || key === 'age_ms' ? undefined : value);
+    if (res.__integrityBetsSig === signature) continue;
+    res.__integrityBetsSig = signature;
+    res.write(`event: bets\ndata: ${JSON.stringify(list)}\n\n`);
+  }
 }
 function emitSnapshot() {
   for (const res of clients) res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot(res.uid, res.role))}\n\n`);
@@ -235,7 +358,7 @@ function flush(W) {
        so without this EVERY game went out every 9 s during games and every phone redrew the whole board).
        Bucketed to 5 minutes it still refreshes well inside the client's 15-minute "old number" window, and a
        real change — a price, a score, the clock — goes out immediately as before. */
-    const s = JSON.stringify(p, (k, v) => (k === 'seen' && typeof v === 'number' ? Math.floor(v / 300e3) : v));
+    const s = JSON.stringify(p, (k, v) => (k === 'resolved_at' || k === 'age_ms' ? undefined : k === 'seen' && typeof v === 'number' ? Math.floor(v / 300e3) : v));
     if (W.sent.get(G.id) === s) continue;
     W.sent.set(G.id, s);
     if (clients.size) emit('game', p);
@@ -246,30 +369,32 @@ function flush(W) {
 async function pollEspn(W) {
   const j = await ESPN.fetchScoreboard(W.k);
   const seen = new Set();
+  integrity.batch(() => {
   for (const e of j.events || []) {
     const g = ESPN.gameFromEvent(e);
     if (!g) continue;
     seen.add(g.id);
+    if (g.dk?.open) retainObservation(g, 'open', g.dk.open, 'espn_reported_open', Date.now(), false, 'full_game', g.id);
+    if (g.dk?.cur) g.dk.cur = retainObservation(g, 'dk', g.dk.cur, 'espn', Date.now(), false, 'full_game', g.id);
     const prev = W.games.get(g.id);
     // ESPN drops odds once a game starts; keep the last pregame DraftKings numbers.
     if (!g.dk && prev?.dk) g.dk = prev.dk;
     if (prev && prev.state === 'pre' && g.state !== 'pre') onKickoff(W, g);
     W.games.set(g.id, g);
   }
+  });
   for (const id of W.games.keys()) if (!seen.has(id) && j.events?.length) W.games.delete(id);
   W.at.espn = Date.now();
   // Games that started before this server did still need a closing line.
   for (const g of W.games.values()) if (g.state !== 'pre' && !W.lines.full(g.id)?.close) onKickoff(W, g);
-  if (Bets.refresh(gameById, closeById)) emitBets();
+  Bets.refresh(gameById, closeById);
+  emitBets();
 }
 
 function onKickoff(W, g) {
-  const books = mergedBooks(g, W);
-  const c = books.cons || books.dk;
-  if (!c || (c.s == null && c.t == null)) return;
-  if (W.lines.setClose(g.id, { s: c.s, so: c.so, t: c.t, to: c.to, ml: c.ml, books: Object.fromEntries(Object.entries(books).filter(([k]) => k !== 'open').map(([k, L]) => [k, { s: L.s, t: L.t, ml: L.ml }])) })) {
-    log('close', g.away.abbr, '@', g.home.abbr, c.s, c.t);
-  }
+  // A scoreboard state change does not prove actual kickoff. The resolver only uses explicit verified
+  // start evidence; current adapters supply scheduled time, so any available close is provisional.
+  resolvedMarkets(g, W, mergedBooks(g, W));
 }
 
 // ---------------------------------------------------------------- Action Network
@@ -278,15 +403,23 @@ async function pollAn(W) {
   const espnGames = [...W.games.values()];
   const parsed = AN.parseV2(j, espnGames, W.anCache);
   const now = Date.now();
+  integrity.batch(() => {
   for (const [gid, patch] of parsed) {
-    W.an.set(gid, patch);
     const G = W.games.get(gid);
     if (!G) continue;
+    patch.books = retainBooks(G, patch.books, 'an', now, false, 'full_game', patch.an);
+    patch.live = retainBooks(G, patch.live, 'an', now, true, 'full_game', patch.an);
+    for (const [team, totals] of Object.entries(patch.tt || {})) {
+      const line = retainObservation(G, 'cons', { t: totals.pts, to: [totals.over, totals.under], integrityMeta: totals.integrityMeta }, 'an', now, false, 'full_game', patch.an, { market_type: 'tt', team });
+      patch.tt[team] = { ...totals, integrity: line.integrity, snapshot_ids: line.snapshot_ids };
+    }
+    W.an.set(gid, patch);
     if (G.state === 'pre') recordBooks(W, G, now);
     if (G.state === 'in' && patch.live?.cons) W.lines.recordLive(gid, patch.live.cons, now);
     const o = patch.books.open;
     if (o) W.lines.setOpen(gid, { s: o.s, t: o.t, ml: o.ml, at: W.a1.get(gid)?.openAt || W.lines.full(gid)?.open?.at || null });
   }
+  });
   W.at.an = now;
 }
 
@@ -300,13 +433,18 @@ async function pollAn1(W) {
     const o = (ag.odds || []).find((x) => x.book_id === 30 && x.type === 'game');
     if (patch && o?.inserted) patch.openAt = Date.parse(o.inserted);
   }
+  integrity.batch(() => {
   for (const [gid, patch] of parsed) {
-    W.a1.set(gid, patch);
     const G = W.games.get(gid);
+    if (!G) continue;
+    patch.books = retainBooks(G, patch.books, 'an1', now, false, 'full_game', patch.an);
+    patch.h1 = retainBooks(G, patch.h1, 'an1', now, false, 'first_half', patch.an);
+    W.a1.set(gid, patch);
     if (G?.state === 'pre') recordBooks(W, G, now);
     const H = W.lines.full(gid);
     if (patch.openAt && H?.open && !H.open.at) W.lines.setOpen(gid, { ...H.open, at: patch.openAt });
   }
+  });
   W.at.a1 = now;
 }
 
@@ -332,14 +470,19 @@ async function pollVsin() {
   const v = await VSIN.fetchVsin();
   if (v.same && VSIN_AT.stamp) return false;
   VSIN_AT.stamp = v.stamp;
-  VSIN_AT.t = VSIN.stampTime(v.stamp) || Date.now();
+  VSIN_AT.t = VSIN.stampTime(v.stamp);
   const { all, weekOf } = trackedGames();
+  integrity.batch(() => {
   for (const [gid, patch] of VSIN.matchAll(v.games, all)) {
     const W = weekOf.get(gid);
-    W.vs.set(gid, patch);
     const G = W.games.get(gid);
+    patch.books = retainBooks(G, patch.books, 'vsin', Date.now(), false, 'full_game');
+    patch.h1 = retainBooks(G, patch.h1, 'vsin', Date.now(), false, 'first_half');
+    for (const [book, reported] of Object.entries(patch.open || {})) retainObservation(G, `reported_open:${book}`, { ...reported, market_status: 'unverified' }, 'vsin_reported_open', Date.now(), false);
+    W.vs.set(gid, patch);
     if (G.state === 'pre') recordBooks(W, G);
   }
+  });
   for (const W of tracked()) W.at.vsin = Date.now();
   return true;
 }
@@ -347,18 +490,21 @@ async function pollVsin() {
 async function pollPin() {
   const pg = await PIN.fetchPinnacle();
   const { all, weekOf } = trackedGames();
+  integrity.batch(() => {
   for (const [gid, patch] of PIN.matchPinnacle(pg, all)) {
     const W = weekOf.get(gid);
     const prev = W.pin.get(gid);
-    // Pinnacle takes the pre-game parent off its board at kickoff and lists the game again as a live
-    // child. Keep the last pregame number as `line` — that is what the game closed at — and let the
-    // in-play price ride alongside it, never over it.
-    W.pin.set(gid, patch.line
-      ? { ...patch, at: Date.now() }
-      : { ...prev, ...patch, line: prev?.line ?? null, h1: prev?.h1 ?? null, limit: prev?.limit ?? null, live: true, at: Date.now() }); // `at`: last time Pinnacle listed it
     const G = W.games.get(gid);
+    const now = Date.now();
+    if (patch.line) patch.line = retainObservation(G, 'pin', patch.line, 'pin', now, false);
+    if (patch.h1) patch.h1 = retainObservation(G, 'pin', patch.h1, 'pin', now, false, 'first_half');
+    if (patch.liveLine) patch.liveLine = retainObservation(G, 'pin', patch.liveLine, 'pin', now, true);
+    // A live child may not refresh the timestamp or provenance of its retained pregame parent.
+    W.pin.set(gid, patch.line ? { ...patch, at: patch.line.source_observed_at || null }
+      : { ...prev, ...patch, line: prev?.line ?? null, h1: prev?.h1 ?? null, limit: prev?.limit ?? null, at: prev?.at || null });
     if (G.state === 'pre' && patch.line) recordBooks(W, G);
   }
+  });
   for (const W of tracked()) W.at.pin = Date.now();
 }
 
@@ -429,7 +575,8 @@ async function pollStrays() {
       if (g) strays.set(gid, g);
     } catch (e) { log('stray', gid, e.message); }
   }
-  if (Bets.refresh(gameById, closeById)) emitBets();
+  Bets.refresh(gameById, closeById);
+  emitBets();
 }
 
 // ---------------------------------------------------------------- calendar and the default week
@@ -1100,7 +1247,7 @@ const server = http.createServer(async (req, res) => {
         if (!G) continue;
         const s = await summary(G);
         if (s?.fpi && G.state === 'pre') W.fpi.set(G.id, { home: s.fpi.home, at: Date.now() });
-        return sendJSON(res, 200, { now: Date.now(), game: pub(G, W), hist: W.lines.full(G.id), summary: s });
+        return sendJSON(res, 200, { now: Date.now(), game: pub(G, W), hist: integrityHistory(G, W), summary: s });
       }
       return sendJSON(res, 404, { error: 'That game is not loaded. Open its week first.' });
     }
@@ -1201,7 +1348,7 @@ const server = http.createServer(async (req, res) => {
         const clvPts = [], mkts = {}, books = {};
         for (const b of bets) {
           for (const l of b.legs || []) {
-            if (l.clv && Number.isFinite(l.clv.pts)) clvPts.push(l.clv.pts);
+            if (l.integrity?.status === 'VERIFIED_CLV' && Number.isFinite(l.integrity.line_clv_points)) clvPts.push(l.integrity.line_clv_points);
             if (l.mkt) mkts[l.mkt] = (mkts[l.mkt] || 0) + 1;
           }
           if (b.book) books[b.book] = (books[b.book] || 0) + 1;
@@ -1232,6 +1379,8 @@ const server = http.createServer(async (req, res) => {
           avgStake: stakes.length ? stakes.reduce((a, b) => a + b, 0) / stakes.length : null,
           maxStake: stakes.length ? Math.max(...stakes) : null,
           medStake: median(stakes),
+          clvStatus: 'VERIFIED_CLV',
+          clvMeasure: 'line_clv_points',
           clvN: clvPts.length,
           clvAvg: clvPts.length ? clvPts.reduce((a, b) => a + b, 0) / clvPts.length : null,
           clvBeat: clvPts.length ? clvPts.filter((x) => x > 0).length / clvPts.length : null,
@@ -1257,7 +1406,7 @@ const server = http.createServer(async (req, res) => {
             placed: b.placed, created: b.created, settled: b.settled,
             book: b.book || '', stake: b.stake, odds: b.odds, status: b.status, net: b.net,
             note: b.note || '',
-            legs: (b.legs || []).map((l) => ({ gid: l.gid, mkt: l.mkt, side: l.side, line: l.line, odds: l.odds, team: l.team || null, state: l.state || null, clv: l.clv || null })),
+            legs: (b.legs || []).map((l) => ({ gid: l.gid, mkt: l.mkt, side: l.side, line: l.line, odds: l.odds, team: l.team || null, state: l.state || null, integrity: l.integrity || null })),
           });
         }
       }
@@ -1386,12 +1535,39 @@ const server = http.createServer(async (req, res) => {
       }
       return sendJSON(res, 405, { error: 'Method' });
     }
+    if (p === '/api/integrity/signals' && M === 'POST') {
+      const body = await readBody(req);
+      const entry = integrity.snapshot(body.entry_snapshot_id);
+      const event = gameById(String(body.event_id || ''));
+      if (!entry || !event || String(entry.canonical_event_id) !== String(event.id)) return sendJSON(res, 400, { error: 'Signal needs an observed entry from this event.' });
+      const now = Date.now();
+      const quoteState = freshness(entry, now, integrity.config);
+      if (!['FRESH', 'AGING'].includes(quoteState.status)) return sendJSON(res, 400, { error: 'Signal entry is not verified and fresh.' });
+      const kickoffAt = Date.parse(event.actual_start_verified ? event.actual_start_at : event.start);
+      if (entry.is_live ? event.state !== 'in' : event.state !== 'pre' || now >= kickoffAt)
+        return sendJSON(res, 400, { error: 'Signal quote does not match the current pregame/live context.' });
+      // Creation time is server-owned: callers cannot retroactively create predictions after results.
+      const input = { event_id: event.id, canonical_event_id: event.id, market_type: entry.market_type,
+        selection: entry.selection, period: entry.period, team: entry.team, sportsbook: entry.sportsbook,
+        line_value: entry.line_value, american_odds: entry.american_odds,
+        model_version: body.model_version, feature_version: body.feature_version,
+        features_as_of: body.features_as_of, entry_snapshot_id: entry.snapshot_id,
+        predicted_probability: body.predicted_probability, predicted_line: body.predicted_line,
+        signal_direction: body.direction, signal_strength: body.strength };
+      const signalId = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
+      const prior = integrity.signals.get(signalId);
+      if (prior) return sendJSON(res, 200, { signal: prior });
+      let signal;
+      try { signal = integrity.recordSignal({ ...input, signal_id: signalId, prediction_created_at: new Date(now).toISOString() }); }
+      catch (e) { return sendJSON(res, 400, { error: e.message }); }
+      return sendJSON(res, 200, { signal });
+    }
     if (p === '/api/bets' && M === 'GET') return sendJSON(res, 200, Bets.list(uid));
     if (p === '/api/bets' && M === 'POST') {
       const b = Bets.create(await readBody(req), uid);
       Bets.refresh(gameById, closeById);
       emitBets();
-      return sendJSON(res, 200, b);
+      return sendJSON(res, 200, Bets.list(uid).find((x) => x.id === b.id) || b);
     }
     const bm = /^\/api\/bets\/([\w-]+)$/.exec(p);
     if (bm && M === 'PATCH') {
@@ -1399,7 +1575,7 @@ const server = http.createServer(async (req, res) => {
       if (!b) return sendJSON(res, 404, { error: 'No such bet' });
       Bets.refresh(gameById, closeById);
       emitBets();
-      return sendJSON(res, 200, b);
+      return sendJSON(res, 200, Bets.list(uid).find((x) => x.id === b.id) || b);
     }
     if (bm && M === 'DELETE') {
       const ok = Bets.remove(bm[1], uid);
@@ -1423,6 +1599,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/lan') return sendJSON(res, 200, { urls: PUBLIC_URL ? [PUBLIC_URL] : lanUrls(), public: !!PUBLIC_URL, port: PORT });
     if (p === '/api/health') {
       return sendJSON(res, 200, {
+        integrity: integrity.health(),
         ok: true, season: cal.season, def: defId, cur: curId, clients: clients.size, sources: U.health(), vsin: VSIN_AT,
         weeks: tracked().map((W) => ({ id: W.id, games: W.games.size, matched: W.an.size, at: W.at, live: [...W.games.values()].filter((g) => g.state === 'in').length })),
       });

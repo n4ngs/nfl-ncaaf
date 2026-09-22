@@ -52,23 +52,42 @@ function matchGame(ag, espnGames, cache) {
 // ---------------------------------------------------------------- v2: many books, live lines, splits
 function emptyLine() { return { s: null, so: [null, null], t: null, to: [null, null], ml: [null, null] }; }
 
+// Only provider timestamps are source evidence. Receipt time is kept separately by the server.
+function quoteMeta(o, live) {
+  const status = String(o.market_status || o.status || '').toLowerCase();
+  return {
+    source_observed_at: o.updated_at || o.updated || o.last_updated || o.inserted || null,
+    market_status: o.is_suspended || /suspend|lock|pause/.test(status) ? 'suspended'
+      : /remove|closed|settled/.test(status) ? 'removed' : status && !/^(open|active|available)$/.test(status) ? 'unverified' : 'active',
+    is_live: live,
+    ...(o.fixtureId || o.fixture_id ? { fixtureId: o.fixtureId || o.fixture_id } : {}),
+    optionMarketId: o.optionMarketId || o.option_market_id || null,
+    optionId: o.optionId || o.option_id || null,
+  };
+}
 function readMarkets(ev, side, live) {
   const L = emptyLine();
+  L.is_live = live;
+  L.integrityMeta = { s: {}, t: {}, ml: {} };
   const pick = (list) => (list || []).filter((o) => !!o.is_live === live);
   for (const o of pick(ev.spread)) {
     const sd = side[o.team_id];
     if (!sd) continue;
-    if (sd === 'home') { L.s = num(o.value); L.so[0] = num(o.odds); } else { L.so[1] = num(o.odds); if (L.s == null) L.s = num(o.value) == null ? null : -num(o.value); }
+    L.integrityMeta.s[sd] = { ...quoteMeta(o, live), line_value: num(o.value), american_odds: num(o.odds) };
+    if (sd === 'home') { L.s = num(o.value); L.so[0] = num(o.odds); }
+    else { L.so[1] = num(o.odds); if (L.s == null) L.s = num(o.value) == null ? null : -num(o.value); }
   }
   for (const o of pick(ev.total)) {
+    if (!['over', 'under'].includes(o.side)) continue;
+    L.integrityMeta.t[o.side] = { ...quoteMeta(o, live), line_value: num(o.value), american_odds: num(o.odds) };
     if (o.side === 'over') { L.t = num(o.value); L.to[0] = num(o.odds); }
-    if (o.side === 'under') { L.to[1] = num(o.odds); if (L.t == null) L.t = num(o.value); }
+    else { L.to[1] = num(o.odds); if (L.t == null) L.t = num(o.value); }
   }
   for (const o of pick(ev.moneyline)) {
     const sd = side[o.team_id];
-    if (sd) L.ml[sd === 'home' ? 0 : 1] = num(o.odds);
+    if (sd) { L.ml[sd === 'home' ? 0 : 1] = num(o.odds); L.integrityMeta.ml[sd] = { ...quoteMeta(o, live), line_value: null, american_odds: num(o.odds) }; }
   }
-  const has = L.s != null || L.t != null || L.ml[0] != null;
+  const has = Object.values(L.integrityMeta).some((m) => Object.keys(m).length);
   return has ? L : null;
 }
 
@@ -93,7 +112,8 @@ function teamTotals(ev, side) {
   for (const o of (ev.core_bet_type_6_team_score || []).filter((x) => !x.is_live)) {
     const sd = side[o.team_id];
     if (!sd) continue;
-    const r = (out[sd] ||= { pts: null, over: null, under: null });
+    const r = (out[sd] ||= { pts: null, over: null, under: null, integrityMeta: { tt: {} } });
+    r.integrityMeta.tt[o.side] = { ...quoteMeta(o, false), line_value: num(o.value), american_odds: num(o.odds) };
     r.pts = num(o.value);
     r[o.side] = num(o.odds);
   }
@@ -149,12 +169,15 @@ function parseV1(j, espnGames, cache) {
         to: [num(o.over), num(o.under)],
         ml: homeIsHome ? [num(o.ml_home), num(o.ml_away)] : [num(o.ml_away), num(o.ml_home)],
         at: Date.parse(o.inserted || 0) || null,
+        ...quoteMeta(o, !!o.is_live),
+        provider_event_id: ag.id,
       };
-      if (L.s == null && L.t == null && L.ml[0] == null) continue;
+      L.integrityMeta = { s: { home: { line_value: num(homeIsHome ? o.spread_home : o.spread_away), american_odds: L.so[0] }, away: { line_value: num(homeIsHome ? o.spread_away : o.spread_home), american_odds: L.so[1] } }, t: { over: { line_value: L.t, american_odds: L.to[0] }, under: { line_value: L.t, american_odds: L.to[1] } } };
+      if (L.s == null && L.t == null && L.ml[0] == null && L.market_status === 'active') continue;
       if (o.type === 'game' && keyOf[o.book_id]) books[keyOf[o.book_id]] = L;
-      if (o.type === 'firsthalf' && h1Key[o.book_id]) h1[h1Key[o.book_id]] = { s: L.s, so: L.so, t: L.t, to: L.to };
+      if (o.type === 'firsthalf' && h1Key[o.book_id]) h1[h1Key[o.book_id]] = { ...L, ml: [null, null] };
     }
-    out.set(m.id, { books, h1 });
+    out.set(m.id, { an: ag.id, books, h1 });
   }
   return out;
 }
@@ -162,4 +185,4 @@ function parseV1(j, espnGames, cache) {
 async function fetchV2(week) { return getBody(v2Url(week), { timeout: 20000, headers: { 'cache-control': 'no-cache' } }); }
 async function fetchV1(week) { return getBody(v1Url(week), { timeout: 20000, headers: { 'cache-control': 'no-cache' } }); }
 
-module.exports = { fetchV2, fetchV1, parseV2, parseV1 };
+module.exports = { fetchV2, fetchV1, parseV2, parseV1, readMarkets, quoteMeta };

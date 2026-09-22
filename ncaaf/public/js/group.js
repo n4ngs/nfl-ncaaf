@@ -159,7 +159,7 @@ const grpActOf = (uid) => (grpAct?.people || []).find((x) => x.uid === uid) || n
 
 // Closing line value, the one number that means something at this sample size.
 function grpClvBadge(P) {
-  if (!P || !P.clvN) return '';
+  if (!P || !P.clvN || P.clvStatus !== 'VERIFIED_CLV') return '';
   const avg = P.clvAvg;
   const cls = avg > 0.05 ? 'w' : avg < -0.05 ? 'l' : '';
   return `<span class="grp-clv ${cls}">CLV ${avg > 0 ? '+' : ''}${avg.toFixed(2)}<small>${Math.round((P.clvBeat || 0) * 100)}% beat · ${P.clvN}</small></span>`;
@@ -188,7 +188,7 @@ function grpPickTxt(b) {
   return parts.join(' + ') || grpLegs(b);
 }
 function grpLedgerRow(b) {
-  const clv = (b.legs || []).map((l) => l.clv).find((c) => c && Number.isFinite(c.pts));
+  const clv = (b.legs || []).map((l) => ({line_clv_points: integrityMetric(l, 'line_clv_points', true)})).find((c) => Number.isFinite(c.line_clv_points));
   const st = b.status === 'won' ? 'w' : b.status === 'lost' ? 'l' : '';
   const result = b.status === 'open'
     ? '<small>open</small>'
@@ -198,7 +198,7 @@ function grpLedgerRow(b) {
     <span class="grp-led-p">${esc(grpPickTxt(b))}<small>${esc(b.legs.length > 1 ? `${plural(b.legs.length, 'leg')} parlay` : '')}${esc(b.note ? `${b.legs.length > 1 ? ' · ' : ''}\u201c${b.note}\u201d` : '')}</small></span>
     <span class="grp-led-s">${esc(fmtMoney(b.stake))}<small>${esc(b.book || 'no book')} ${esc(fmtOdds(b.odds))}</small></span>
     <span class="grp-led-r">${result}</span>
-    <span class="grp-led-c">${clv ? `${clv.pts > 0 ? '+' : ''}${clv.pts}` : '—'}</span>
+    <span class="grp-led-c">${clv ? `${clv.line_clv_points > 0 ? '+' : ''}${clv.line_clv_points} pts · VERIFIED` : '—'}</span>
   </div>`;
 }
 
@@ -350,13 +350,12 @@ async function grpPersonSheet(uid) {
   const row = (b) => {
     const g = typeof gameById === 'function' ? gameById(b.legs?.[0]?.gid) : null;
     const match = g ? `${g.away?.abbr} @ ${g.home?.abbr}` : '';
-    const clv = (b.legs || []).map((l) => l.clv).find((c) => c && (Number.isFinite(c.pts) || Number.isFinite(c.pct)));
-    const clvTxt = clv ? (Number.isFinite(clv.pts) ? `${clv.pts > 0 ? '+' : ''}${clv.pts} pts vs close` : `${clv.pct > 0 ? '+' : ''}${clv.pct.toFixed(1)}% vs close`) : '';
+    const clvTxt = (b.legs || []).map(integrityShort).join(' · ');
     const when = b.placed ? Date.parse(b.placed) : b.created;
     return `<div class="grp-b">
       <span class="grp-b-m">${esc(grpPickTxt(b))}
         <small>${esc([match, b.book ? bookName(b.book) : '', when ? `${dayLabel(new Date(when).toISOString())} ${timeLabel(new Date(when).toISOString())}` : ''].filter(Boolean).join(' · '))}</small>
-        ${clvTxt ? `<small class="grp-b-clv ${clv.pts > 0 || clv.pct > 0 ? 'w' : (clv.pts < 0 || clv.pct < 0) ? 'l' : ''}">${esc(clvTxt)}</small>` : ''}
+        ${clvTxt ? `<small class="grp-b-clv">${esc(clvTxt)}</small>` : ''}
         ${b.note ? `<small>&ldquo;${esc(b.note)}&rdquo;</small>` : ''}</span>
       <span class="grp-b-r">${esc(fmtMoney(b.stake))}<small>${esc(fmtOdds(b.odds))}</small>${b.status === 'open' ? '<small>open</small>' : `<b class="${b.net > 0 ? 'w' : b.net < 0 ? 'l' : ''}">${esc(fmtMoney(b.net || 0, true))}</b><small>${esc(b.status)}${b.settled ? ` ${esc(ago(b.settled))}` : ''}</small>`}</span></div>`;
   };
@@ -373,7 +372,7 @@ async function grpPersonSheet(uid) {
     ${A && A.n ? `<div class="grp-sum" style="margin-top:16px">
       ${stat('Record', `${A.won}-${A.lost}${A.push ? `-${A.push}` : ''}`)}
       ${stat('Net', fmtMoney(A.net, true), A.net > 0 ? 'w' : A.net < 0 ? 'l' : '')}
-      ${stat('Beats the close', A.clvN ? `${Math.round((A.clvBeat || 0) * 100)}%` : '—', A.clvAvg > 0 ? 'w' : A.clvAvg < 0 ? 'l' : '')}
+      ${stat('Beats the close', A.clvStatus === 'VERIFIED_CLV' && A.clvN ? `${Math.round((A.clvBeat || 0) * 100)}%` : '—', A.clvAvg > 0 ? 'w' : A.clvAvg < 0 ? 'l' : '')}
     </div>` : ''}
     ${open.length ? `<div class="sub-h" style="margin-top:20px">Running now</div><div class="card grp-blist">${open.map(row).join('')}</div>` : ''}
     ${done.length ? `<div class="sub-h" style="margin-top:20px">Settled</div><div class="card grp-blist">${done.slice(0, 60).map(row).join('')}</div>` : ''}

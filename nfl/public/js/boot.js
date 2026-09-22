@@ -68,6 +68,7 @@ document.addEventListener('click', (ev) => {
     try { window.open('https://www.nv.betmgm.com/en/sports', '_blank', 'noopener'); } catch (e) { /* blocked */ }
     return;
   }
+  if (ev.target.closest('.integrity-leg')) return; // Native details expand without opening the game behind them.
   const t = ev.target.closest('button, a, [data-open], [data-bet]');
   if (!t) return;
   const d = t.dataset;
@@ -117,7 +118,8 @@ document.addEventListener('click', (ev) => {
     readSlip();
     const sl = S.sheet.slip, l = sl.legs[0], g = gameById(l?.gid);
     sl.book = d.slipBook;
-    if (g && d.slipBook !== 'other') { const f = legFrom(g, l.mkt, l.side, d.slipBook); if (f.odds != null) { l.odds = f.odds; if (f.line != null) l.line = f.line; l.book = d.slipBook; } }
+    if (g && d.slipBook !== 'other') { const f = legFrom(g, l.mkt, l.side, d.slipBook); if (f.odds != null) { l.odds = f.odds; if (f.line != null) l.line = f.line; l.book = d.slipBook; l.entry_snapshot_id = f.entry_snapshot_id; } }
+    else { l.book = 'other'; l.entry_snapshot_id = null; }
     paintSlip();
     return;
   }

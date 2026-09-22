@@ -20,3 +20,6 @@
 .clv-chart .end{fill:var(--ink)}
 .clv-t{margin-top:var(--s2)}
 @media (min-width:1024px){.clv{padding:var(--s3)}}
+
+/* Explicit evidence stays within the existing card design. */
+.integrity-leg{font-size:12px;margin:8px 0;color:var(--ink-2)}.integrity-leg summary{cursor:pointer;line-height:1.6}.integrity-detail{display:grid;gap:7px;padding:10px 0}.integrity-detail small{display:block;line-height:1.6;overflow-wrap:anywhere}.integrity-panel{margin-top:16px}.integrity-panel>div{margin-top:12px}.integrity-fresh{font-size:9px!important;letter-spacing:.03em}.integrity-leg summary{overflow-wrap:anywhere}

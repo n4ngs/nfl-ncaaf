@@ -16,23 +16,23 @@ function hitLeg(l) {
   if (l.state === 'lost') return { p: 0, how: 'lost' };
   if (l.state === 'push' || l.state === 'void') return { p: 1, how: 'push' };
   const g = gameById(l.gid);
-  if (!g) return { p: l.odds != null ? imp(l.odds) : 0.5, how: 'price' };
+  if (!g) return { p: null, how: 'unavailable' };
   const now = isPre(g) ? null : legNow(g, l);
   if (isFinal(g)) return { p: now > 0 ? 1 : now < 0 ? 0 : 1, how: now > 0 ? 'won' : now < 0 ? 'lost' : 'push', now, g };
   if (isLive(g)) {
     const p = coverChance(g, l);
     if (p != null) return { p, how: 'live', now, g };
-    return { p: now > 0 ? 0.6 : now < 0 ? 0.4 : 0.5, how: 'live', now, g, rough: true }; // halves and team totals: no model yet
+    return { p: null, how: 'unavailable', now, g }; // halves and team totals: no model yet
   }
   const f = typeof fairFor === 'function' ? fairFor(g, l) : null;
   if (f) return { p: f.p, how: 'fair', g };
-  return { p: l.odds != null ? imp(l.odds) : 0.5, how: 'price', g };
+  return { p: null, how: 'unavailable', g };
 }
 
 // One bet: its chance, what it pays, what it's expected to make, and the leg to open when tapped.
 function hitBet(b) {
   const legs = b.legs.map((l) => ({ l, ...hitLeg(l) }));
-  const p = legs.reduce((acc, x) => acc * x.p, 1);
+  const p = legs.every(x => Number.isFinite(x.p)) ? legs.reduce((acc, x) => acc * x.p, 1) : null;
   const open = legs.filter((x) => x.how === 'live' || x.how === 'fair' || x.how === 'price');
   const pays = toWin(b.stake, b.odds) || 0;
   const weakest = [...open].sort((x, y) => x.p - y.p)[0] || legs[0];
@@ -63,7 +63,9 @@ const betLegShort = (l) => l.label || '';
 function hitList(bets) {
   const open = bets.filter((b) => b.status === 'open');
   if (!open.length) return '';
-  const rows = open.map(hitBet);
+  const rows = open.map(hitBet).filter(x => Number.isFinite(x.p));
+  const omitted = open.length - rows.length;
+  if (!rows.length) return '<section class="card hit"><h3>Most likely to hit</h3><p class="note">Estimates unavailable: fresh, verified market evidence is required. Your tickets and grading remain below.</p></section>';
   const sort = store.get('hitSort', 'p');
   rows.sort(sort === 'time' ? (a, b) => a.kick - b.kick || b.p - a.p : (a, b) => b.p - a.p || a.kick - b.kick);
   const exp = rows.reduce((s, x) => s + x.p, 0);
@@ -85,11 +87,11 @@ function hitList(bets) {
   };
   return `<section class="card hit" aria-labelledby="hitTitle">
     <div class="hit-h">
-      <div><h3 id="hitTitle">Most likely to hit</h3><p>Updates live. Chances are est.${rows.some((x) => x.winning) ? ' A green bar is covering right now.' : ''}${anyPrice ? ' Some pre-game bets use the price you took.' : ''}</p></div>
+      <div><h3 id="hitTitle">Most likely to hit</h3><p>Updates live. Chances are est.${rows.some((x) => x.winning) ? ' A green bar is covering right now.' : ''}${omitted ? ` ${omitted} tickets omitted because current market evidence is unavailable.` : ''}</p></div>
       <div class="seg hit-seg" role="group" aria-label="Order"><button type="button" data-hit-sort="p" aria-pressed="${sort !== 'time'}">Likeliest</button><button type="button" data-hit-sort="time" aria-pressed="${sort === 'time'}">Kickoff</button></div>
     </div>
     <div class="hit-sum">
-      <div><b class="num">${exp.toFixed(1)}</b><span>of ${open.length} expected to cash</span></div>
+      <div><b class="num">${exp.toFixed(1)}</b><span>of ${rows.length} eligible tickets expected to cash</span></div>
       <div><b class="num">${esc(fmtMoney(Math.round(ev), true))}</b><span>expected profit, est.</span></div>
       <div><b class="num">${esc(fmtMoney(risk))}</b><span>at risk</span></div>
     </div>

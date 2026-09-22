@@ -186,7 +186,7 @@ function bestOf(books, mkt, side) {
   for (const b of visibleBooks()) {
     const L = books?.[b.key];
     const p = sideOf(L, mkt, side);
-    if (!p || p.odds == null) continue;
+    if (!p || p.odds == null || !quoteCanAct(L, null, mkt, side)) continue;
     if (!best || better(mkt, side, p, best)) best = { ...p, book: b.key };
   }
   return best;
@@ -200,8 +200,7 @@ const isPre = (g) => g?.state === 'pre';
 const timeLabel = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s/g, '\u00a0') : '');
 // Vegas rotation numbers are three or four digits; anything else in the feed is an internal id.
 const rotOf = (g, side) => { const v = g.rot?.[side]; return v > 0 && v < 10000 ? v : null; };
-const STALE_MS = 15 * 60e3;
-const isOld = (L) => !!(L?.seen && serverNow() - L.seen > STALE_MS);
+const isOld = (L) => !quoteCanAct(L);
 const dayLabel = (iso, long = false) => (iso ? new Date(iso).toLocaleDateString([], long ? { weekday: 'long', month: 'short', day: 'numeric' } : { weekday: 'short' }) : '');
 const localDay = (iso) => new Date(iso).toLocaleDateString('en-CA');
 const etHour = (iso) => { const p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: 'numeric', hourCycle: 'h23' }).formatToParts(new Date(iso)); return Number(p.find((x) => x.type === 'hour').value) + Number(p.find((x) => x.type === 'minute').value) / 60; };
@@ -246,7 +245,7 @@ function remaining(g) {
 }
 const margin = (g, side) => (side === 'home' ? (g.home.score ?? 0) - (g.away.score ?? 0) : (g.away.score ?? 0) - (g.home.score ?? 0));
 const favSide = (g) => (g.mkt?.s == null ? null : g.mkt.s < 0 ? 'home' : g.mkt.s > 0 ? 'away' : null);
-const closeOf = (g) => g.close || g.mkt; // before kickoff, the current number is the "close so far"
+const closeOf = (g) => canonicalClose(g);
 function lineFor(g, side, L = closeOf(g)) { return L?.s == null ? null : side === 'home' ? L.s : -L.s; }
 
 // Where a bet at `line` stands right now: coverBy > 0 is winning.
@@ -267,6 +266,7 @@ function coverChance(g, leg) {
   if (!g || isPre(g) || isFinal(g)) return null;
   const left = remaining(g);
   const live = g.live?.cons || g.live?.dk;
+  if (!quoteCanAct(live, g, leg.mkt, leg.side)) return null;
   const h = g.home.score ?? 0, a = g.away.score ?? 0;
   if (leg.mkt === 's' || leg.mkt === 'ml') {
     // expected final home margin
@@ -306,6 +306,7 @@ function oddsWords(o) {
 // What the betting splits and movement say. Signals, not advice.
 function signals(g) {
   const out = [];
+  if (!quoteCanAct(g.books?.cons, g)) return out;
   const sp = g.splits?.s, o = g.open, m = g.mkt;
   if (sp && sp.tix != null && o?.s != null && m?.s != null) {
     const moved = m.s - o.s; // negative = toward home

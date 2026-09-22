@@ -230,7 +230,7 @@ function watchGame(prev, g) {
   const legs = S.bets.filter((b) => b.status === 'open').flatMap((b) => b.legs.filter((l) => l.gid === g.id && l.state === 'open'));
   const kick = isPre(prev) && isLive(g);
   if (kick && (legs.length || (S.alerts !== 'off' && followsGame(g)))) {
-    toast({ logoUrl: g.home.logo, kicker: 'Kickoff', title: `${g.away.abbr} @ ${g.home.abbr}`, line: closeOf(g)?.s != null ? `Closed ${favSide(g) ? `${g[favSide(g)].abbr} ${fmtPts(-Math.abs(closeOf(g).s))}` : 'PK'} · O/U ${fmtTot(closeOf(g).t)}` : '', open: g.id });
+    toast({ logoUrl: g.home.logo, kicker: 'Kickoff', title: `${g.away.abbr} @ ${g.home.abbr}`, line: closeOf(g)?.s != null ? `Canonical close ${favSide(g) ? `${g[favSide(g)].abbr} ${fmtPts(-Math.abs(closeOf(g).s))}` : 'PK'} · O/U ${fmtTot(closeOf(g).t)}` : '', open: g.id });
   }
   if (!legs.length || S.alerts === 'off') return;
   const scored = (prev.home.score ?? 0) !== (g.home.score ?? 0) || (prev.away.score ?? 0) !== (g.away.score ?? 0);

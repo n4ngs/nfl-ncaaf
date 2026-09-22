@@ -97,9 +97,11 @@ const MARKET_RE = { s: /spread|handicap/i, h1s: /spread|handicap/i, t: /total|ov
 
 function pickFixture(rows, G) {
   const home = norm(nameOf(G?.home)), away = norm(nameOf(G?.away));
-  if (!home || !away || !Array.isArray(rows)) return null;
+  if (!home || !away || !Array.isArray(rows) || !Number.isFinite(Date.parse(G?.start))) return null;
   const hit = (s) => { const n = norm(s); return n && (n.includes(home) || home.includes(n) || n.includes(away) || away.includes(n)); };
   return rows.find((f) => {
+    const start = Date.parse(f.startDate || f.startTime || f.start || '');
+    if (!Number.isFinite(start) || Math.abs(start - Date.parse(G.start)) > 6 * 3600e3) return false;
     const parts = f?.participants || f?.competitors || [];
     const names = parts.map((p) => p?.name?.value || p?.name || p?.shortName || '').filter(Boolean);
     const blob = names.join(' | ') || f?.name?.value || f?.name || '';
@@ -228,24 +230,29 @@ async function oddsRows() {
   if (Array.isArray(j)) oc = { at: Date.now(), rows: j };
   return oc.rows;
 }
-const MKT_KEY = { s: 'spreads', h1s: 'spreads', t: 'totals', ml: 'h2h' };
+const MKT_KEY = { s: 'spreads', t: 'totals', ml: 'h2h' };
 function matchEvent(rows, G) {
   const home = norm(nameOf(G && G.home)), away = norm(nameOf(G && G.away));
   if (!home || !away) return null;
   const near = (a, b) => a && b && (a.includes(b) || b.includes(a));
-  return (rows || []).find((e) => near(norm(e.home_team), home) && near(norm(e.away_team), away))
-      || (rows || []).find((e) => near(norm(e.home_team), home) || near(norm(e.away_team), away))
-      || null;
+  const start = Date.parse(G.start);
+  if (!Number.isFinite(start)) return null;
+  const matches = (rows || []).filter((e) => near(norm(e.home_team), home) && near(norm(e.away_team), away)
+    && Number.isFinite(Date.parse(e.commence_time)) && Math.abs(Date.parse(e.commence_time) - start) < 6 * 3600e3);
+  return matches.length === 1 ? matches[0] : null;
 }
 // Their link carries a {state} placeholder; swap in the state this board bets in.
 const fixState = (link) => String(link || '').replace('{state}', ODDS_STATE);
 async function oddsLink(G, market, side) {
+  if (!MKT_KEY[market]) return null;
   const rows = await oddsRows();
   if (!rows) return null;
   const ev = matchEvent(rows, G);
   if (!ev) return null;
   const bk = (ev.bookmakers || []).find((b) => b.key === 'betmgm');
-  const mk = bk && (bk.markets || []).find((m) => m.key === (MKT_KEY[market] || 'spreads'));
+  const mk = bk && (bk.markets || []).find((m) => m.key === MKT_KEY[market]);
+  const observed = Date.parse(mk?.last_update || bk?.last_update || '');
+  if (!Number.isFinite(observed) || Date.now() - observed > 2 * 60e3 || observed > Date.now()) return null;
   if (!mk) return null;
   const want = market === 't'
     ? (side === 'over' ? 'over' : 'under')
@@ -262,8 +269,9 @@ async function linkFor(G, market, side, stake, gid) {
   // An owner-pasted link wins: it is a real selection, confirmed by hand. Checked FIRST and off the raw
   // id, so it still works for a game this process has not loaded (a past week, a restart mid-slate).
   const id = (G && G.id) || gid || '';
-  const pasted = id && getMap(id, market, side);
-  if (pasted) return slipLink(pasted, stake);
+  // Pasted IDs have no quote/line observation evidence and optionId can change when the line moves.
+  // Preserve mappings for inspection, but do not put an unverified selection into a slip.
+  if (!MKT_KEY[market]) return searchLink(G);
   if (!G) return `${BASE}/en/sports`;
   // The Odds API hands us BetMGM's own ids and a finished betslip link — no key from BetMGM needed.
   try { const ol = await oddsLink(G, market, side); if (ol) return ol; } catch { /* fall through */ }
@@ -272,11 +280,12 @@ async function linkFor(G, market, side, stake, gid) {
     if (rows) {
       const fx = pickFixture(rows, G);
       const sel = fx && pickOption(fx, market, side, G);
-      if (sel) return slipLink(sel, stake);
+      const observed = Date.parse(fx?.lastUpdated || fx?.updatedAt || '');
+      if (sel && Number.isFinite(observed) && observed <= Date.now() && Date.now() - observed <= 2 * 60e3) return slipLink(sel, stake);
     }
   } catch { /* any trouble at their end falls back below */ }
   return searchLink(G);
 }
 const status = () => ({ base: BASE, configured: !!ACCESS_ID, odds: !!ODDS_KEY, oddsSport: ODDS_SPORT, oddsCached: (oc.rows||[]).length, oddsQuota: quota, cachedFixtures: cache.rows?.length ?? 0, err: cache.err });
 
-module.exports = { linkFor, searchLink, slipLink, status, parseLink, setMap, delMap, getMap, listMap };
+module.exports = { linkFor, searchLink, slipLink, status, parseLink, setMap, delMap, getMap, listMap, matchEvent };

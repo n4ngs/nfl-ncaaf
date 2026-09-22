@@ -27,7 +27,6 @@ const EDGE_MAX_GAP = 3;           // points between a book's line and the sharp 
 const EDGE_ML_LONG = 500;         // skip moneylines longer than +500
 const EDGE_TOTAL_SD = 16.5;       // spread of final totals around the market total, points
 const EDGE_SRC = ['pin', 'circa'];
-const EDGE_SHARP_FRESH = 10 * 60e3;
 const EDGE_KEYS = [3, 7, 10, 14]; // the only margins with enough history to trust a bump
 const EDGE_MKTS = new Set(['s', 't', 'ml', 'h1s']);
 
@@ -114,7 +113,7 @@ function edgeNoVig(mkt, a, b) {
 
 // ------------------------------------------------------------ the sharp price
 const edgeSrcOf = (g, mkt) => (mkt === 'h1s' ? g.h1 : g.books) || {};
-const edgeAgeOf = (L) => (L?.seen ? serverNow() - L.seen : null);
+const edgeAgeOf = (L) => quoteFreshness(L).age_ms;
 const edgeFairMemo = new WeakMap(); // game object -> { v, byMkt }
 function edgeFair(g, mkt) {
   const v = edgeVer();
@@ -127,10 +126,11 @@ function edgeFair(g, mkt) {
   for (const k of EDGE_SRC) {
     const L = src[k];
     const age = edgeAgeOf(L);
-    if (!L || L.m || age == null || age > EDGE_SHARP_FRESH) continue; // sharp prices must be recent, and never typed in
+    if (!L || L.m || !quoteCanAct(L, g, mkt, a) || !quoteCanAct(L, g, mkt, b) || age == null) continue; // sharp prices must be recent, and never typed in
     const pa = sideOf(L, mkt, a), pb = sideOf(L, mkt, b);
     if (!pa || !pb || pa.odds == null || pb.odds == null) continue;
     if (mkt !== 'ml' && pa.line == null) continue;
+    if (!quotePairCanDevig(L,g,mkt)) continue;
     const p = edgeNoVig(mkt, pa.odds, pb.odds);
     if (p == null) continue;
     out = { book: k, line: pa.line, p, sideA: a, age, limit: k === 'pin' ? g.pinLimit ?? null : null, pmf: null };
@@ -151,6 +151,7 @@ function edgeMarketP(g, mkt, side, line, exclude) {
     const a = sideOf(L, mkt, side), b = sideOf(L, mkt, other);
     if (!a || !b || a.odds == null || b.odds == null) continue;
     if (mkt !== 'ml' && a.line !== line) continue;
+    if (!quotePairCanDevig(L,g,mkt)) continue;
     const p = edgeNoVig(mkt, a.odds, b.odds);
     if (p != null) ps.push(p);
   }
@@ -181,6 +182,9 @@ function edgeOnlyBook(g, mkt, side, line, odds, book) {
 // Used by the list, the bet slip and the "Most likely to hit" ranking, so they always agree.
 function edgePrice(g, mkt, side, line, odds, book = null) {
   if (!g || !EDGE_MKTS.has(mkt) || odds == null || Math.abs(odds) < 100) return null;
+  const target = book ? edgeSrcOf(g, mkt)[book] : null;
+  const captured = sideOf(target, mkt, side);
+  if (!quoteCanAct(target, g, mkt, side) || !quoteSnapshotId(target, mkt, side) || !captured || captured.odds !== odds || (mkt !== 'ml' && captured.line !== line)) return null;
   const F = edgeFair(g, mkt);
   if (!F) return null;
   const kind = mkt === 't' ? 't' : 's';
@@ -318,6 +322,8 @@ function edgeLabel(e) {
 }
 function edgeRow(e) {
   const g = e.g;
+  const captured = recordDisplayedSignal(g, e);
+  if (captured !== 'RECORDED') return `<div class="edge-row"><span class="edge-s">${esc(signalEvidenceMessage(captured))}</span></div>`;
   const t = e.mkt === 't' ? g.home : g[e.side];
   const cav = edgeCaveats(e);
   return `<button type="button" class="edge-row c-${e.conf}" data-open="${esc(e.gid)}" aria-label="${esc(edgeLabel(e))}">
@@ -423,6 +429,7 @@ $('#dlg').addEventListener('close', () => { if (location.hash === '#edges') hist
 function edgeBadge(g, mkt, side, book) {
   if (!store.get('edgeMarks', false) || !g || !isPre(g) || book === 'cons' || book === 'open') return '';
   const e = edgesFor(g).find((x) => x.mkt === mkt && x.side === side && x.book === book);
+  if (e && recordDisplayedSignal(g, e) !== 'RECORDED') return '';
   return e ? '<span class="edge-b" aria-hidden="true"></span>' : '';
 }
 function edgeGame(g) { return isPre(g) && edgesFor(g).length > 0; }

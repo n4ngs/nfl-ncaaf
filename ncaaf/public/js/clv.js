@@ -1,75 +1,38 @@
 'use strict';
-/* Hook & Ladder — Closing line value report card (My bets → Results).
-   At kickoff the server records, for every bet, how your number compared with where the market closed (lib/bets.js
-   clvOf): points for spreads and totals, and percent for moneylines and same-number juice. Beating the close is the
-   most reliable sign of good betting over time, and it says nothing about any single result. The card reports it
-   plainly, with how many bets it's based on, and never suggests betting more. */
-
-const CLV_MKT = { s: 'Spreads', t: 'Totals', ml: 'Moneylines', h1s: '1st-half spreads', h1t: '1st-half totals', tt: 'Team totals' };
-
+/* Only independently eligible entries contribute to earned CLV summaries. */
+const clvAvg = (a) => a.length ? a.reduce((s,v)=>s+v,0)/a.length : null;
+const clvSigned = (v,unit,d=1) => Number.isFinite(v) ? `${v>0?'+':v<0?MINUS:''}${Math.abs(v).toFixed(d)}${unit}` : '—';
 function clvLegs() {
-  const out = [];
-  for (const b of S.bets) {
-    if (b.status === 'void') continue;
-    for (const l of b.legs) if (l.clv && (l.clv.pts != null || l.clv.pct != null)) out.push({ b, l, t: Date.parse(b.placed) || b.created || 0 });
-  }
-  return out.sort((x, y) => x.t - y.t);
+  return S.bets.filter(b=>b.status!=='void').flatMap(b=>b.legs.map(l=>({b,l,t:Date.parse(b.placed)||b.created||0}))).sort((a,b)=>a.t-b.t);
 }
-const clvAvg = (a) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : null);
-const clvSigned = (v, unit, d = 1) => (v == null ? '—' : `${v > 0 ? '+' : v < 0 ? MINUS : ''}${Math.abs(v).toFixed(d)}${unit}`);
-
+function clvLegHTML(l,b) {
+  const I=l.integrity||{}, status=integrityStatus(l), entry=I.entry, close=I.close;
+  const ef=I.entry_freshness?.status||'UNVERIFIED', cf=I.close_freshness?.status||'UNVERIFIED';
+  const reason=I.reason_code || (status==='MISSING_ENTRY_SNAPSHOT'?'No immutable quote captured at wager time':'');
+  const qrow=(label,q,fallback,stamp,fresh)=>`<div><b>${label}</b> ${esc(integrityQuoteText(q,fallback))}<small>${esc(integrityUTC(q?.source_observed_at||stamp))} · ${esc(q?.sportsbook?bookName(q.sportsbook):l.entry_record?.sportsbook||l.book||b?.book||'source unavailable')} / ${esc(q?.source||'unverified')} · ${esc(fresh)}</small></div>`;
+  return `<details class="integrity-leg"><summary>${esc(integrityShort(l))}</summary><div class="integrity-detail"><div><b>Wager placed</b> ${esc(integrityUTC(l.entry_record?.entry_created_at || b?.placed))}</div>${qrow('Entry quote',entry,l.entry_record||l,b?.placed,ef)}${qrow('Close',close,null,null,cf)}<div><b>Line CLV</b> ${clvSigned(integrityMetric(l,'line_clv_points'),' pts')}</div><div><b>No-vig probability CLV</b> ${clvSigned(integrityMetric(l,'clv_fair_probability_pp'),' pp',2)}</div><div><b>CLV-EV</b> ${clvSigned(integrityMetric(l,'clv_ev_pct'),'%',2)}</div><div class="note">${esc(I.kickoff_basis||I.resolution?.kickoff_basis||'Kickoff basis unavailable')} · ${esc(reason)}${I.price_clv_status&&!['VERIFIED_CLV','PROVISIONAL_CLV','COMPARABLE','AVAILABLE'].includes(I.price_clv_status)?` · Price CLV: ${esc(I.price_clv_status)}`:''}</div></div></details>`;
+}
 function clvCard() {
-  const legs = clvLegs();
-  if (!legs.length) return `<div class="card clv"><h3>Closing line value</h3><p class="clv-lede">At kickoff, each bet is compared with where the market closed. Getting a better number than the close is the most reliable sign of good betting over time. Your report shows up after your first bet kicks off.</p></div>`;
-  const pts = legs.filter((x) => x.l.clv.pts != null).map((x) => x.l.clv.pts);
-  const pcts = legs.filter((x) => x.l.clv.pts == null || x.l.clv.pts === 0).map((x) => x.l.clv.pct).filter((v) => v != null);
-  const avgPts = clvAvg(pts), avgPct = clvAvg(pcts);
-  const beat = pts.filter((v) => v > 0).length, same = pts.filter((v) => v === 0).length, worse = pts.filter((v) => v < 0).length;
-  const n = legs.length;
-  // Plain verdict; the sample size comes first because it matters most.
-  let verdict;
-  if (n < 20) verdict = `Early days: ${plural(n, 'bet')} with a closing number. Closing line value starts to mean something around 50 bets.`;
-  else if ((avgPts ?? 0) > 0.3 || (avgPts == null && (avgPct ?? 0) > 1)) verdict = 'You’re regularly getting a better number than where the market closed. Over time that’s the most reliable sign of good betting, though it says nothing about any single result.';
-  else if ((avgPts ?? 0) < -0.3 || (avgPts == null && (avgPct ?? 0) < -1)) verdict = 'You’re usually getting a worse number than the close. Betting earlier, or comparing books before you bet, tends to help.';
-  else verdict = 'You’re getting about the closing number on average.';
-  // Running average in points over time.
-  let run = 0;
-  const series = legs.filter((x) => x.l.clv.pts != null).map((x, i) => (run += x.l.clv.pts) / (i + 1));
-  const chart = series.length >= 3 ? clvSpark(series) : '';
-  // By market and by book.
-  const group = (keyOf) => {
-    const m = new Map();
-    for (const x of legs) {
-      const k = keyOf(x); const r = m.get(k) || { n: 0, pts: [], pct: [], beat: 0, beatPct: 0 }; r.n++;
-      if (x.l.clv.pts != null) { r.pts.push(x.l.clv.pts); if (x.l.clv.pts > 0) r.beat++; }
-      else if (x.l.clv.pct != null) { r.pct.push(x.l.clv.pct); if (x.l.clv.pct > 0) r.beatPct++; }
-      m.set(k, r);
-    }
-    return [...m].sort((a, b) => b[1].n - a[1].n);
+  const all=clvLegs(), verified=all.filter(x=>integrityVerified(x.l));
+  const values=k=>verified.map(x=>integrityMetric(x.l,k,true)).filter(Number.isFinite);
+  const labels={s:'Spread',t:'Total',h1s:'First-half spread',h1t:'First-half total',tt:'Team total'};
+  const lineGroups=Object.entries(labels).map(([m,label])=>({label,legs:verified.filter(x=>x.l.mkt===m)}));
+  const pts=values('line_clv_points'), pp=values('clv_fair_probability_pp'), ev=values('clv_ev_pct');
+  const trends=lineGroups.map(({label,legs})=>{let sum=0;const series=legs.map(x=>integrityMetric(x.l,'line_clv_points',true)).filter(Number.isFinite).map((v,i)=>(sum+=v)/(i+1));return series.length>=3?`<h4>${esc(label)} CLV</h4>${clvSpark(series)}`:'';}).join('');
+  const breakdown=(title,key)=>{
+    const groups=new Map();for(const x of verified){const k=key(x);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x.l);}
+    return `<table class="brk clv-t"><thead><tr><th>${esc(title)}</th><th>Verified</th><th>Line CLV (pts)</th><th>Probability (pp)</th><th>CLV-EV (%)</th></tr></thead><tbody>${[...groups].map(([k,legs])=>`<tr><td>${esc(k)}</td><td>${legs.length}</td>${['line_clv_points','clv_fair_probability_pp','clv_ev_pct'].map(m=>`<td>${clvSigned(clvAvg(legs.map(l=>integrityMetric(l,m,true)).filter(Number.isFinite)),'',2)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
   };
-  const rows = (title, g) => `<table class="brk clv-t"><thead><tr><th>${esc(title)}</th><th>Bets</th><th>Avg vs close</th><th>Beat it</th></tr></thead><tbody>${g.map(([k, r]) => `<tr><td>${esc(k)}</td><td>${r.n}</td><td>${r.pts.length ? clvSigned(clvAvg(r.pts), ' pts') : r.pct.length ? clvSigned(clvAvg(r.pct), '%') : '—'}</td><td>${r.pts.length ? fmtPct(r.beat / r.pts.length) : r.pct.length ? fmtPct(r.beatPct / r.pct.length) : '—'}</td></tr>`).join('')}</tbody></table>`;
-  return `<div class="card clv">
-    <h3>Closing line value</h3>
-    <p class="clv-lede">How your number compared with where the market closed at kickoff. It measures the price you got, not whether you won.</p>
-    <div class="clv-sum">
-      <div><b class="num">${pts.length ? clvSigned(avgPts, '') : clvSigned(avgPct, '%')}</b><span>${pts.length ? 'avg points vs the close' : 'avg vs the close'}</span></div>
-      <div><b class="num">${pts.length ? fmtPct(beat / pts.length) : '—'}</b><span>beat the close</span></div>
-      <div><b class="num">${n}</b><span>bets measured</span></div>
-    </div>
-    ${pts.length ? `<div class="clv-split" aria-label="${beat} better, ${same} same, ${worse} worse than the close"><i style="flex:${beat}"></i><i style="flex:${same}"></i><i style="flex:${worse}"></i></div><div class="clv-split-l"><span>Better ${beat}</span><span>Same ${same}</span><span>Worse ${worse}</span></div>` : ''}
-    <p class="clv-v">${esc(verdict)}</p>
-    ${chart}
-    ${rows('Market', group((x) => CLV_MKT[x.l.mkt] || x.l.mkt))}
-    ${rows('Book', group((x) => x.b.book || 'Unknown'))}
-    ${avgPct != null && pts.length ? `<p class="note">On moneylines and same-number bets the price difference averages ${clvSigned(avgPct, '%')} against the close with the cut removed.</p>` : ''}
-  </div>`;
+  const counts=new Map();for(const {l} of all){const s=integrityStatus(l);counts.set(s,(counts.get(s)||0)+1);}
+  return `<div class="card clv"><h3>Closing line value</h3><p class="clv-lede">Verified entries and actual-kickoff closes only in these averages. Provisional results and unavailable evidence are listed separately.</p><div class="clv-sum">${lineGroups.map(({label,legs})=>{const points=legs.map(x=>integrityMetric(x.l,'line_clv_points',true)).filter(Number.isFinite);return `<div><b class="num">${clvSigned(clvAvg(points),'')}</b><span>${esc(label)} line CLV · pts (${points.length})</span></div>`;}).join('')}<div><b class="num">${clvSigned(clvAvg(pp),' pp',2)}</b><span>no-vig probability CLV (${pp.length})</span></div><div><b class="num">${clvSigned(clvAvg(ev),'%',2)}</b><span>CLV-EV (${ev.length})</span></div></div><p class="note">${all.length?[...counts].map(([s,n])=>`${esc(s.replace(/_/g,' '))}: ${n}`).join(' · '):'No timestamped entries with closing evidence yet.'}</p>${trends}${breakdown('Market',x=>x.l.mkt)}${breakdown('Book / market',x=>`${x.b.book||'Unknown'} · ${labels[x.l.mkt]||x.l.mkt}`)}<p class="note">Price CLV requires the same market number and both opposing prices. Missing values remain unavailable.</p></div>`;
 }
+
 function clvSpark(series) {
   const W = 640, H = 120, P = 8;
   const lo = Math.min(0, ...series), hi = Math.max(0, ...series);
   const X = (i) => P + (i / Math.max(1, series.length - 1)) * (W - 2 * P);
   const Y = (v) => P + ((hi - v) / (hi - lo || 1)) * (H - 2 * P);
-  return `<div class="clv-chart"><div class="sub-h">Running average<span>points vs the close, over time</span></div>
+  return `<div class="clv-chart"><div class="sub-h">Running average<span>verified points vs the close, over time</span></div>
     <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Running average closing line value, now ${clvSigned(series.at(-1), ' points')}">
       <line class="z" x1="${P}" x2="${W - P}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}"/>
       <polyline class="ln" points="${series.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ')}"/>
