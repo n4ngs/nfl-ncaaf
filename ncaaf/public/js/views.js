@@ -90,6 +90,7 @@ function renderLive() {
   const pre = games.filter(isPre).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
   const done = games.filter(isFinal);
   const W = defWeek();
+  const scheduleReady = Boolean(W || S.snapshotLoaded);
 
   // headline
   const next = pre[0] || allGames().filter(isPre).sort((a, b) => Date.parse(a.start) - Date.parse(b.start))[0];
@@ -101,10 +102,10 @@ function renderLive() {
     $('#subline').textContent = `First kickoff ${timeLabel(pre[0].start)} · ${W?.meta.label || ''}`;
   } else if (done.length) {
     $('#headline').textContent = 'All final today';
-    $('#subline').textContent = next ? `Next kickoff ${dayLabel(next.start)} ${timeLabel(next.start)} · ${gameById(next.id)?.wk === S.def ? W?.meta.label : 'next week'}` : '';
+    $('#subline').textContent = next ? `Next kickoff ${dayLabel(next.start)} ${timeLabel(next.start)} · ${gameById(next.id)?.wk === S.def ? W?.meta.label : 'next week'}` : 'No upcoming games in the loaded schedule.';
   } else {
     $('#headline').textContent = next ? `${W?.meta.label || 'This week'}` : 'College football';
-    $('#subline').textContent = next ? `No games today. Next kickoff ${dayLabel(next.start, true)}, ${timeLabel(next.start)}.` : 'Loading…';
+    $('#subline').textContent = next ? `No games today. Next kickoff ${dayLabel(next.start, true)}, ${timeLabel(next.start)}.` : scheduleReady ? 'No upcoming games in the loaded schedule. Browse other weeks on the Board.' : S.connected ? 'Loading the schedule…' : 'Connecting to the schedule…';
   }
 
   // desktop numbers next to the headline
@@ -125,7 +126,7 @@ function renderLive() {
   // scores strip
   const strip = [...live, ...pre, ...done.sort((a, b) => Date.parse(b.start) - Date.parse(a.start))];
   $('#scoreMeta').textContent = strip.length ? `All ${strip.length} ›` : 'Board ›';
-  $('#strip').innerHTML = strip.length ? strip.slice(0, 40).map(stripCard).join('') : `<div class="gm" style="width:auto"><div class="gm-h">No games today</div><div class="muted" style="font-size:13px">Lines for the week are on the board.</div></div>`;
+  $('#strip').innerHTML = strip.length ? strip.slice(0, 40).map(stripCard).join('') : `<div class="gm" style="width:auto" role="status"><div class="gm-h">${scheduleReady ? 'No games today' : 'Loading the schedule'}</div><div class="muted" style="font-size:13px">${scheduleReady ? 'Browse other weeks on the Board.' : 'Waiting for the schedule feed.'}</div></div>`;
 
   // on the field
   $('#liveSec').hidden = !live.length;
@@ -387,15 +388,29 @@ function syncBoardChoices(selector, html, dataKey) {
 }
 
 function renderBoard(loading = false) {
-  const W = boardWeek();
+  // Never substitute the default slate while a different selected week is unavailable.
+  const W = S.boardWeek ? S.weeks.get(S.boardWeek) : defWeek();
+  const request = S.weekRequests?.get(S.boardWeek);
+  const busy = loading || request?.status === 'loading' || !W && !request && !S.snapshotLoaded;
+  $('#boardBody').setAttribute('aria-busy', String(busy));
   const meta = W?.meta || S.cal.find((c) => c.id === S.boardWeek) || {};
   $('#boardTitle').textContent = meta.label || 'The board';
   const idx = S.cal.findIndex((c) => c.id === (meta.id || S.boardWeek));
   const prev = S.cal[idx - 1], next = S.cal[idx + 1];
   $('#weekNav').innerHTML = `<button class="ibtn" type="button" data-week="${prev?.id || ''}" ${prev ? '' : 'disabled'} aria-label="Previous week">${ICON.back}</button><span class="lab">${esc(meta.detail || meta.label || '')}</span><button class="ibtn" type="button" data-week="${next?.id || ''}" ${next ? '' : 'disabled'} aria-label="Next week">${ICON.chev}</button>`;
   $$('#mktSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mkt === S.mkt)));
-  if (typeof wxBoard === 'function') wxBoard(loading ? null : W); // Weather watch card (weather.js)
-  if (loading || !W) { $('#boardSub').textContent = 'Loading…'; $('#boardBody').innerHTML = '<div class="card empty"><b>Loading the week</b>Pulling every game and line.</div>'; return; }
+  if (typeof wxBoard === 'function') wxBoard(busy || request?.status === 'error' ? null : W); // Weather watch card (weather.js)
+  if (request?.status === 'error') {
+    $('#boardSub').textContent = 'Schedule unavailable';
+    $('#boardBody').innerHTML = `<div class="card empty" role="status"><b>Could not load this week</b><p>${esc(request.message)}</p><button class="btn ghost" type="button" data-week="${esc(S.boardWeek)}">Retry week</button></div>`;
+    return;
+  }
+  if (busy) { $('#boardSub').textContent = 'Loading…'; $('#boardBody').innerHTML = '<div class="card empty" role="status"><b>Loading the week</b>Pulling every game and line.</div>'; return; }
+  if (!W) {
+    $('#boardSub').textContent = 'No schedule loaded';
+    $('#boardBody').innerHTML = `<div class="card empty" role="status"><b>No schedule available</b><p>Choose another week above.</p>${S.boardWeek ? `<button class="btn ghost" type="button" data-week="${esc(S.boardWeek)}">Retry week</button>` : ''}</div>`;
+    return;
+  }
 
   const games = [...W.games.values()].filter((g) => g.state !== 'off' || true);
   const counts = Object.fromEntries(FILTERS.map(([f]) => [f, games.filter((g) => passes(g, f)).length]));
@@ -421,7 +436,7 @@ function renderBoard(loading = false) {
   syncBoardChoices('#phBooks', [['mkt', 'Market'], ...cols.map((b) => [b.key, b.short])]
     .map(([k, l]) => `<button class="pbtn" type="button" data-phbook="${esc(k)}" aria-pressed="${S.phBook === k}">${esc(l)}${k !== 'mkt' && S.books.find((b) => b.key === k)?.sharp ? '<span class="tag sharp">S</span>' : ''}</button>`).join(''), 'phbook');
 
-  if (!shown.length) { $('#boardBody').innerHTML = `<div class="card empty" style="margin-top:24px"><b>No games match</b>${S.query ? `Nothing for “${esc(S.query)}”.` : 'Try another filter.'}</div>`; return; }
+  if (!shown.length) { $('#boardBody').innerHTML = games.length ? `<div class="card empty" style="margin-top:24px" role="status"><b>No games match</b>${S.query ? `Nothing for “${esc(S.query)}”.` : 'Try another filter.'}</div>` : `<div class="card empty" style="margin-top:24px" role="status"><b>No games scheduled</b>No games are listed for ${esc(meta.label || 'this week')}. Choose another week above.</div>`; return; }
 
   // group by day + TV window; games that are over drop to one folded group at the bottom
   const groups = [];

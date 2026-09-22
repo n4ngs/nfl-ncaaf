@@ -11,7 +11,7 @@
  *   - one device id for the whole board (`tb_dev`, Path=/), so one phone is one row across NFL/NCAAF/MLB;
  *   - the role is stamped on every event at the door, and the owner can pin a device as "me" or "guest",
  *     so the owner's own traffic is a separate lane, never mixed into the guests;
- *   - the capture is the raw truth: full user agent, real IP (owner-approved, owner-only), every page
+ *   - the capture is the raw truth: full user agent, observed IP (owner-approved, owner-only), every page
  *     load, API call, screen view, tap and bet, with timestamps — readable, and downloadable as CSV/JSON.
  *
  * Capture is silent. Nobody is signed out, asked for a name or shown anything. Nothing here is visible
@@ -24,6 +24,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { resolveClientIp } = require('./shared/client-ip');
 
 const RING_MAX = 80000;            // events held in memory for the views; the files keep everything
 const WARM_DAYS = 21;              // how far back a boot re-reads into memory
@@ -100,8 +101,6 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
 
   // ------------------------------------------------------------------ who is this
   const cookies = (req) => Object.fromEntries(String(req.headers.cookie || '').split(';').map((c) => c.trim()).filter(Boolean).map((c) => { const i = c.indexOf('='); return i < 0 ? [c, ''] : [c.slice(0, i), c.slice(i + 1)]; }));
-  // Railway appends the real client address last; anything before it can be typed by the client.
-  const ipOf = (req) => String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || '';
 
   /* One id per browser for the whole board. A page loaded before this existed has no tb_dev yet but does
      carry the engines' own device cookies, so reuse the device those already map to — otherwise a burst of
@@ -118,7 +117,8 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
       cookie = `tb_dev=${dev}; Path=/; Max-Age=63072000; HttpOnly; SameSite=Lax${isHttps ? '; Secure' : ''}`;
     }
     for (const [sp, v] of engine) link(dev, sp, v);
-    return { dev, cookie, ip: ipOf(req), ua: String(req.headers['user-agent'] || '').slice(0, 400) };
+    const ipInfo = resolveClientIp(req);
+    return { dev, cookie, ip: ipInfo.ip, ipInfo, ua: String(req.headers['user-agent'] || '').slice(0, 400) };
   }
   function link(dev, sp, uid) {
     const k = `${sp}:${uid}`;
@@ -150,9 +150,17 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
       u.last = t; u.n++;
       if (Object.keys(d.uas).length > 12) { const old = Object.entries(d.uas).sort((a, b) => a[1].last - b[1].last)[0][0]; delete d.uas[old]; }
     }
+    // Keep old observations intact. Provenance belongs only to requests seen by this resolver.
+    if (who.ipInfo) {
+      dirty = true; // checkpoint the latest observation on the existing 10-second save cadence
+      d.ipLast = who.ip;
+      d.ipInfo = { ...who.ipInfo, observedAt: t };
+    }
     if (who.ip) {
-      const h = d.ips[who.ip] || (d.ips[who.ip] = { first: t, last: t, n: 0 });
+      d.ips ||= {};
+      const h = Object.hasOwn(d.ips, who.ip) ? d.ips[who.ip] : (d.ips[who.ip] = { first: t, last: t, n: 0 });
       h.last = t; h.n++;
+      if (who.ipInfo) h.ipInfo = { ...who.ipInfo, observedAt: t };
       if (d.ipLast !== who.ip) { d.ipLast = who.ip; dirty = true; }
     }
     if (sport) d.sports[sport] = t;
@@ -275,7 +283,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     }
     if (e.k === 'act') return [ACT[e.a] || e.a, e.a === 'APP_BACKGROUND' || e.a === 'APP_FOREGROUND' || e.a === 'PAGE_EXIT' ? 1 : 2];
     if (e.k === 'err') return [`App error: ${e.msg}`, 2];
-    if (e.k === 'visit') { const c = e.ctx || {}; return [`Opened on a ${c.sw || '?'}×${c.sh || '?'} screen${c.tz ? `, ${c.tz}` : ''}${c.standalone ? ', from the home-screen icon' : ''}${e.ref ? `, from ${e.ref}` : ''}`, 1]; }
+    if (e.k === 'visit') { const c = e.ctx || {}; return [`Opened on a ${c.sw || '?'}×${c.sh || '?'} screen${c.tz ? `, time zone ${c.tz}` : ''}${c.standalone ? ', from the home-screen icon' : ''}${e.ref ? `, from ${e.ref}` : ''}`, 1]; }
     if (e.k === 'enter') return [ENTER[e.how] || e.how, 1];
     return [e.k, 2];
   }
@@ -332,6 +340,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     return out.sort((a, b) => (Date.parse(b.placed) || b.created || 0) - (Date.parse(a.placed) || a.created || 0));
   }
 
+  const canLookup = (ip) => resolveClientIp({ headers: {}, socket: { remoteAddress: ip } }, { mode: 'direct' }).kind === 'public';
   const roleOfDev = (d) => d.roleSet || d.role || 'none';
   function summary(id) {
     const d = state.devices[id];
@@ -356,7 +365,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     return {
       id, role: roleOfDev(d), roleSet: d.roleSet || null, roleSeen: d.role || null, label: d.label || '', name, who,
       ua: d.ua || '', ...info, ctx: d.ctx || null,
-      ipLast: d.ipLast || '', ipCount: Object.keys(d.ips || {}).length,
+      ipLast: d.ipLast || '', ipInfo: d.ipInfo || null, ipCount: Object.keys(d.ips || {}).length,
       first: d.first, last: d.last, live: streams.has(id) || (!!lastReal && Date.now() - lastReal < LIVE_MS), streaming: streams.get(id) || 0,
       feedOnly: !views && !clicks && ev.some((e) => e.k === 'req' && e.p === '/api/stream'),
       blocked: !!state.blocked[id], signoutPending: !!state.signout[id],
@@ -383,7 +392,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
       ...summary(id),
       links: d.links || {},
       uaHistory: Object.entries(d.uas || {}).map(([ua, h]) => ({ ua, ...h })).sort((a, b) => b.last - a.last),
-      ipHistory: Object.entries(d.ips || {}).map(([ip, h]) => ({ ip, ...h })).sort((a, b) => b.last - a.last),
+      ipHistory: Object.entries(d.ips || {}).map(([ip, h]) => ({ ip, ...h, lookup: canLookup(ip) })).sort((a, b) => b.last - a.last),
       sessionList: sessionsOf(ev).slice(0, 200),
       timeline: ev.slice(-3000).map(view).reverse(),
       betList: betsOf(d),
@@ -431,7 +440,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
       const x = ipMap.get(ip) || { ip, first: h.first, last: h.last, n: 0, devs: [], roles: new Set() };
       x.first = Math.min(x.first, h.first); x.last = Math.max(x.last, h.last); x.n += h.n; x.devs.push(id); x.roles.add(roleOfDev(d)); ipMap.set(ip, x);
     }
-    const ips = [...ipMap.values()].map((x) => ({ ...x, roles: [...x.roles], shared: x.devs.length > 1 })).sort((a, b) => b.last - a.last);
+    const ips = [...ipMap.values()].map((x) => ({ ...x, lookup: canLookup(x.ip), roles: [...x.roles], shared: x.devs.length > 1 })).sort((a, b) => b.last - a.last);
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const T = today.getTime();
     const count = (fn) => door.filter(fn).length;
@@ -555,7 +564,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     }
     const M = req.method;
     if ((pathname === '/admin' || pathname === '/admin/') && M === 'GET') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...sec }); res.end(PAGE); return true; }
-    if (pathname === '/admin/api/board' && M === 'GET') { json(res, 200, boardJSON()); return true; }
+    if (pathname === '/admin/api/board' && M === 'GET') { json(res, 200, { ...boardJSON(), connection: resolveClientIp(req) }); return true; }
     if (pathname === '/admin/api/security' && M === 'GET') { json(res, 200, securityJSON()); return true; }
     if (pathname === '/admin/api/export' && M === 'GET') {
       const q = new URLSearchParams(qs.replace(/^\?/, ''));

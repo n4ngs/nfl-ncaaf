@@ -21,6 +21,12 @@ const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { clientIp: resolvedClientIp } = require('../shared/client-ip');
+// Merged engines accept the terminal's signed address only over loopback. Standalone engines resolve
+// their own direct/Railway ingress. These are existing process settings, never request headers.
+const CLIENT_IP_OPTIONS = process.env.BASE_PATH && process.env.TELEMETRY_PEER_SECRET
+  ? { mode: 'internal', secret: process.env.TELEMETRY_PEER_SECRET } : undefined;
+const clientIp = (req) => resolvedClientIp(req, CLIENT_IP_OPTIONS);
 
 const U = require('./lib/util');
 const ESPN = require('./lib/espn');
@@ -796,8 +802,7 @@ const sameHash = (a, b) => {
 const LOGIN_WINDOW = 15 * 60e3;
 const failures = new Map(); // ip -> [timestamps]
 let allFailures = [];       // every wrong code, any address
-// The client can write anything into X-Forwarded-For; only the last entry, appended by Railway's proxy, is real.
-const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || '?';
+
 function lockedOut(ip) {
   const now = Date.now();
   allFailures = allFailures.filter((t) => now - t < LOGIN_WINDOW);
@@ -1708,7 +1713,7 @@ process.on('SIGTERM', shutdown);
 (async () => {
   // Accept connections right away: hosting platforms health-check the port during boot.
   // Pages that connect early get an empty snapshot, then the full one as soon as the data is in.
-  server.listen(PORT, () => {
+  server.listen(PORT, CLIENT_IP_OPTIONS?.mode === 'internal' ? '127.0.0.1' : undefined, () => {
     log(`Pick Six is up → ${PUBLIC_URL || `http://localhost:${PORT}`}`);
     if (!PUBLIC_URL) for (const u of lanUrls()) log(`  on your phone (same Wi-Fi) → ${u}`);
     if (ACCESS_CODE) log('  access code is on');

@@ -42,10 +42,12 @@ function putWeek(w, meta = {}) {
   const prev = S.weeks.get(w.id);
   const games = new Map(w.games.map((g) => [g.id, withMine(g)]));
   S.weeks.set(w.id, { meta: { id: w.id, season: w.season, type: w.type, week: w.week, label: w.label, detail: w.detail, ...meta }, games, moves: w.moves || [] });
+  if (S.weekRequests?.get(w.id)?.status === 'error') S.weekRequests.delete(w.id);
   if (prev) for (const g of w.games) notePrices(prev.games.get(g.id), g);
 }
 
 function loadSnapshot(d) {
+  S.snapshotLoaded = true;
   S.offset = d.now - Date.now();
   S.season = d.season;
   S.cal = d.cal || [];
@@ -57,28 +59,44 @@ function loadSnapshot(d) {
   if (d.me) S.me = d.me;
   S.liveMs = d.liveMs || S.liveMs;
   if (d.week) putWeek(d.week, { tracked: true });
-  if (!S.boardWeek || !S.weeks.has(S.boardWeek)) S.boardWeek = S.def;
+  if (!S.boardWeek || !S.weeks.has(S.boardWeek) && !S.weekRequests?.has(S.boardWeek)) S.boardWeek = S.def;
   S.moves = mergeMoves(d.week?.moves || [], S.moves);
   invalidate();
 }
 const mergeMoves = (a, b) => [...new Map([...a, ...b].map((m) => [m.id, m])).values()].sort((x, y) => y.t - x.t).slice(0, 120);
 
 async function openWeek(id) {
-  if (!id || id === S.boardWeek && S.weeks.has(id)) return;
+  if (!id) return;
+  const requests = S.weekRequests ||= new Map();
+  const prior = requests.get(id);
+  if (prior?.status === 'loading') { S.boardWeek = id; invalidate(); return prior.promise; }
+  if (id === S.boardWeek && S.weeks.has(id) && prior?.status !== 'error') return;
   S.boardWeek = id;
-  const c = S.cal.find((x) => x.id === id);
-  if (!S.weeks.has(id) || !S.weeks.get(id).meta.tracked) {
-    renderBoard(true);
+  if (S.weeks.get(id)?.meta.tracked && prior?.status !== 'error') { invalidate(); return; }
+  const c = S.cal.find((x) => x.id === id), season = S.season;
+  const request = { status: 'loading', message: '', promise: null };
+  requests.set(id, request);
+  renderBoard();
+  request.promise = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
-      const r = await fetch(`api/week?season=${S.season}&type=${c.type}&week=${c.week}`);
+      if (!c || !Number.isInteger(c.type) || !Number.isInteger(c.week)) throw new Error('Week unavailable');
+      const r = await fetch(`api/week?season=${season}&type=${c.type}&week=${c.week}`, { signal: controller.signal });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.error || 'Could not load that week');
+      if (!r.ok || j.week?.id !== id || !Array.isArray(j.week.games)) throw new Error('Week unavailable');
+      if (S.season !== season) { requests.delete(id); return; }
       putWeek(j.week, { tracked: j.tracked });
+      request.status = 'ready';
     } catch (e) {
-      toastText(e.message);
+      request.status = 'error';
+      request.message = e.name === 'AbortError' ? 'The schedule took too long to respond. Try again.' : 'The schedule could not be loaded. Check your connection and try again.';
+    } finally {
+      clearTimeout(timeout);
+      invalidate();
     }
-  }
-  invalidate();
+  })();
+  return request.promise;
 }
 
 // ------------------------------------------------------------ price flashes

@@ -72,6 +72,12 @@
     const reconnecting = Object.entries(s.peerStatus || {}).filter(([,v]) => ['reconnecting','error'].includes(v)).map(([k])=>names[k]);
     const note = s.refreshError || (reconnecting.length ? `${reconnecting.join(', ')} live updates reconnecting. Live status may be unavailable.` : failed.length ? `${failed.join(', ')} unavailable. Showing only successfully loaded logs. Retry to reconnect.` : s.loading && !s.loaded ? 'Connecting your sports…' : `Private to this device · ${data.sources.filter((x) => x.status === 'ok').length} sports connected`);
     if (s.notice.textContent !== note) s.notice.textContent = note;
+    const refreshButton = s.root.querySelector('[data-pf-refresh]');
+    if (refreshButton) {
+      refreshButton.disabled = Boolean(s.loading);
+      refreshButton.setAttribute('aria-busy', String(Boolean(s.loading)));
+      refreshButton.textContent = s.loading ? 'Refreshing…' : 'Refresh';
+    }
     const tickets = select(data.tickets, s.filter);
     const limit = s.limit || 40;
     const html = tickets.length ? tickets.slice(0, limit).map((t) => renderTicket(t, s.options)).join('') + (tickets.length > limit ? `<button class="portfolio-manage" type="button" data-pf-more>Show ${Math.min(40, tickets.length - limit)} more tickets</button>` : '') : `<div class="portfolio-empty"><strong>${s.loaded ? s.filter.query || s.filter.status !== 'all' && data.tickets.length ? 'No tickets match' : 'Your tickets belong here' : 'Loading your tickets…'}</strong><p>${s.loaded ? data.tickets.length ? 'Try another sport or status, or clear your search.' : 'Log your first bet. Your pick, price and result will stay together.' : 'Opening your private logs across sports.'}</p></div>`;
@@ -128,7 +134,7 @@
         if (b.hasAttribute('data-pf-new')) { const sport = root.querySelector('.portfolio-entry-sport').value; if (sport === s.options.sport) s.options.onNew?.(); else location.assign(`/${sport}/?portfolio=new#${sport === 'mlb' ? 'following' : 'bets'}`); }
         if (b.dataset.pfStatus) { s.filter.status = b.dataset.pfStatus; s.limit = 40; updateList(s); }
         if (b.hasAttribute('data-pf-more')) { s.limit = (s.limit || 40) + 40; updateList(s); }
-        if (b.hasAttribute('data-pf-refresh')) { s.peerBets = {}; refresh(s, true); }
+        if (b.hasAttribute('data-pf-refresh') && !s.loading) { s.peerBets = {}; refresh(s, true); }
         if (b.hasAttribute('data-pf-results')) {
           const p = root.querySelector('.portfolio-analysis'); p.hidden = !p.hidden;
           b.setAttribute('aria-expanded', String(!p.hidden));

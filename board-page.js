@@ -87,7 +87,10 @@ td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}tr:la
 .tl .k{font:600 10.5px var(--mono);color:var(--i3);text-transform:uppercase}
 .tl pre{grid-column:1/-1;margin:4px 0 2px;font:11.5px/1.5 var(--mono);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--i2)}
 .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}.filters label{display:flex;gap:6px;align-items:center;color:var(--i2);font-size:12px;cursor:pointer}
-.note{color:var(--i3);font-size:12px;margin-top:8px}
+.connection{margin:0 0 18px;padding:12px 14px;border:1px solid var(--line2);border-radius:12px;background:var(--s);color:var(--i2);font-size:12px;overflow-wrap:anywhere}.connection strong{color:var(--ink);font-weight:600}.connection .note{margin-top:4px;color:var(--i2)}.ip-source{font:11px var(--font);color:var(--i2);margin-top:4px;overflow-wrap:anywhere}.note{color:var(--i3);font-size:12px;margin-top:8px}
+#vPeople .grid > .card:first-child{min-width:0;overflow-x:auto;overscroll-behavior-x:contain}
+@media (min-width:861px){#vPeople .t-h,#vPeople .row{min-width:936px}}
+@media (max-width:1400px){#vPeople .grid{grid-template-columns:minmax(0,1fr)}#vPeople .feed-body{max-height:420px}}
 @media (max-width:1180px){.grid,.sec-grid{grid-template-columns:minmax(0,1fr)}.feed-body{max-height:420px}.stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:860px){
   .top{padding:0 14px;gap:10px}.back,.brand span{display:none}main{padding:14px 16px}
@@ -106,6 +109,7 @@ td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}tr:la
   <div class="dl"><a class="btn" href="/admin/api/export?fmt=csv" title="Every recorded event, every device">⤓ CSV</a><a class="btn" href="/admin/api/export?fmt=json">⤓ JSON</a></div>
 </header>
 <main>
+  <section class="connection" aria-label="Your observed connection"><div id="connection">Checking your connection…</div><div class="note">The address this app sees. VPNs, Private Relay and shared networks can change or share it; an address hidden behind them cannot be recovered.</div></section>
   <div id="vPeople">
   <div class="head">
     <div><h1>Admin Center</h1><div class="sub" id="sub">Loading…</div></div>
@@ -114,7 +118,7 @@ td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}tr:la
   <section class="stats" id="stats"></section>
   <div class="grid">
     <section class="card"><div class="card-h"><span id="listTitle">Guests</span><small id="listNote"></small></div>
-      <div class="t-h"><span>Who</span><span>Device</span><span>IP address</span><span>Last seen</span><span>Sessions</span><span>Activity</span><span>Sports</span><span>Bets</span></div>
+      <div class="t-h"><span>Who</span><span>Device</span><span>Observed IP</span><span>Last seen</span><span>Sessions</span><span>Activity</span><span>Sports</span><span>Bets</span></div>
       <div id="rows"></div></section>
     <aside class="card feed"><div class="card-h"><span>What they are doing</span><small>newest first · live</small></div><div class="feed-body" id="feed"></div></aside>
   </div>
@@ -151,6 +155,11 @@ function dayL(t){var d=new Date(t),n=new Date();var y=new Date(n);y.setDate(n.ge
 function dur(ms){var s=Math.round(ms/1000);if(s<60)return s+'s';var m=Math.floor(s/60);if(m<60)return m+'m '+String(s%60).padStart(2,'0')+'s';return Math.floor(m/60)+'h '+String(m%60).padStart(2,'0')+'m'}
 function money(n,sign){if(n==null)return'—';var a=Math.abs(n),s=a>=1000?a.toLocaleString(undefined,{maximumFractionDigits:0}):(a%1?a.toFixed(2):String(a));return(n<0?'−':sign&&n>0?'+':'')+'$'+s}
 function odds(o){return o==null?'':(o>0?'+'+o:String(o))}
+function ipSource(i){if(!i)return 'Source not recorded';if(i.source==='socket'&&i.reason&&i.reason!=='FORWARDED_HEADERS_IGNORED')return 'Transport peer · fallback';return {'railway-x-real-ip':'Railway edge','railway-x-forwarded-for':'Forwarded address · fallback',socket:'Direct connection',unavailable:'Address unavailable'}[i.source]||'Source not recorded'}
+function ipKind(i){if(!i)return 'Historical observation';return {public:'Public address',private:'Private / reserved address',loopback:'Local connection',unavailable:'Address unavailable'}[i.kind]||'Unknown address type'}
+function ipReason(i){if(!i||!i.reason)return '';return {REAL_IP_INVALID:'The edge IP header was invalid; the final forwarded address was used.',FORWARDED_ADDRESS_INVALID:'No valid edge address was supplied; this is the server connection peer.',FORWARDED_ADDRESS_MISSING:'The edge address was missing; this is the server connection peer.',FORWARDED_HEADERS_IGNORED:'Forwarded headers were ignored on a direct connection.',INTERNAL_ADDRESS_UNVERIFIED:'The internal address could not be verified; this is the server connection peer.'}[i.reason]||'Address evidence could not be verified.'}
+function ipLookup(ip,allowed){return allowed?'<a href="https://ipinfo.io/'+encodeURIComponent(ip)+'" target="_blank" rel="noopener noreferrer" title="Approximate network location, not GPS">IP lookup ↗</a>':'<span class="dim">No public lookup</span>'}
+function ipCaption(i){return ipSource(i)+(i&&i.kind?' · '+ipKind(i):'')}
 function devLine(d){return [d.device+(d.model?' '+d.model:''),d.os?(d.os+' '+d.osVer).trim():''].filter(Boolean).join(' · ')}
 function brLine(d){return [d.browser?(d.browser+' '+d.bVer).trim():'',d.inApp?'inside '+d.inApp:''].filter(Boolean).join(' · ')||'—'}
 function display0(d){if(d.who)return d.who;if(d.role==='owner')return (OWNER?OWNER+"'s ":'Your ')+d.device;return d.device+(d.browser?' · '+d.browser:'')}
@@ -173,7 +182,7 @@ function renderSec(){
   $('#alerts').innerHTML=D.alerts.length?D.alerts.map(function(a){var x=dv[a.dev]||{};return '<div class="al '+a.sev+'" data-dev="'+a.dev+'"><span class="sev '+a.sev+'"></span><div><div class="k">'+esc(a.kind)+'</div></div><div><div class="aw"><b>'+esc(who2(x))+'</b> '+roleTag(x.role)+'</div><div class="tx">'+esc(a.text)+'</div><div class="tx dim mono" style="font-size:11.5px">'+esc([x.device,x.os,x.browser,a.ip].filter(Boolean).join(' · '))+'</div></div><div class="tm">'+esc(exact(a.t))+' <span class="ag">'+ago(a.t)+'</span></div></div>'}).join(''):'<div class="empty">No alerts in the last 7 days.</div>';
   $('#door').innerHTML=D.door.length?'<table><thead><tr><th>When</th><th>What happened</th><th>Device</th><th>IP</th></tr></thead><tbody>'+D.door.map(function(x){var d=dv[x.dev]||{};return '<tr class="click" data-dev="'+x.dev+'"><td class="mono" style="white-space:nowrap">'+esc(exact(x.t))+'</td><td'+(HOW_BAD[x.how]?' class="l"':'')+'>'+esc(x.text)+'</td><td><b>'+esc(who2(d))+'</b><br><span class="dim">'+esc([d.os,d.browser].filter(Boolean).join(' · '))+'</span></td><td class="mono">'+esc(x.ip||'—')+'</td></tr>'}).join('')+'</tbody></table>':'<div class="empty">Nobody has come to the door yet.</div>';
   $('#blocked').innerHTML=D.blocked.length?'<table><tbody>'+D.blocked.map(function(b){var d=dv[b.id]||{};return '<tr class="click" data-dev="'+b.id+'"><td><b>'+esc(who2(d))+'</b><br><span class="dim">'+esc([d.device,d.browser].filter(Boolean).join(' · '))+'</span></td><td class="dim">since '+esc(exact(b.at))+'</td></tr>'}).join('')+'</tbody></table>':'<div class="empty" style="padding:16px">Nobody is blocked. Open any device and tap Block.</div>';
-  $('#ips').innerHTML=D.ips.length?'<table><thead><tr><th>IP</th><th>Devices</th><th>Hits</th><th>Last</th><th></th></tr></thead><tbody>'+D.ips.map(function(x){return '<tr><td class="mono">'+esc(x.ip)+(x.shared?' <span class="tag bad">shared</span>':'')+'</td><td>'+x.devs.map(function(id){var d=dv[id]||{};return '<a href="#" data-dev="'+id+'">'+esc(who2(d))+'</a>'}).join('<br>')+'</td><td>'+x.n+'</td><td class="dim" style="white-space:nowrap">'+ago(x.last)+'</td><td><a href="https://ipinfo.io/'+encodeURIComponent(x.ip)+'" target="_blank" rel="noopener noreferrer">look up ↗</a></td></tr>'}).join('')+'</tbody></table>':'<div class="empty">No addresses yet.</div>';
+  $('#ips').innerHTML=D.ips.length?'<table><thead><tr><th>IP</th><th>Devices</th><th>Hits</th><th>Last</th><th></th></tr></thead><tbody>'+D.ips.map(function(x){return '<tr><td class="mono">'+esc(x.ip)+(x.shared?' <span class="tag bad">shared</span>':'')+'</td><td>'+x.devs.map(function(id){var d=dv[id]||{};return '<a href="#" data-dev="'+id+'">'+esc(who2(d))+'</a>'}).join('<br>')+'</td><td>'+x.n+'</td><td class="dim" style="white-space:nowrap">'+ago(x.last)+'</td><td>'+ipLookup(x.ip,x.lookup)+'</td></tr>'}).join('')+'</tbody></table>':'<div class="empty">No addresses yet.</div>';
 }
 function loadSec(){return api('/admin/api/security').then(function(d){S.sec=d;renderSec()}).catch(function(){})}
 var SEGS=[['guest','Guests'],['owner','You'],['none','Signed out'],['all','Everyone']];
@@ -181,6 +190,7 @@ function inSeg(d){return S.seg==='all'||segOf(d)===S.seg}
 
 function render(){
   var D=S.data;if(!D)return;
+  $('#connection').innerHTML='<strong>This connection</strong> · <span class="mono">'+esc(D.connection&&D.connection.ip||'Unavailable')+'</span> · '+esc(ipCaption(D.connection))+(D.connection&&D.connection.kind==='public'?' · '+ipLookup(D.connection.ip,true):'')+(D.connection&&D.connection.reason?'<div class="note">'+esc(ipReason(D.connection))+'</div>':'');
   var all=D.devices, list=all.filter(inSeg);
   DUP={};all.forEach(function(d){var n=display0(d);DUP[n]=(DUP[n]||0)+1});
   $('#seg').innerHTML=SEGS.map(function(s){var n=s[0]==='all'?all.length:all.filter(function(d){return segOf(d)===s[0]}).length;return '<button role="tab" data-seg="'+s[0]+'" class="'+(S.seg===s[0]?'on':'')+'">'+s[1]+'<em>'+n+'</em></button>'}).join('');
@@ -212,7 +222,7 @@ function row(d){
   return '<div class="row" data-dev="'+d.id+'">'
    +'<div class="c who-c"><div class="who"><b>'+esc(display(d))+'</b>'+chips+'</div><small>'+(d.lastDo?esc(d.lastDo.text)+(d.lastDo.sp?' · '+SPORT[d.lastDo.sp]:'')+' · '+ago(d.lastDo.t):d.feedOnly?'A board left open in another window or tab — live prices only, nothing tapped':'no activity recorded')+'</small></div>'
    +'<div class="c"><b>'+esc(devLine(d))+'</b><small>'+esc(brLine(d))+'</small></div>'
-   +'<div class="c"><b class="mono" style="font-weight:500">'+esc(d.ipLast||'—')+'</b><small>'+esc(extra||(d.ctx&&d.ctx.tz)||'')+'</small></div>'
+   +'<div class="c"><b class="mono" style="font-weight:500">'+esc(d.ipLast||'—')+'</b><small>'+esc(ipCaption(d.ipInfo)+(extra?' · '+extra:''))+'</small></div>'
    +'<div class="c"><b>'+ago(d.last)+'</b><small>'+esc(exact(d.last))+'</small></div>'
    +'<div class="c m-hide"><b>'+d.sessions+'</b><small>'+dur(d.timeOn)+' total</small></div>'
    +'<div class="c m-hide"><b>'+d.clicks+' taps</b><small>'+d.views+' screens</small></div>'
@@ -253,16 +263,16 @@ function drawDev(){
     +'<div class="note">Block keeps this device out of all three boards until you unblock it; it only sees a sign-in screen and is not told why. Auto uses the code this device signed in with ('+esc(d.roleSeen||'none')+'). Pin it if you test on your own phone with the guest link. Clearing removes it from this view only; the device is not told or signed out.'+(d.name&&d.label?' They call themselves “'+esc(d.name)+'”.':'')+'</div>';
   h+='<div class="d-sec"><h3>Identity</h3><div class="facts">'
     +fx('Device',d.device+(d.model?' · '+d.model:''))+fx('Operating system',(d.os+' '+d.osVer).trim())+fx('Browser',(d.browser+' '+d.bVer).trim()+(d.inApp?' (inside '+d.inApp+')':''))
-    +fx('IP address (latest)',d.ipLast)+fx('Screen',c.sw?c.sw+' × '+c.sh+(c.dpr?' @'+c.dpr+'x':''):'')+fx('Window',c.vw?c.vw+' × '+c.vh:'')
-    +fx('Time zone',c.tz?c.tz+(c.tzo!=null?' (UTC'+(c.tzo<=0?'+':'−')+Math.abs(c.tzo/60)+')':''):'')+fx('Language',c.langs||c.locale||'')+fx('Touch',c.touch!=null?(c.touch?c.touch+' touch points':'none (mouse)'):'')
+    +fx('Observed IP (latest)',d.ipLast)+fx('IP source',ipSource(d.ipInfo))+fx('IP source note',ipReason(d.ipInfo))+fx('Address type',ipKind(d.ipInfo))+fx('IP observed at',d.ipInfo?exact(d.ipInfo.observedAt):'Not recorded')+fx('Screen',c.sw?c.sw+' × '+c.sh+(c.dpr?' @'+c.dpr+'x':''):'')+fx('Window',c.vw?c.vw+' × '+c.vh:'')
+    +fx('Browser time zone',c.tz?c.tz+(c.tzo!=null?' (UTC'+(c.tzo<=0?'+':'−')+Math.abs(c.tzo/60)+')':''):'')+fx('Language',c.langs||c.locale||'')+fx('Touch',c.touch!=null?(c.touch?c.touch+' touch points':'none (mouse)'):'')
     +fx('Opened from',c.standalone?'Home-screen icon (installed)':c.sw?'Browser tab':'')+fx('Connection',!c.net?'':c.touch?c.net+(c.rtt?' · '+c.rtt+' ms':'')+(c.down?' · '+c.down+' Mb/s':''):'not reported on computers')+fx('Automated?',d.bot?'Looks like a script or bot':'No')
     +fx('First seen',exact(d.first))+fx('Last seen',exact(d.last)+' ('+ago(d.last)+')')+fx('Time on the board',dur(d.timeOn)+' over '+d.sessions+' session'+(d.sessions===1?'':'s'))
-    +fx('Board device ID',d.id)+fx('Per-sport IDs',Object.keys(d.links||{}).map(function(k){return SPORT[k]+' '+(d.links[k]||[]).map(function(x){return x.slice(0,8)}).join(',')}).join(' · '))+fx('Sports used',d.sports.map(function(s){return SPORT[s]}).join(', '))
+    +fx('Location note','A time-zone name describes clock rules, not a city. IP lookup estimates network location; it is not GPS.')+fx('Board device ID',d.id)+fx('Per-sport IDs',Object.keys(d.links||{}).map(function(k){return SPORT[k]+' '+(d.links[k]||[]).map(function(x){return x.slice(0,8)}).join(',')}).join(' · '))+fx('Sports used',d.sports.map(function(s){return SPORT[s]}).join(', '))
     +'</div></div>';
   h+='<div class="d-sec"><h3>Full user agent <span style="text-transform:none;letter-spacing:0;font-weight:500">exactly as the browser sent it</span></h3><div class="raw">'+esc(d.ua||'(none sent)')+'</div></div>';
   if(d.uaHistory&&d.uaHistory.length>1)h+='<div class="d-sec"><h3>Every browser this device has used <span>'+d.uaHistory.length+'</span></h3><div class="card"><table><thead><tr><th>User agent</th><th>First</th><th>Last</th><th>Hits</th></tr></thead><tbody>'+d.uaHistory.map(function(u){return '<tr><td class="mono" style="font-size:11.5px;overflow-wrap:anywhere">'+esc(u.ua)+'</td><td>'+esc(exact(u.first))+'</td><td>'+esc(exact(u.last))+'</td><td>'+u.n+'</td></tr>'}).join('')+'</tbody></table></div><div class="note">More than one here can mean a second browser on the same phone, or a sign-in copied to another device.</div></div>';
-  h+='<div class="d-sec"><h3>IP addresses <span>'+d.ipHistory.length+'</span></h3><div class="card"><table><thead><tr><th>IP</th><th>First</th><th>Last</th><th>Hits</th><th></th></tr></thead><tbody>'
-    +d.ipHistory.map(function(i){return '<tr><td class="mono">'+esc(i.ip)+'</td><td>'+esc(exact(i.first))+'</td><td>'+esc(exact(i.last))+'</td><td>'+i.n+'</td><td><a href="https://ipinfo.io/'+encodeURIComponent(i.ip)+'" target="_blank" rel="noopener noreferrer">look up ↗</a></td></tr>'}).join('')+'</tbody></table></div></div>';
+  h+='<div class="d-sec"><h3>Observed IP history <span>'+d.ipHistory.length+'</span></h3><div class="note">Source and address type describe the latest observation for each address. Older records without this evidence keep their original values.</div><div class="card"><table><thead><tr><th>IP</th><th>First</th><th>Last</th><th>Hits</th><th></th></tr></thead><tbody>'
+    +d.ipHistory.map(function(i){return '<tr><td class="mono">'+esc(i.ip)+'<div class="ip-source">'+esc(ipCaption(i.ipInfo))+(i.ipInfo?'<br>Latest observation · '+esc(exact(i.ipInfo.observedAt)):'')+'</div></td><td>'+esc(exact(i.first))+'</td><td>'+esc(exact(i.last))+'</td><td>'+i.n+'</td><td>'+ipLookup(i.ip,i.lookup)+'</td></tr>'}).join('')+'</tbody></table></div></div>';
   if(d.betList.length){
     h+='<div class="d-sec"><h3>Bets <span>'+d.betList.length+'</span></h3><div class="card"><table><thead><tr><th>When</th><th>Sport</th><th>Pick</th><th>Risk</th><th>Book</th><th>Result</th></tr></thead><tbody>'
      +d.betList.map(function(b){var t=Date.parse(b.placed)||b.created;return '<tr><td>'+esc(exact(t))+'</td><td>'+esc(SPORT[b.sp])+'</td><td>'+esc(b.text)+(b.legs>1?' <small style="color:var(--i3)">('+b.legs+'-leg parlay)</small>':'')+(b.note?'<br><small style="color:var(--i3)">“'+esc(b.note)+'”</small>':'')+'</td><td>'+esc(money(b.stake))+' <small style="color:var(--i3)">'+esc(odds(b.odds))+'</small></td><td>'+esc(b.book||'—')+'</td><td class="'+(b.status==='won'?'w':b.status==='lost'?'l':'')+'">'+(b.status==='open'?'open':esc(b.status)+' '+esc(money(b.net,true)))+'</td></tr>'}).join('')+'</tbody></table></div></div>';
@@ -301,7 +311,7 @@ document.addEventListener('click',function(ev){
 document.addEventListener('change',function(ev){if(ev.target.id==='bg'){S.bg=ev.target.checked;drawDev()}});
 document.addEventListener('keydown',function(ev){if(ev.key==='Escape')closeDev();if(ev.key==='Enter'&&ev.target.id==='lbl'){ev.preventDefault();document.querySelector('[data-act="label"]').click()}});
 
-function loadBoard(){return api('/admin/api/board').then(function(d){S.data=d;render()}).catch(function(){})}
+function loadBoard(){return api('/admin/api/board').then(function(d){S.data=d;render()}).catch(function(){$('#connection').textContent='Connection check unavailable. Retrying automatically…'})}
 setView(S.view);if(S.view==='security')loadBoard();
 setInterval(function(){if(document.visibilityState!=='visible')return;loadBoard();if(S.view==='security')loadSec();if(S.open&&!document.activeElement.matches('#lbl'))loadDev()},8000);
 document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')loadBoard()});

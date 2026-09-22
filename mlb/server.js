@@ -22,6 +22,12 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { clientIp: resolvedClientIp } = require('../shared/client-ip');
+// Merged engines accept the terminal's signed address only over loopback. Standalone engines resolve
+// their own direct/Railway ingress. These are existing process settings, never request headers.
+const CLIENT_IP_OPTIONS = process.env.BASE_PATH && process.env.TELEMETRY_PEER_SECRET
+  ? { mode: 'internal', secret: process.env.TELEMETRY_PEER_SECRET } : undefined;
+const clientIp = (req) => resolvedClientIp(req, CLIENT_IP_OPTIONS);
 const Odds = require('./lib/odds');
 const BetMGM = require('./lib/betmgm');
 const Manual = require('./lib/manual');
@@ -1153,7 +1159,7 @@ setInterval(() => pollStrays().then(gradeBets), 120e3);
 // ---------------------------------------------------------------- per-visitor rate limit (public deployments)
 const hits = new Map(); // ip -> { n, t }
 function limited(req) {
-  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const ip = clientIp(req);
   const now = Date.now();
   let h = hits.get(ip);
   if (!h || now - h.t > 60e3) { h = { n: 0, t: now }; hits.set(ip, h); }
@@ -1262,11 +1268,11 @@ function newLink(uid) {
   return { code, exp };
 }
 // Join and claim share a failure limit: 5 wrong codes per address in 15 minutes, and 100 from anywhere
-// (a backstop against address rotation). Only the LAST X-Forwarded-For entry is real (the proxy appends it).
+// (a backstop against address rotation). Address attribution matches the general API limiter.
 const TRY_WINDOW = 15 * 60e3;
 const tryFails = new Map(); // ip -> [timestamps]
 let allTryFails = [];
-const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || '?';
+
 function lockedOut(ip) {
   const now = Date.now();
   allTryFails = allTryFails.filter((t) => now - t < TRY_WINDOW);
@@ -1623,7 +1629,7 @@ process.on('SIGTERM', shutdown);
   contentLoop();
   Odds.start({ today: () => today, emit });
   pollStrays().then(gradeBets);
-  server.listen(PORT, () => {
+  server.listen(PORT, CLIENT_IP_OPTIONS?.mode === 'internal' ? '127.0.0.1' : undefined, () => {
     log(`Bing Bong Live is up → http://localhost:${PORT}   (live at-bats every ${FEED_MS / 1000}s)${ACCESS_TOKEN ? '   [access code on]' : ''}`);
     for (const u of lanUrls()) log(`  on your phone (same Wi-Fi) → ${u}`);
   });

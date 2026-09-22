@@ -17,6 +17,7 @@ const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
+const { clientIp, forwardClientIpHeaders } = require('./shared/client-ip');
 
 const PORT = Number(process.env.PORT) || 4000;
 // Where everything durable lives: bets, names, share links, line history, the Admin Center log. On Railway
@@ -232,9 +233,7 @@ function useBundles(key, html) {
 const fails = new Map();
 function locked(ip) { const a = (fails.get(ip) || []).filter((t) => t > Date.now() - 15 * 60e3); fails.set(ip, a); return a.length >= 10; }
 function bad(ip) { const a = fails.get(ip) || []; a.push(Date.now()); fails.set(ip, a); }
-// Railway appends the real client address LAST; earlier entries can be typed by the client (and would let
-// anyone dodge the login rate limit). Same rule the engines use.
-const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',').pop().trim() || req.socket.remoteAddress || '';
+// The shared resolver selects a validated address under this process's ingress trust policy.
 const isHttps = (req) => (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
 
 // Assets that must load even before sign-in (PWA install + uptime checks).
@@ -343,7 +342,7 @@ const server = http.createServer((req, res) => {
   const sp = m[1];
   const enginePath = m[2] || '/';
   const forwardPath = enginePath + qs;
-  const headers = { ...req.headers, host: `127.0.0.1:${s.port}` };
+  const headers = { ...forwardClientIpHeaders(req, PEER_SECRET), host: `127.0.0.1:${s.port}` };
   const t0 = Date.now();
   const isStream = enginePath === '/api/stream';
   // The owner's copy of a board page gets an Admin Center link in the sport bar; ask for it uncompressed so
