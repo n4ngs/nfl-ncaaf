@@ -111,7 +111,29 @@ Final pre-deploy validation:
 - Browser console errors: none observed in the local Tools check. No live football game was active during these checks; real-time grading transitions are covered by deterministic regressions and the running HTTP final-game test.
 - Warm local health latency: five requests measured **2, 2, 2, 3, 2 ms** (median 2 ms, max 3 ms). This is a small local smoke measurement, not a load test or sportsbook execution benchmark.
 
-Production deployment is the next authorized step after presenting this report. Production revision, additive classification results, and live smoke results will be recorded in the final deployment addendum.
+The implementation was committed as `1b53e601b42db6322806b2aeffd71400e03767cf` and deployed successfully through the existing GitHub `main` integration. Railway deployment: `acb7ac37-df76-48c9-a44d-013e2ab5aa21` (SUCCESS), production instance `c886d9e7-670a-4f7b-b1a1-1dd603e2cbbf`. The safety branch was also pushed. Implementation diff: **54 files, 2,330 insertions, 527 deletions**. A documentation-only follow-up records these observed results; it does not alter application behavior.
+
+Production migration at fixed as-of `2026-09-22T07:02:26Z`:
+
+| Sport | Reviewed dry-run | Additive apply | Repeat dry-run |
+| --- | --- | --- | --- |
+| NFL | 64 retrospective records | 64 classifications appended | 0 new; 64 already classified |
+| NCAAF | 145 retrospective records | 145 classifications appended | 0 new; 145 already classified |
+
+The only reclassification destinations are `/data/nfl/integrity/reclassification-v1.jsonl` and `/data/ncaaf/integrity/reclassification-v1.jsonl`. Both runs reported **0 raw files modified**. New quote/entry/signal/resolution journals are additive. No synthetic production tickets were created.
+
+Production smoke results:
+
+- Root, NFL, NCAAF, and MLB health: HTTP 200. NFL/NCAAF report `clv-integrity-v1`, journal `ok:true`, and no journal errors.
+- NFL Board loaded 16 games; Live, My Bets, and Tools worked. Tools showed Journal OK. My Bets showed unavailable verified CLV as an em dash, not zero.
+- Completed-game details showed immutable-source timestamps, provisional closes, scheduled-start basis, and the actual-kickoff-unavailable reason. Raw stale/unverified prices remained visible without actionable full-game or first-half buttons.
+- NCAAF Board loaded 71 games. Production college mobile view at **390 × 844** rendered with 390-pixel body width, no page overflow, and working bottom navigation. A 721-pixel intermediate tablet layout was also checked. Temporary viewport overrides were reset.
+- Source health for ESPN, Action Network, VSiN, Pinnacle and Open-Meteo reported successful polls and no current errors for both sports. Connectivity does not establish quote freshness.
+- No browser console errors were observed during the production college smoke.
+- Production Admin correctly presented its sign-in boundary; the authorized in-app browser has no owner session. Authenticated production Admin functionality was therefore **not verified**. Local Admin Center was verified.
+- No active football game or existing ticket was available for observing a production settlement transition. Grading is verified by the regression suite and actual local HTTP final-game settlement. A separate local college UI ticket was saved, then its disclosure expanded successfully to show frozen UTC wager time, actual entered line/price, `MISSING_ENTRY_SNAPSHOT`, and null CLV measures. This test stayed in isolated local data.
+
+No application test failures occurred. A browser option-selection attempt needed the option’s exact value because its label contains a non-breaking space; the successful retry completed the UI smoke. An early local upstream Pinnacle poll failure was transient; production source health is recorded above.
 
 A pre-migration backup was created on the existing production volume at `/data/clv-integrity-backups/2026-09-22T06-53-39-400Z`: **21 files, 2,227,562 bytes**, all copied bytes SHA-256 verified. The source files were not modified. This is a verified per-file live backup; append-only telemetry may advance during the copy. Baseline code remains the separately recorded rollback revision.
 
@@ -123,7 +145,7 @@ A pre-migration backup was created on the existing production volume at `/data/c
 - A displayed or API-provided sportsbook quote does not prove executable availability, stake limits, or acceptance. No sportsbook order placement is automated.
 - Append-only journals and in-memory indexes grow over time; monitor disk and RSS and plan archival. Snapshot/entry/signal writes are durably flushed; reconstructible resolution records are appended without an individual fsync. Run reclassification serially with a fixed `--as-of` for reproducibility.
 - File-based persistence remains single-replica. Multi-replica operation requires coordinated storage and locking before scaling.
-- Chrome automation was unavailable. The user authorized the available in-app browser for testing; its session is separate from Chrome and may not have owner/Admin access.
+- Chrome automation was unavailable. The user authorized the available in-app browser for testing; its session is separate from Chrome and does not have owner/Admin access in production.
 
 ## Recommended next work
 
