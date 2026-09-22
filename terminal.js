@@ -149,11 +149,11 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 <body><div class="card">
 <div class="top"><span class="logo">${LOGO}</span><span class="wm">THE<b>.</b>BOARD</span></div>
 <h1>${OWNER_NAME ? OWNER_NAME + "'s board" : 'Enter your code'}</h1>
-<p>NFL, college football and MLB on one board. Enter the code you were given.</p>
+<p>NFL, college football and MLB on one board. Enter your code, or paste the link you were sent.</p>
 <form method="post" action="/login" autocomplete="off">
-<input name="code" type="password" inputmode="text" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Access code" autofocus required>
+<input name="code" type="password" inputmode="text" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Code or link" placeholder="Code or link" autofocus required>
 <button>Open the board</button>
-<div class="e">${wrong ? "That code didn't work. Check it and try again." : ''}</div>
+<div class="e">${wrong ? "That didn't work. Try opening the link you were sent in this browser." : ''}</div>
 </form>
 <div class="f">One board · NFL · NCAAF · MLB</div>
 </div></body></html>`;
@@ -223,10 +223,16 @@ const server = http.createServer((req, res) => {
     if (locked(ip)) { res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '900' }); return res.end('Too many tries. Wait 15 minutes.'); }
     let body = ''; req.on('data', (c) => { body += c; if (body.length > 2000) req.destroy(); });
     req.on('end', () => {
-      const code = new URLSearchParams(body).get('code') || '';
+      const raw = new URLSearchParams(body).get('code') || '';
+      /* Forgiving on purpose: guests are handed a LINK, not a code, and when they land here in a second
+         browser they paste that link or type the code with a phone's auto-capital or a trailing space.
+         Accept the code as typed, trimmed, or lower-cased, and the guest link (whole URL or its token). */
+      const tries = [...new Set([raw, raw.trim(), raw.trim().toLowerCase()])].filter(Boolean);
+      const tok = (/(?:\/g\/)?([a-f0-9]{24})\b/i.exec(raw.trim()) || [])[1];
       let kind = null;
-      if (OWNER_HASH && safeEq(hashCode(code), OWNER_HASH)) kind = 'owner';
-      else if (GUEST_HASH && safeEq(hashCode('guest:' + code), GUEST_HASH)) kind = 'guest';
+      if (OWNER_HASH && tries.some((c) => safeEq(hashCode(c), OWNER_HASH))) kind = 'owner';
+      else if (GUEST_HASH && tries.some((c) => safeEq(hashCode('guest:' + c), GUEST_HASH))) kind = 'guest';
+      else if (GUEST_LINK && tok && safeEq(tok.toLowerCase(), GUEST_LINK)) kind = 'guest';
       if (!kind) { bad(ip); Board.entrance(who, null, 'wrong'); return page(res, 401, { wrong: true }); }
       fails.delete(ip);
       Board.entrance(who, kind, kind === 'owner' ? 'code' : 'guest-code');
