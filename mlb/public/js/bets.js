@@ -7,8 +7,10 @@
 
 // ------------------------------------------------------------ constants
 const BETS_MINUS = '−';
-// Nevada sportsbook pages only. DraftKings, FanDuel, Pinnacle, Wynn and Boomer's get no link.
+// Nevada sportsbook pages. Boomer's and Wynn have no betting website, only their Nevada iPhone apps.
 const BETS_SITE = {
+  boom: 'https://apps.apple.com/us/app/boomers-sportsbook-nevada/id6749002754',
+  wynn: 'https://apps.apple.com/us/app/wynn-sports-nevada/id6476514610',
   mgm: 'https://www.nv.betmgm.com/en/sports',
   czr: 'https://sportsbook.caesars.com/us/nv/bet',
   circa: 'https://www.circasports.com/',

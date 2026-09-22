@@ -142,3 +142,7 @@ body:has(#xsport) .top{min-height:52px}
 .days .on,.days [aria-current="true"],.days [aria-pressed="true"]{background:var(--brand);color:var(--brand-ink)}
 
 @media (prefers-reduced-motion:reduce){.px{transition:none}}
+
+/* a live game's book with no in-game feed: its last pregame number, clearly not a live price */
+.px.pre{opacity:.5;cursor:default;background:transparent!important;box-shadow:none!important}
+.px.pre small{text-transform:uppercase;letter-spacing:.06em;font-size:9px}

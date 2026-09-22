@@ -404,7 +404,8 @@ function renderBoard(loading = false) {
     grp.games.push(g);
   }
   const mkt = S.mkt;
-  const cols = visibleBooks().filter((b) => shown.some((g) => sideKeys(mkt).some((sd) => boardPrice(g, mkt, sd, b.key))));
+  // Every book, always — a book with nothing on this slate shows dashes rather than vanishing (owner: "all books everywhere").
+  const cols = visibleBooks();
   if (S.phBook !== 'mkt' && !cols.some((b) => b.key === S.phBook)) S.phBook = 'mkt'; // that book has nothing on this slate
   $('#phBooks').innerHTML = [['mkt', 'Market'], ...cols.map((b) => [b.key, b.short])]
     .map(([k, l]) => `<button class="pbtn" type="button" data-phbook="${esc(k)}" aria-pressed="${S.phBook === k}">${esc(l)}${k !== 'mkt' && S.books.find((b) => b.key === k)?.sharp ? '<span class="tag sharp">S</span>' : ''}</button>`).join('');
@@ -427,7 +428,16 @@ function sideKeys(mkt) { return mkt === 't' ? ['over', 'under'] : ['away', 'home
 function pxCell(g, mkt, side, book, best, opts = {}) {
   const p = boardPrice(g, mkt, side, book);
   const m = mkt === 'h1' ? 'h1s' : mkt;
-  if (!p || (p.odds == null && p.line == null)) return `<span class="px na" aria-hidden="true">—</span>`;
+  if (!p || (p.odds == null && p.line == null)) {
+    // Boomer's, Wynn, Station and Pinnacle have no in-game feed. In a live game show their last pregame
+    // number, marked "close" and not tappable, so the column still says something true instead of going blank.
+    const q = isLive(g) && mkt !== 'h1' ? sideOf(g.books?.[book], m, side) : null;
+    if (q && (q.line != null || q.odds != null)) {
+      const qm = m === 'ml' ? fmtOdds(q.odds) : mkt === 't' ? `${side === 'over' ? 'o' : 'u'}${fmtTot(q.line)}` : fmtPts(q.line);
+      return `<span class="px num na pre" title="${esc(bookFull(book))} has no live feed. This was its last pregame number." aria-label="${esc(`${bookFull(book)}, no live feed, last pregame ${qm}`)}">${esc(qm)}<small>close</small></span>`;
+    }
+    return `<span class="px na" aria-hidden="true">—</span>`;
+  }
   const isBest = best && best.book === book && !isFinal(g);
   const L = mkt === 'h1' ? g.h1?.[book] : isLive(g) ? g.live?.[book] : g.books?.[book];
   const flash = flashAttr(g.id, mkt === 'h1' ? 'h1' : isLive(g) ? 'live' : 'pre', book, m);

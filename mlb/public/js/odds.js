@@ -21,8 +21,10 @@ const ODDS_BOOKS = [
   { key: 'dk', name: 'DraftKings', short: 'DK', code: 'DK' },
   { key: 'fd', name: 'FanDuel', short: 'FanDuel', code: 'FD' },
 ];
-// Verified Nevada pages only. DraftKings, FanDuel, Pinnacle, Wynn and Boomer's get no link.
+// Verified Nevada pages. Boomer's and Wynn have no betting website, only their Nevada iPhone apps.
 const ODDS_NV_LINK = {
+  boom: 'https://apps.apple.com/us/app/boomers-sportsbook-nevada/id6749002754',
+  wynn: 'https://apps.apple.com/us/app/wynn-sports-nevada/id6476514610',
   mgm: 'https://www.nv.betmgm.com/en/sports',
   czr: 'https://sportsbook.caesars.com/us/nv/bet',
   circa: 'https://www.circasports.com/',
@@ -596,7 +598,8 @@ function oddsRowExtras(g, O) {
 function oddsBoardTable(games, mkt) {
   if (!games.length) return '';
   const keys = [...new Set(games.flatMap((g) => Object.keys(oddsBooksFor(oddsGame(g.pk), mkt))))].filter((k) => k !== 'cons' && k !== 'open');
-  const books = [...ODDS.books, ...ODDS_BOOKS].map((b) => b.key).filter((k, i, a) => a.indexOf(k) === i && keys.includes(k));
+  // Every book, always (owner: "all books everywhere"); an unpriced book shows dashes instead of vanishing.
+  const books = [...ODDS.books, ...ODDS_BOOKS].map((b) => b.key).filter((k, i, a) => a.indexOf(k) === i && k !== 'cons' && k !== 'open');
   const [s1, s2] = oddsSides(mkt);
   const head = `<tr><th class="l stk">Matchup</th><th>Open</th><th>Market</th><th>Move</th>${books.map((k) => `<th title="${esc(oddsBookFull(k))}"><span class="odds-bt-bk">${esc(oddsBookName(k))}</span>${oddsBook(k).sharp ? '<span class="odds-sharp" aria-hidden="true">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th><th>Wind</th></tr>`;
   const rows = games.map((g) => {

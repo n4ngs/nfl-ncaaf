@@ -229,7 +229,11 @@ function bookTable(g) {
   const cell = (k, m, side) => {
     const L = k === 'open' ? { s: g.open?.s, so: [null, null], t: g.open?.t, to: [null, null], ml: g.open?.ml || [null, null] } : src[k];
     const p = sideOf(L, m, side);
-    if (!p || (p.line == null && p.odds == null)) return '<span class="px na">—</span>';
+    if (!p || (p.line == null && p.odds == null)) {
+      const q = live && k !== 'cons' && k !== 'open' ? sideOf(g.books?.[k], m, side) : null;
+      if (q && (q.line != null || q.odds != null)) return `<span class="px num na pre" title="No live feed for this book. Its last pregame number.">${esc(m === 'ml' ? fmtOdds(q.odds) : m === 't' ? `${side === 'over' ? 'o' : 'u'}${fmtTot(q.line)}` : fmtPts(q.line))}<small>close</small></span>`;
+      return '<span class="px na">—</span>';
+    }
     const b = best[`${m}${side}`];
     const isBest = k !== 'cons' && k !== 'open' && b?.book === k && !isFinal(g);
     const main = m === 'ml' ? fmtOdds(p.odds) : m === 't' ? `${side === 'over' ? 'o' : 'u'}${fmtTot(p.line)}` : fmtPts(p.line);
@@ -242,10 +246,10 @@ function bookTable(g) {
     const label = [bookFull(k), `${who} ${main}`, m !== 'ml' ? fmtOdds(p.odds) : '', isBest ? 'best price' : '', L?.m ? 'typed in' : '', flash.label, old ? `checked ${ago(L.seen)}` : ''].filter(Boolean).join(', ');
     return `<button type="button" class="${cls}"${flash.style} data-bet="${g.id}|${m}|${side}|${k}" aria-label="${esc(label)}">${inner}</button>`;
   };
-  const rows = keys.filter((k) => k === 'cons' || k === 'open' || src[k] || S.books.find((b) => b.key === k && !b.feed)).map((k) => {
+  const rows = keys.map((k) => {
     const b = S.books.find((x) => x.key === k);
     const L = src[k];
-    const age = L?.m ? `typed ${ago(L.at)}` : L?.src === 'vsin' ? 'via VSiN' : L?.src === 'pin' ? 'Pinnacle feed' : k === 'open' && g.open?.at ? dayLabel(new Date(g.open.at).toISOString()) : '';
+    const age = L?.m ? `typed ${ago(L.at)}` : live && !L && k !== 'cons' && g.books?.[k] ? 'no live feed · last pregame shown' : !L && k !== 'cons' && k !== 'open' ? 'no price posted' : L?.src === 'vsin' ? 'via VSiN' : L?.src === 'pin' ? 'Pinnacle feed' : k === 'open' && g.open?.at ? dayLabel(new Date(g.open.at).toISOString()) : '';
     const op = g.opens?.[k]?.s != null && !live ? `opened ${fmtPts(favSide(g) === 'away' ? -g.opens[k].s : g.opens[k].s)}` : '';
     return `<tr class="${k === 'cons' ? 'cons' : ''}"><td><div class="bk">${esc(bookName(k))}${b?.sharp ? '<span class="tag sharp">Sharp</span>' : ''}</div><small class="faint" style="font-size:11px">${esc([age, op].filter(Boolean).join(' · ') || (b && !b.feed && !L ? 'counter only' : ''))}</small></td>
       <td class="c-s">${cell(k, 's', 'away')}</td><td class="c-s">${cell(k, 's', 'home')}</td><td class="c-t">${cell(k, 't', 'over')}</td><td class="c-t">${cell(k, 't', 'under')}</td><td class="c-ml">${cell(k, 'ml', 'away')}</td><td class="c-ml">${cell(k, 'ml', 'home')}</td></tr>`;
