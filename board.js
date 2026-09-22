@@ -40,10 +40,11 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   fs.mkdirSync(DIR, { recursive: true });
   const DEV_FILE = path.join(DIR, 'devices.json');
   const SPORT_KEYS = Object.keys(sports);
+  const SPORT_LABEL = Object.fromEntries(SPORT_KEYS.map((k) => [k, sports[k].label]));
 
   // ------------------------------------------------------------------ state
-  let state = { v: 1, devices: {}, cleared: {} };
-  try { const s = JSON.parse(fs.readFileSync(DEV_FILE, 'utf8')); if (s && s.v === 1) state = { cleared: {}, ...s }; } catch { /* first boot */ }
+  let state = { v: 1, devices: {}, cleared: {}, blocked: {}, signout: {} };
+  try { const s = JSON.parse(fs.readFileSync(DEV_FILE, 'utf8')); if (s && s.v === 1) state = { cleared: {}, blocked: {}, signout: {}, ...s }; } catch { /* first boot */ }
   let dirty = false;
   const save = () => {
     try { const tmp = `${DEV_FILE}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(state)); fs.renameSync(tmp, DEV_FILE); dirty = false; } catch (e) { console.log('[board] save failed', e.message); }
@@ -257,7 +258,9 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   }
   const ACT = { APP_FOREGROUND: 'Came back to the app', APP_BACKGROUND: 'Switched away from the app', PAGE_EXIT: 'Closed the page', ONLINE: 'Came back online', OFFLINE: 'Lost connection' };
   const ENTER = { code: 'Signed in with the admin code', 'guest-code': 'Signed in with the guest code', 'guest-link': 'Came in on the guest link',
-    wrong: 'Typed a wrong code', gate: 'Saw the sign-in screen', logout: 'Signed out', 'bad-link': 'Tried a guest link that does not work' };
+    wrong: 'Typed a wrong code', gate: 'Saw the sign-in screen', logout: 'Signed out', 'bad-link': 'Tried a guest link that does not work',
+    blocked: 'Turned away (blocked by you)', 'signed-out': 'Signed out by you (sent to the sign-in screen)', 'owner-block': 'You blocked this device',
+    'owner-unblock': 'You unblocked this device', 'owner-signout': 'You signed this device out' };
   function describe(e) {
     if (e.k === 'req') { const [txt, lvl] = describeReq(e.m, e.p); return [e.s >= 400 ? `${txt} — failed (${e.s})` : txt, lvl]; }
     if (e.k === 'view') return [`Viewed ${tabName(e.r)}`, 1];
@@ -332,13 +335,16 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     const ev = byDev.get(id) || [];
     const info = uaInfo(d.ua, d.ctx);
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    let views = 0, clicks = 0, today_n = 0, lastDo = null;
+    let views = 0, clicks = 0, today_n = 0, lastDo = null, lastReal = 0;
     for (const e of ev) {
       if (e.k === 'view') views++;
       if (e.k === 'click') clicks++;
       if (e.t >= today.getTime() && (e.k === 'click' || e.k === 'view')) today_n++;
     }
     for (let i = ev.length - 1; i >= 0; i--) { const v = view(ev[i]); if (v.lvl === 1) { lastDo = { t: v.t, text: v.text, sp: v.sp }; break; } }
+    // "Here now" means a board is actually open (live feed connected) or they did something real in the last
+    // few minutes while signed in. Seeing the sign-in screen is not being here.
+    for (let i = ev.length - 1; i >= 0; i--) { const e = ev[i]; if (e.role !== 'none' && (e.k === 'view' || e.k === 'click' || (e.k === 'req' && e.p === '/'))) { lastReal = e.t; break; } }
     const ss = sessionsOf(ev);
     const bets = betsOf(d);
     const done = bets.filter((b) => b.status === 'won' || b.status === 'lost' || b.status === 'push');
@@ -348,7 +354,9 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
       id, role: roleOfDev(d), roleSet: d.roleSet || null, roleSeen: d.role || null, label: d.label || '', name, who,
       ua: d.ua || '', ...info, ctx: d.ctx || null,
       ipLast: d.ipLast || '', ipCount: Object.keys(d.ips || {}).length,
-      first: d.first, last: d.last, live: streams.has(id) || Date.now() - d.last < LIVE_MS, streaming: streams.get(id) || 0,
+      first: d.first, last: d.last, live: streams.has(id) || (!!lastReal && Date.now() - lastReal < LIVE_MS), streaming: streams.get(id) || 0,
+      feedOnly: !views && !clicks && ev.some((e) => e.k === 'req' && e.p === '/api/stream'),
+      blocked: !!state.blocked[id], signoutPending: !!state.signout[id],
       sessions: ss.length, sessionsToday: ss.filter((s) => s.end >= today.getTime()).length, timeOn: ss.reduce((a, s) => a + s.dur, 0),
       views, clicks, tapsToday: today_n, events: ev.length,
       sports: Object.entries(d.sports || {}).sort((a, b) => b[1] - a[1]).map(([k]) => k), lastDo,
@@ -376,6 +384,67 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
       sessionList: sessionsOf(ev).slice(0, 200),
       timeline: ev.slice(-3000).map(view).reverse(),
       betList: betsOf(d),
+    };
+  }
+
+  /* The Security tab. Everything here is derived from the same log as the People tab, so it is the same truth
+     seen from the door: who tried to get in and how, what changed about a device, which addresses are shared,
+     and what failed. Each alert names the device, so every line opens the full detail. */
+  function securityJSON() {
+    const now = Date.now(), DAY = 86400e3, WEEK = 7 * DAY;
+    const devs = state.devices;
+    const label = (id) => { const d = devs[id]; if (!d) return { id, gone: true }; const i = uaInfo(d.ua, d.ctx); return { id, who: d.label || engineName(d), role: roleOfDev(d), device: i.device, os: `${i.os} ${i.osVer}`.trim(), browser: `${i.browser} ${i.bVer}`.trim() }; };
+    const door = [], alerts = [], fails = [];
+    const wrongByIp = new Map();
+    for (let i = ring.length - 1; i >= 0; i--) {
+      const e = ring[i];
+      if (now - e.t > WEEK) break;
+      if (!devs[e.dev]) continue;
+      if (e.k === 'enter') {
+        door.push({ t: e.t, dev: e.dev, how: e.how, text: describe(e)[0], ip: e.ip, role: e.role });
+        if (e.how === 'wrong' && now - e.t < DAY) { const w = wrongByIp.get(e.ip) || { ip: e.ip, n: 0, devs: new Set(), first: e.t, last: e.t }; w.n++; w.devs.add(e.dev); w.first = Math.min(w.first, e.t); w.last = Math.max(w.last, e.t); wrongByIp.set(e.ip, w); }
+      }
+      if (e.k === 'req' && (e.s === 401 || e.s === 403 || e.s === 429 || e.s >= 500) && fails.length < 300) fails.push({ t: e.t, dev: e.dev, sp: e.sp, m: e.m, p: e.p, s: e.s, ip: e.ip, role: e.role, text: describe(e)[0] });
+    }
+    // Admin code used on a device the board had never seen before: the one that matters most.
+    for (const x of door) if (x.how === 'code') { const d = devs[x.dev]; if (d && x.t - d.first < 5 * 60e3) alerts.push({ t: x.t, sev: 'high', kind: 'Admin code on a new device', dev: x.dev, ip: x.ip, text: 'Your admin code was used on a device this board had never seen. If this was not you, change ACCESS_CODE.' }); }
+    for (const w of wrongByIp.values()) if (w.n >= 3) alerts.push({ t: w.last, sev: 'high', kind: 'Repeated wrong codes', dev: [...w.devs][0], ip: w.ip, text: `${w.n} wrong codes from ${w.ip} in the last day (after 10 the address is locked out for 15 minutes).` });
+    for (const [id, d] of Object.entries(devs)) {
+      const role = roleOfDev(d);
+      if (now - d.first < WEEK && role !== 'owner') alerts.push({ t: d.first, sev: role === 'guest' ? 'notice' : 'info', kind: role === 'guest' ? 'New guest device' : 'New signed-out visitor', dev: id, ip: Object.entries(d.ips || {}).sort((a, b) => a[1].first - b[1].first)[0]?.[0] || '', text: role === 'guest' ? 'A device came in as a guest for the first time.' : 'A device reached the sign-in screen and never got in.' });
+      for (const [ua, h] of Object.entries(d.uas || {})) if (h.first - d.first > 60e3 && now - h.first < WEEK) {
+        const a = uaInfo(ua);
+        alerts.push({ t: h.first, sev: role === 'owner' ? 'info' : 'notice', kind: 'Different browser on the same device', dev: id, ip: d.ipLast, text: `This device's sign-in showed up in ${[`${a.browser} ${a.bVer}`.trim() || 'an unrecognised browser', `${a.os} ${a.osVer}`.trim()].filter(Boolean).join(' on ')}. Either the browser updated, or the sign-in was copied to another browser.` });
+      }
+      for (const [ip, h] of Object.entries(d.ips || {})) if (h.first - d.first > 60e3 && now - h.first < WEEK) alerts.push({ t: h.first, sev: 'info', kind: 'New IP address', dev: id, ip, text: `Now connecting from ${ip}${role === 'owner' ? ' (one of your devices; a VPN or a network change does this)' : ''}.` });
+    }
+    const groupFails = new Map();
+    for (const f of fails) { const k = `${f.dev}|${f.s}|${f.p}`; const g = groupFails.get(k) || { ...f, n: 0, first: f.t }; g.n++; g.first = Math.min(g.first, f.t); groupFails.set(k, g); }
+    for (const g of groupFails.values()) alerts.push({ t: g.t, sev: g.s === 403 || g.s >= 500 ? 'notice' : 'info', kind: g.s >= 500 ? 'Server error' : g.s === 429 ? 'Rate limited' : 'Refused request', dev: g.dev, ip: g.ip, text: `${g.text}${g.n > 1 ? ` · ${g.n} times` : ''} (${g.m} ${SPORT_LABEL[g.sp] || ''} ${g.p})` });
+    alerts.sort((a, b) => b.t - a.t);
+    // Every address, who used it. One address, many devices = a shared network, or one person on many browsers.
+    const ipMap = new Map();
+    for (const [id, d] of Object.entries(devs)) for (const [ip, h] of Object.entries(d.ips || {})) {
+      const x = ipMap.get(ip) || { ip, first: h.first, last: h.last, n: 0, devs: [], roles: new Set() };
+      x.first = Math.min(x.first, h.first); x.last = Math.max(x.last, h.last); x.n += h.n; x.devs.push(id); x.roles.add(roleOfDev(d)); ipMap.set(ip, x);
+    }
+    const ips = [...ipMap.values()].map((x) => ({ ...x, roles: [...x.roles], shared: x.devs.length > 1 })).sort((a, b) => b.last - a.last);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const T = today.getTime();
+    const count = (fn) => door.filter(fn).length;
+    const used = new Set(alerts.map((a) => a.dev).concat(door.map((x) => x.dev), ips.flatMap((x) => x.devs)));
+    return {
+      now,
+      stats: {
+        signinsToday: count((x) => x.t >= T && (x.how === 'code' || x.how === 'guest-code' || x.how === 'guest-link')),
+        wrongToday: count((x) => x.t >= T && x.how === 'wrong'), badLinksToday: count((x) => x.t >= T && x.how === 'bad-link'),
+        newDevicesWeek: Object.values(devs).filter((d) => now - d.first < WEEK).length,
+        high: alerts.filter((a) => a.sev === 'high').length, failsDay: fails.filter((f) => now - f.t < DAY).length,
+        blocked: Object.keys(state.blocked).length, sharedIps: ips.filter((x) => x.shared).length,
+      },
+      alerts: alerts.slice(0, 300), door: door.slice(0, 400), ips: ips.slice(0, 300),
+      blocked: Object.entries(state.blocked).map(([id, b]) => ({ id, at: b.at })),
+      devices: Object.fromEntries([...used].map((id) => [id, label(id)])),
     };
   }
 
@@ -415,11 +484,42 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   function setDevice(id, body) {
     const d = state.devices[id];
     if (!d) return false;
+    if (body.action) return act(id, d, body.action);
     if (typeof body.label === 'string') d.label = body.label.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40);
     if (body.role === 'owner' || body.role === 'guest' || body.role === null || body.role === 'auto') d.roleSet = body.role === 'auto' ? null : body.role;
     dirty = true; save();
     return true;
   }
+  /* Block and sign-out act at the door, for all three sports at once. Both are silent: a blocked device just
+     sees the ordinary sign-in screen, and a signed-out one is sent there once. Neither is ever announced.
+     The owner's own devices can't be blocked from here, so this page can't lock its owner out. */
+  function act(id, d, a) {
+    if (a === 'block' || a === 'signout') { if (roleOfDev(d) === 'owner') return { error: 'That is one of your own devices.' }; }
+    if (a === 'block') state.blocked[id] = { at: Date.now() };
+    else if (a === 'unblock') delete state.blocked[id];
+    else if (a === 'signout') state.signout[id] = Date.now();
+    else return { error: 'Unknown action' };
+    record({ t: Date.now(), dev: id, role: roleOfDev(d), ip: '', sp: '', k: 'enter', how: `owner-${a}` });
+    dirty = true; save();
+    return true;
+  }
+  const lastBlockNote = new Map();
+  // Called by the terminal on every request, before anything else answers. null = carry on.
+  function gate(who) {
+    if (state.blocked[who.dev]) {
+      const t = Date.now();
+      if (t - (lastBlockNote.get(who.dev) || 0) > 60e3) { lastBlockNote.set(who.dev, t); touch(who, null, null); record({ t, dev: who.dev, role: 'none', ip: who.ip, sp: '', k: 'enter', how: 'blocked' }); }
+      return 'blocked';
+    }
+    if (state.signout[who.dev]) {
+      delete state.signout[who.dev]; dirty = true;
+      touch(who, null, null);
+      record({ t: Date.now(), dev: who.dev, role: 'none', ip: who.ip, sp: '', k: 'enter', how: 'signed-out' });
+      return 'signout';
+    }
+    return null;
+  }
+
   // Clearing is the owner tidying their own view. The device is not told and not signed out; if it comes
   // back it simply starts a fresh row.
   function clearDevice(id) {
@@ -453,6 +553,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     const M = req.method;
     if ((pathname === '/admin' || pathname === '/admin/') && M === 'GET') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...sec }); res.end(PAGE); return true; }
     if (pathname === '/admin/api/board' && M === 'GET') { json(res, 200, boardJSON()); return true; }
+    if (pathname === '/admin/api/security' && M === 'GET') { json(res, 200, securityJSON()); return true; }
     if (pathname === '/admin/api/export' && M === 'GET') {
       const q = new URLSearchParams(qs.replace(/^\?/, ''));
       const dev = DEV_RE.test(q.get('dev') || '') ? q.get('dev') : '';
@@ -473,7 +574,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
       if (M === 'GET') { const d = deviceJSON(dm[1]); json(res, d ? 200 : 404, d || { error: 'Unknown device' }); return true; }
       // A custom header a cross-site form cannot send: every write needs it.
       if (req.headers['x-board-admin'] !== '1') { json(res, 403, { error: 'Missing header' }); return true; }
-      if (M === 'POST') { readBody(req).then((b) => json(res, setDevice(dm[1], b) ? 200 : 404, { ok: true })); return true; }
+      if (M === 'POST') { readBody(req).then((b) => { const r = setDevice(dm[1], b); json(res, r === true ? 200 : r ? 400 : 404, r === true ? { ok: true } : r || { error: 'Unknown device' }); }); return true; }
       if (M === 'DELETE') { json(res, clearDevice(dm[1]) ? 200 : 404, { ok: true }); return true; }
     }
     json(res, 404, { error: 'Not found' });
@@ -483,5 +584,5 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   function close() { if (dirty) save(); try { stream && stream.end(); } catch {} }
 
   const PAGE = require('./board-page')({ brand, logo, ownerName, sports: SPORT_KEYS.map((k) => [k, sports[k].label]) });
-  return { identify, request, entrance, client, streamOpen, streamClose, handle, close, STATIC_RE };
+  return { identify, gate, request, entrance, client, streamOpen, streamClose, handle, close, STATIC_RE };
 };

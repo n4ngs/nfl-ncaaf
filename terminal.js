@@ -186,6 +186,15 @@ const server = http.createServer((req, res) => {
   // One device id for the whole board, minted silently on first sight (no prompt, no sign-out).
   const who = Board.identify(req, isHttps(req));
   if (who.cookie) res.setHeader('set-cookie', [who.cookie]);
+  // A device the owner blocked or signed out from the Admin Center. Silent: it just gets the ordinary
+  // sign-in screen (a blocked one keeps getting it, whatever code it tries).
+  const verdict = Board.gate(who);
+  if (verdict) {
+    clearAuth(res, isHttps(req));
+    if (/^\/(nfl|ncaaf|mlb)\/api\//.test(pathname) || pathname.startsWith('/admin/api/')) { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Sign in"}'); }
+    if (verdict === 'signout' && pathname !== '/') { res.writeHead(303, { location: '/', 'cache-control': 'no-store' }); return res.end(); }
+    return page(res, 200, {});
+  }
 
   if (pathname === '/logout') { Board.entrance(who, role(req), 'logout'); clearAuth(res, isHttps(req)); res.writeHead(303, { location: '/' }); return res.end(); }
 

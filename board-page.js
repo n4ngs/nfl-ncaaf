@@ -49,6 +49,16 @@ h1{font-size:28px;letter-spacing:-.03em;margin:0;line-height:1.1}.sub{color:var(
 .chip.you{background:var(--ink);color:var(--bg);border-color:var(--ink)}.chip.live{color:var(--a);border-color:var(--a);gap:5px}.chip.live:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--a);animation:p 1.6s infinite}
 .chip.bot{border-style:dashed}.chip.sp{font-family:var(--mono);text-transform:none;letter-spacing:0;font-weight:600;color:var(--ink)}
 @keyframes p{50%{opacity:.25}}
+.views{display:flex;gap:3px;padding:3px;background:var(--fill);border-radius:10px}.views a{padding:6px 14px;border-radius:7px;text-decoration:none;font-weight:600;font-size:13px;color:var(--i2);display:flex;gap:6px;align-items:center}
+.views a.on{background:var(--s);color:var(--ink);box-shadow:0 0 0 1px var(--line)}.views a em{font-style:normal;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--a);color:#fff;font:600 11px/18px var(--mono);text-align:center}
+.sev{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;margin-top:6px}.sev.high{background:var(--a)}.sev.notice{background:var(--ink)}.sev.info{background:var(--i3)}
+.al{display:grid;grid-template-columns:12px 150px minmax(0,1fr) 150px;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;align-items:start}.al:hover{background:var(--fill)}.al:last-child{border-bottom:0}
+.al .k{font-weight:600}.al .tx{color:var(--i2);font-size:13px}.al .aw{font-size:13px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}.al .tm{font:500 12px var(--mono);color:var(--i3);text-align:right}
+.al.high .k{color:var(--a)}.al .tm .ag{display:block}
+.sec-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start}.sec-grid .card+.card{margin-top:16px}
+.scroll{max-height:560px;overflow:auto}
+.dim{color:var(--i3)}.tag{font:600 10.5px var(--mono);padding:1px 5px;border-radius:4px;border:1px solid var(--line2);color:var(--i2)}.tag.bad{color:var(--a);border-color:var(--a)}
+.banner{border:1px solid var(--a);background:var(--a-bg);border-radius:12px;padding:10px 12px;margin-top:10px;font-size:13px}
 .w{color:var(--w)}.l{color:var(--a)}
 .feed .it{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);cursor:pointer}.feed .it:hover{background:var(--fill)}
 .feed .tm{font:500 12px var(--mono);color:var(--i3);padding-top:1px}.feed .tx{font-size:13px}.feed .tx b{font-weight:600}.feed .mt{color:var(--i3);font-size:12px;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -78,21 +88,25 @@ td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}tr:la
 .tl pre{grid-column:1/-1;margin:4px 0 2px;font:11.5px/1.5 var(--mono);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--i2)}
 .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}.filters label{display:flex;gap:6px;align-items:center;color:var(--i2);font-size:12px;cursor:pointer}
 .note{color:var(--i3);font-size:12px;margin-top:8px}
-@media (max-width:1180px){.grid{grid-template-columns:1fr}.feed-body{max-height:420px}.stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:1180px){.grid,.sec-grid{grid-template-columns:minmax(0,1fr)}.feed-body{max-height:420px}.stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:860px){
   .top{padding:0 14px;gap:10px}.back,.brand span{display:none}main{padding:14px 16px}
   .t-h{display:none}.row{grid-template-columns:1fr auto;gap:4px 12px;padding:10px 14px}.row .c.who-c{grid-column:1/-1}.row .m-hide{display:none}.row .m-sum{display:block}.seg{overflow-x:auto;max-width:100%}.seg button{padding:7px 11px}
   .facts{grid-template-columns:repeat(2,minmax(0,1fr))}.tl{grid-template-columns:62px minmax(0,1fr);}.tl .k,.tl .ip{display:none}
   .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .al{grid-template-columns:12px minmax(0,1fr);row-gap:4px}.al>div:nth-child(3),.al>.tm{grid-column:2;text-align:left}.al>.tm .ag{display:inline;margin-left:6px}.al>.tm{font-size:11.5px}
+  .dl,.brand b{display:none}.views a{padding:6px 12px}.scroll{max-height:none}.scroll table,#blocked table{min-width:520px}.scroll,#blocked{overflow-x:auto}
 }
 </style></head><body>
 <header class="top">
   <a class="brand" href="/admin">${logo}<b>THE<i>.</i>BOARD</b><span>Admin Center</span></a>
+  <nav class="views" id="views"><a href="#people" data-view="people">People</a><a href="#security" data-view="security">Security</a></nav>
   <nav class="back" aria-label="Back to a board">${sportLinks}</nav>
   <div class="sp"></div>
   <div class="dl"><a class="btn" href="/admin/api/export?fmt=csv" title="Every recorded event, every device">⤓ CSV</a><a class="btn" href="/admin/api/export?fmt=json">⤓ JSON</a></div>
 </header>
 <main>
+  <div id="vPeople">
   <div class="head">
     <div><h1>Admin Center</h1><div class="sub" id="sub">Loading…</div></div>
     <div class="seg" id="seg" role="tablist"></div>
@@ -103,6 +117,21 @@ td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}tr:la
       <div class="t-h"><span>Who</span><span>Device</span><span>IP address</span><span>Last seen</span><span>Sessions</span><span>Activity</span><span>Sports</span><span>Bets</span></div>
       <div id="rows"></div></section>
     <aside class="card feed"><div class="card-h"><span>What they are doing</span><small>newest first · live</small></div><div class="feed-body" id="feed"></div></aside>
+  </div>
+  </div>
+  <div id="vSec" hidden>
+    <div class="head"><div><h1>Security</h1><div class="sub">Who tried to get in and how, what changed about a device, shared addresses, and anything that failed. Last 7 days.</div></div></div>
+    <section class="stats" id="secStats"></section>
+    <div class="sec-grid">
+      <div>
+        <section class="card"><div class="card-h"><span>Alerts</span><small>tap one for the device</small></div><div class="scroll" id="alerts"></div></section>
+        <section class="card"><div class="card-h"><span>The door</span><small>every sign-in, wrong code and turn-away</small></div><div class="scroll" id="door"></div></section>
+      </div>
+      <div>
+        <section class="card"><div class="card-h"><span>Blocked devices</span><small>they only ever see the sign-in screen</small></div><div id="blocked"></div></section>
+        <section class="card"><div class="card-h"><span>IP addresses</span><small>shared = more than one device</small></div><div class="scroll" id="ips"></div></section>
+      </div>
+    </div>
   </div>
 </main>
 <div class="scrim" id="scrim"></div>
@@ -124,16 +153,36 @@ function money(n,sign){if(n==null)return'—';var a=Math.abs(n),s=a>=1000?a.toLo
 function odds(o){return o==null?'':(o>0?'+'+o:String(o))}
 function devLine(d){return [d.device+(d.model?' '+d.model:''),d.os?(d.os+' '+d.osVer).trim():''].filter(Boolean).join(' · ')}
 function brLine(d){return [d.browser?(d.browser+' '+d.bVer).trim():'',d.inApp?'inside '+d.inApp:''].filter(Boolean).join(' · ')||'—'}
-function display(d){if(d.who)return d.who;if(d.role==='owner')return (OWNER?OWNER+"'s ":'Your ')+d.device;return d.device+(d.browser?' · '+d.browser:'')}
+function display0(d){if(d.who)return d.who;if(d.role==='owner')return (OWNER?OWNER+"'s ":'Your ')+d.device;return d.device+(d.browser?' · '+d.browser:'')}
+var DUP={};function display(d){var n=display0(d);return DUP[n]>1&&!d.who?n+' #'+d.id.slice(0,4):n}
 function segOf(d){return d.role==='owner'?'owner':d.role==='guest'?'guest':'none'}
 function api(u,o){o=o||{};o.headers=Object.assign({'x-board-admin':'1','content-type':'application/json'},o.headers||{});o.credentials='same-origin';return fetch(u,o).then(function(r){if(r.status===302||r.redirected){location.href='/';throw new Error('signed out')}return r.json()})}
 
+S.view=location.hash==='#security'?'security':'people';S.sec=null;
+function setView(v){S.view=v;$('#vPeople').hidden=v!=='people';$('#vSec').hidden=v!=='security';document.querySelectorAll('#views a').forEach(function(a){a.classList.toggle('on',a.dataset.view===v)});if(v==='security')loadSec();else loadBoard()}
+function who2(x){if(!x)return'';if(x.gone)return'(cleared device)';var n=x.who||(x.role==='owner'?(OWNER?OWNER+"'s ":'Your ')+x.device:x.device+(x.browser?' · '+x.browser:''));return n}
+function roleTag(r){return r==='owner'?'<span class="chip you">You</span>':r==='guest'?'<span class="chip">Guest</span>':'<span class="chip">Signed out</span>'}
+var HOW_BAD={wrong:1,'bad-link':1,blocked:1};
+function renderSec(){
+  var D=S.sec;if(!D)return;var st=D.stats,dv=D.devices;
+  function t(k,v,s,c){return '<div class="stat"><k>'+k+'</k><b class="'+(c||'')+'">'+v+'</b><s>'+s+'</s></div>'}
+  $('#secStats').innerHTML=t('Needs a look',st.high,st.high?'high-priority alerts':'nothing urgent',st.high?'l':'')+t('Sign-ins today',st.signinsToday,'admin code, guest code or link')
+    +t('Wrong codes today',st.wrongToday,st.badLinksToday?st.badLinksToday+' bad guest links':'no bad links',st.wrongToday?'l':'')+t('New devices',st.newDevicesWeek,'first seen this week')
+    +t('Failed requests',st.failsDay,'refused or errored, 24h')+t('Blocked',st.blocked,st.sharedIps?st.sharedIps+' shared IP'+(st.sharedIps>1?'s':''):'no shared IPs');
+  var badge=document.querySelector('#views a[data-view="security"]');badge.innerHTML='Security'+(st.high?'<em>'+st.high+'</em>':'');
+  $('#alerts').innerHTML=D.alerts.length?D.alerts.map(function(a){var x=dv[a.dev]||{};return '<div class="al '+a.sev+'" data-dev="'+a.dev+'"><span class="sev '+a.sev+'"></span><div><div class="k">'+esc(a.kind)+'</div></div><div><div class="aw"><b>'+esc(who2(x))+'</b> '+roleTag(x.role)+'</div><div class="tx">'+esc(a.text)+'</div><div class="tx dim mono" style="font-size:11.5px">'+esc([x.device,x.os,x.browser,a.ip].filter(Boolean).join(' · '))+'</div></div><div class="tm">'+esc(exact(a.t))+' <span class="ag">'+ago(a.t)+'</span></div></div>'}).join(''):'<div class="empty">No alerts in the last 7 days.</div>';
+  $('#door').innerHTML=D.door.length?'<table><thead><tr><th>When</th><th>What happened</th><th>Device</th><th>IP</th></tr></thead><tbody>'+D.door.map(function(x){var d=dv[x.dev]||{};return '<tr class="click" data-dev="'+x.dev+'"><td class="mono" style="white-space:nowrap">'+esc(exact(x.t))+'</td><td'+(HOW_BAD[x.how]?' class="l"':'')+'>'+esc(x.text)+'</td><td><b>'+esc(who2(d))+'</b><br><span class="dim">'+esc([d.os,d.browser].filter(Boolean).join(' · '))+'</span></td><td class="mono">'+esc(x.ip||'—')+'</td></tr>'}).join('')+'</tbody></table>':'<div class="empty">Nobody has come to the door yet.</div>';
+  $('#blocked').innerHTML=D.blocked.length?'<table><tbody>'+D.blocked.map(function(b){var d=dv[b.id]||{};return '<tr class="click" data-dev="'+b.id+'"><td><b>'+esc(who2(d))+'</b><br><span class="dim">'+esc([d.device,d.browser].filter(Boolean).join(' · '))+'</span></td><td class="dim">since '+esc(exact(b.at))+'</td></tr>'}).join('')+'</tbody></table>':'<div class="empty" style="padding:16px">Nobody is blocked. Open any device and tap Block.</div>';
+  $('#ips').innerHTML=D.ips.length?'<table><thead><tr><th>IP</th><th>Devices</th><th>Hits</th><th>Last</th><th></th></tr></thead><tbody>'+D.ips.map(function(x){return '<tr><td class="mono">'+esc(x.ip)+(x.shared?' <span class="tag bad">shared</span>':'')+'</td><td>'+x.devs.map(function(id){var d=dv[id]||{};return '<a href="#" data-dev="'+id+'">'+esc(who2(d))+'</a>'}).join('<br>')+'</td><td>'+x.n+'</td><td class="dim" style="white-space:nowrap">'+ago(x.last)+'</td><td><a href="https://ipinfo.io/'+encodeURIComponent(x.ip)+'" target="_blank" rel="noopener noreferrer">look up ↗</a></td></tr>'}).join('')+'</tbody></table>':'<div class="empty">No addresses yet.</div>';
+}
+function loadSec(){return api('/admin/api/security').then(function(d){S.sec=d;renderSec()}).catch(function(){})}
 var SEGS=[['guest','Guests'],['owner','You'],['none','Signed out'],['all','Everyone']];
 function inSeg(d){return S.seg==='all'||segOf(d)===S.seg}
 
 function render(){
   var D=S.data;if(!D)return;
   var all=D.devices, list=all.filter(inSeg);
+  DUP={};all.forEach(function(d){var n=display0(d);DUP[n]=(DUP[n]||0)+1});
   $('#seg').innerHTML=SEGS.map(function(s){var n=s[0]==='all'?all.length:all.filter(function(d){return segOf(d)===s[0]}).length;return '<button role="tab" data-seg="'+s[0]+'" class="'+(S.seg===s[0]?'on':'')+'">'+s[1]+'<em>'+n+'</em></button>'}).join('');
   var live=list.filter(function(d){return d.live}), day0=new Date();day0.setHours(0,0,0,0);
   var sessT=list.reduce(function(a,d){return a+d.sessionsToday},0), taps=list.reduce(function(a,d){return a+d.tapsToday},0);
@@ -143,7 +192,7 @@ function render(){
   function st(k,v,s,c){return '<div class="stat"><k>'+k+'</k><b class="'+(c||'')+'">'+v+'</b><s>'+s+'</s></div>'}
   var label={guest:'Guests',owner:'Your devices',none:'Signed-out devices',all:'Devices'}[S.seg];
   $('#stats').innerHTML=st(label,list.length,list.filter(function(d){return d.bot}).length?list.filter(function(d){return d.bot}).length+' look automated':'distinct browsers')
-    +st('Here now',live.length,live.length?esc(live.map(display).slice(0,2).join(', '))+(live.length>2?' +'+(live.length-2):''):'nobody right now')
+    +st('Here now',live.length,live.length?esc(live.map(display).slice(0,2).join(', '))+(live.length>2?' +'+(live.length-2):''):'nobody has a board open')
     +st('Sessions today',sessT,'30-min gap = new session')
     +st('Taps + screens today',taps,'from the board itself')
     +st('Bets logged',bets,open?open+' still open':'none open')
@@ -158,10 +207,10 @@ function render(){
 }
 function lower(t){return t&&t.charAt(0).toLowerCase()+t.slice(1)}
 function row(d){
-  var chips=(d.role==='owner'?'<span class="chip you">You</span>':'')+(d.live?'<span class="chip live">'+(d.streaming?'on now':'here')+'</span>':'')+(d.bot?'<span class="chip bot">bot?</span>':'');
+  var chips=(d.role==='owner'?'<span class="chip you">You</span>':'')+(d.blocked?'<span class="chip live" style="animation:none">blocked</span>':'')+(d.live?'<span class="chip live">'+(d.streaming?'board open':'active')+'</span>':'')+(d.bot?'<span class="chip bot">bot?</span>':'');
   var extra=d.ipCount>1?'+'+(d.ipCount-1)+' more':'';
   return '<div class="row" data-dev="'+d.id+'">'
-   +'<div class="c who-c"><div class="who"><b>'+esc(display(d))+'</b>'+chips+'</div><small>'+(d.lastDo?esc(d.lastDo.text)+(d.lastDo.sp?' · '+SPORT[d.lastDo.sp]:'')+' · '+ago(d.lastDo.t):'no activity recorded')+'</small></div>'
+   +'<div class="c who-c"><div class="who"><b>'+esc(display(d))+'</b>'+chips+'</div><small>'+(d.lastDo?esc(d.lastDo.text)+(d.lastDo.sp?' · '+SPORT[d.lastDo.sp]:'')+' · '+ago(d.lastDo.t):d.feedOnly?'A board left open in another window or tab — live prices only, nothing tapped':'no activity recorded')+'</small></div>'
    +'<div class="c"><b>'+esc(devLine(d))+'</b><small>'+esc(brLine(d))+'</small></div>'
    +'<div class="c"><b class="mono" style="font-weight:500">'+esc(d.ipLast||'—')+'</b><small>'+esc(extra||(d.ctx&&d.ctx.tz)||'')+'</small></div>'
    +'<div class="c"><b>'+ago(d.last)+'</b><small>'+esc(exact(d.last))+'</small></div>'
@@ -197,13 +246,16 @@ function drawDev(){
   h+='<div class="ctl"><input id="lbl" maxlength="40" placeholder="Name this device (e.g. Hannah\\'s iPhone)" value="'+esc(d.label)+'"><button class="btn pri" data-act="label">Save name</button>'
     +'<div class="seg sm" title="Who this device belongs to">'+[['auto','Auto'],['owner','This is me'],['guest','Guest']].map(function(r){var on=(d.roleSet||'auto')===r[0];return '<button data-role="'+r[0]+'" class="'+(on?'on':'')+'">'+r[1]+'</button>'}).join('')+'</div>'
     +'<a class="btn" href="/admin/api/export?fmt=csv&dev='+d.id+'">⤓ CSV</a><a class="btn" href="/admin/api/export?fmt=json&dev='+d.id+'">⤓ JSON</a>'
+    +(d.role!=='owner'?'<button class="btn" data-act="signout"'+(d.signoutPending?' disabled':'')+'>'+(d.signoutPending?'Sign-out pending':'Sign out this device')+'</button>'+'<button class="btn danger" data-act="'+(d.blocked?'unblock':'block')+'">'+(d.blocked?'Unblock':'Block')+'</button>':'')
     +'<button class="btn danger'+(S.armed?' armed':'')+'" data-act="clear">'+(S.armed?'Tap again to clear':'Clear')+'</button></div>'
-    +'<div class="note">Auto uses the code this device signed in with ('+esc(d.roleSeen||'none')+'). Pin it if you test on your own phone with the guest link. Clearing removes it from this view only; the device is not told or signed out.'+(d.name&&d.label?' They call themselves “'+esc(d.name)+'”.':'')+'</div>';
+    +(d.blocked?'<div class="banner">Blocked: this device only ever sees the sign-in screen, on all three sports, whatever code it tries. It is not told why.</div>':'')
+    +(d.feedOnly?'<div class="note">This row is a board left open in another window or tab (or another browser profile). It only keeps live prices flowing; nothing has been tapped in it.</div>':'')
+    +'<div class="note">Sign out sends them to the sign-in screen once, silently (they can come back with their link or code). Block keeps them out until you unblock. Neither is announced. Auto uses the code this device signed in with ('+esc(d.roleSeen||'none')+'). Pin it if you test on your own phone with the guest link. Clearing removes it from this view only; the device is not told or signed out.'+(d.name&&d.label?' They call themselves “'+esc(d.name)+'”.':'')+'</div>';
   h+='<div class="d-sec"><h3>Identity</h3><div class="facts">'
     +fx('Device',d.device+(d.model?' · '+d.model:''))+fx('Operating system',(d.os+' '+d.osVer).trim())+fx('Browser',(d.browser+' '+d.bVer).trim()+(d.inApp?' (inside '+d.inApp+')':''))
     +fx('IP address (latest)',d.ipLast)+fx('Screen',c.sw?c.sw+' × '+c.sh+(c.dpr?' @'+c.dpr+'x':''):'')+fx('Window',c.vw?c.vw+' × '+c.vh:'')
     +fx('Time zone',c.tz?c.tz+(c.tzo!=null?' (UTC'+(c.tzo<=0?'+':'−')+Math.abs(c.tzo/60)+')':''):'')+fx('Language',c.langs||c.locale||'')+fx('Touch',c.touch!=null?(c.touch?c.touch+' touch points':'none (mouse)'):'')
-    +fx('Opened from',c.standalone?'Home-screen icon (installed)':c.sw?'Browser tab':'')+fx('Connection',c.net?c.net+(c.rtt?' · '+c.rtt+' ms':'')+(c.down?' · '+c.down+' Mb/s':''):'')+fx('Automated?',d.bot?'Looks like a script or bot':'No')
+    +fx('Opened from',c.standalone?'Home-screen icon (installed)':c.sw?'Browser tab':'')+fx('Connection',!c.net?'':c.touch?c.net+(c.rtt?' · '+c.rtt+' ms':'')+(c.down?' · '+c.down+' Mb/s':''):'not reported on computers')+fx('Automated?',d.bot?'Looks like a script or bot':'No')
     +fx('First seen',exact(d.first))+fx('Last seen',exact(d.last)+' ('+ago(d.last)+')')+fx('Time on the board',dur(d.timeOn)+' over '+d.sessions+' session'+(d.sessions===1?'':'s'))
     +fx('Board device ID',d.id)+fx('Per-sport IDs',Object.keys(d.links||{}).map(function(k){return SPORT[k]+' '+(d.links[k]||[]).map(function(x){return x.slice(0,8)}).join(',')}).join(' · '))+fx('Sports used',d.sports.map(function(s){return SPORT[s]}).join(', '))
     +'</div></div>';
@@ -230,16 +282,18 @@ function drawDev(){
 
 // ---------------------------------------------------------------- events
 document.addEventListener('click',function(ev){
+  var vw=ev.target.closest('[data-view]');if(vw){ev.preventDefault();history.replaceState(null,'','#'+vw.dataset.view);setView(vw.dataset.view);return}
   var t=ev.target.closest('[data-seg],[data-dev],[data-f],[data-sess],[data-ev],[data-act],[data-role],#dClose,#scrim');if(!t)return;
   if(t.id==='dClose'||t.id==='scrim'){closeDev();return}
   if(t.dataset.seg){S.seg=t.dataset.seg;try{localStorage.setItem('adm.seg',S.seg)}catch(e){}render();return}
-  if(t.dataset.dev){openDev(t.dataset.dev);return}
+  if(t.dataset.dev){ev.preventDefault();openDev(t.dataset.dev);return}
   if(t.dataset.f){S.f=t.dataset.f;drawDev();return}
   if(t.dataset.sess){var p=t.dataset.sess.split(':').map(Number);S.sess=S.sess&&S.sess[0]===p[0]?null:p;drawDev();return}
   if(t.dataset.ev){if(ev.target.closest('pre'))return;S.exp[t.dataset.ev]=!S.exp[t.dataset.ev];drawDev();return}
   if(t.dataset.role){api('/admin/api/device/'+S.open,{method:'POST',body:JSON.stringify({role:t.dataset.role})}).then(function(){loadDev();loadBoard()});return}
   var a=t.dataset.act;
   if(a==='allsess'){S.sess=null;drawDev();return}
+  if(a==='block'||a==='unblock'||a==='signout'){api('/admin/api/device/'+S.open,{method:'POST',body:JSON.stringify({action:a})}).then(function(r){if(r&&r.error)alert(r.error);loadDev();loadBoard();if(S.view==='security')loadSec()});return}
   if(a==='label'){api('/admin/api/device/'+S.open,{method:'POST',body:JSON.stringify({label:$('#lbl').value})}).then(function(){loadDev();loadBoard()});return}
   if(a==='clear'){if(!S.armed){S.armed=true;drawDev();setTimeout(function(){if(S.armed){S.armed=false;drawDev()}},4000);return}
     S.armed=false;api('/admin/api/device/'+S.open,{method:'DELETE'}).then(function(){closeDev();loadBoard()});return}
@@ -248,8 +302,8 @@ document.addEventListener('change',function(ev){if(ev.target.id==='bg'){S.bg=ev.
 document.addEventListener('keydown',function(ev){if(ev.key==='Escape')closeDev();if(ev.key==='Enter'&&ev.target.id==='lbl'){ev.preventDefault();document.querySelector('[data-act="label"]').click()}});
 
 function loadBoard(){return api('/admin/api/board').then(function(d){S.data=d;render()}).catch(function(){})}
-loadBoard();
-setInterval(function(){if(document.visibilityState!=='visible')return;loadBoard();if(S.open&&!document.activeElement.matches('#lbl'))loadDev()},8000);
+setView(S.view);if(S.view==='security')loadBoard();
+setInterval(function(){if(document.visibilityState!=='visible')return;loadBoard();if(S.view==='security')loadSec();if(S.open&&!document.activeElement.matches('#lbl'))loadDev()},8000);
 document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')loadBoard()});
 })();
 </script></body></html>`;
