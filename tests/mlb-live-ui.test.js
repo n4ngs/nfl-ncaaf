@@ -90,7 +90,20 @@ test('live action requires actual playing state; suspended game and first-five h
   f.game.detail = 'Suspended'; assert.equal(f.run("betsPrice(1,'mgm','ml','home')"), null);
   f.game.detail = ''; f.game.state = 'Final'; assert.equal(f.run("oddsPriceAt(1,'ml','home','mgm')"), null);
   f.game.state = 'Preview';
+  // Returning to pregame must not promote legacy receipt-only prices into current evidence.
+  assert.equal(f.run("oddsQuote(currentOdds.books.mgm,'ml','home').freshness"), 'UNVERIFIED');
+  assert.equal(f.run("oddsPriceAt(1,'ml','home','mgm')"), null);
+  assert.equal(f.run("oddsPriceAt(1,'f5ml','home','mgm')"), null);
+  const pregame = (american_odds) => quote({ is_live: false, source: 'vsin', american_odds,
+    fresh_for_ms: 120000, max_age_ms: 900000 });
+  f.O.books.mgm = { ...f.O.books.mgm, quote_meta: {
+    ml: { home: pregame(-150), away: pregame(130) },
+  } };
+  f.O.f5.mgm = { ...f.O.f5.mgm, quote_meta: {
+    ml: { home: pregame(-170), away: pregame(150) },
+  } };
   assert.equal(f.run("oddsPriceAt(1,'ml','home','mgm').odds"), -150);
+  assert.equal(f.run("oddsPriceAt(1,'f5ml','home','mgm').odds"), -170);
   assert.equal(f.run("betsPrice(1,'mgm','f5ml','home').odds"), -170);
 });
 

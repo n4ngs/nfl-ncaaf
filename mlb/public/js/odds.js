@@ -43,9 +43,10 @@ const ODDS = {
   moves: new Map(),     // id -> Move
   fetched: new Map(),   // date -> { at, ok }
   flashed: new Map(),   // cell key -> ms it changed
-  view: store.get('gamesView', 'scores'),
+  view: store.get('gamesView', 'odds'),
   sheetPk: null, sheetHist: null, sheetPaint: 0, sheetTimer: 0,
-  chartMkt: store.get('oddsChart', 'ml'),
+  chartMkt: store.get('oddsChart', 'ml'), chartBook: 'cons', chartAt: null,
+  phoneBook: store.get('oddsBook', 'cons'), status: new Map(),
   mkt: store.get('oddsMkt', 'ml'),   // which market the board shows
   manual: {},           // pk -> book -> L: numbers you typed in at a window, yours alone
   keys: null,           // last season's run margins and totals
@@ -157,7 +158,33 @@ function oddsBetter(mkt, side, a, b) {
   if (mkt !== 'ml' && a.line !== b.line) return mkt === 't' ? (side === 'over' ? a.line < b.line : a.line > b.line) : a.line > b.line;
   return oddsDec(a.odds) > oddsDec(b.odds);
 }
-const oddsStale = (L) => !!(L?.seen && serverNow() - L.seen > 15 * 60e3);
+// Receipt proves delivery; only a valid upstream quote clock proves quote freshness.
+const oddsStamp = (v) => typeof v === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/i.test(v) ? Date.parse(v) : NaN;
+function oddsQuote(L, mkt, side) {
+  const p = oddsSide(L, mkt, side);
+  if (!p) return null;
+  const q = L?.quote_meta?.[mkt]?.[side], at = oddsStamp(q?.source_observed_at), received = oddsStamp(q?.received_at);
+  let freshness = 'FRESH';
+  if (q?.conflicted || q?.freshness === 'CONFLICTED' || (Number.isFinite(at) && (at > serverNow() || at > received))) freshness = 'CONFLICTED';
+  else if (['suspended', 'removed'].includes(q?.market_status)) freshness = 'SUSPENDED';
+  else if (!q || L.m || q.is_live !== false || q.market_status !== 'active' || !Number.isFinite(at) || !Number.isFinite(received) || !Number.isFinite(q.max_age_ms) || q.max_age_ms <= 0 || !Number.isFinite(q.american_odds) || Math.abs(q.american_odds) < 100 || q.american_odds !== p.odds || (mkt !== 'ml' && (!Number.isFinite(q.line_value) || q.line_value !== p.line))) freshness = 'UNVERIFIED';
+  else if (serverNow() - at > q.max_age_ms || q.freshness === 'STALE') freshness = 'STALE';
+  else if (q.freshness === 'AGING' || (Number.isFinite(q.fresh_for_ms) && q.fresh_for_ms > 0 && serverNow() - at > q.fresh_for_ms)) freshness = 'AGING';
+  else if (q.freshness !== 'FRESH' || q.actionable !== true) freshness = 'UNVERIFIED';
+  return { ...p, freshness, actionable: freshness === 'FRESH', seen: Number.isFinite(at) ? at : null,
+    source: q?.source || q?.src || L?.market_sources?.[mkt] || L?.src || null,
+    source_observed_at: q?.source_observed_at || null, reason_code: q?.reason_code || (Number.isFinite(at) ? freshness : 'SOURCE_TIME_UNAVAILABLE') };
+}
+function oddsPairFresh(L, mkt) {
+  const sides = mkt === 't' ? ['over', 'under'] : ['home', 'away'];
+  const a = oddsQuote(L, mkt, sides[0]), b = oddsQuote(L, mkt, sides[1]);
+  return !!(a?.actionable && b?.actionable && a.source && a.source === b.source && a.source_observed_at === b.source_observed_at && (mkt === 'ml' || (mkt === 't' ? a.line === b.line : a.line === -b.line)));
+}
+const oddsStale = (L) => !['ml', 'rl', 't'].some((m) => (m === 't' ? ['over', 'under'] : ['home', 'away']).some((sd) => oddsQuote(L, m, sd)?.actionable));
+const oddsStateLabel = (p) => ({ FRESH: 'Fresh', AGING: 'Aging', STALE: 'Stale', UNVERIFIED: 'Unverified', SUSPENDED: 'Suspended', CONFLICTED: 'Conflict' }[p?.freshness] || 'Unavailable');
+function oddsQuoteNote(p) {
+  return p ? `${oddsStateLabel(p)} · ${p.source || 'Source unavailable'} · ${p.seen ? 'source ' + oddsAgo(p.seen) : 'source time unavailable'}` : 'No quote supplied';
+}
 // The bettable books with a price, in the display order.
 function oddsBookKeys(O) {
   const have = Object.keys(O?.books || {}).filter((k) => !ODDS_NOT_BETTABLE.has(k));
@@ -171,8 +198,8 @@ function oddsBest(O, mkt, side) {
   for (const k of oddsBookKeys(O)) {
     const L = O.books[k];
     if (oddsStale(L)) continue;
-    const p = oddsSide(L, mkt, side);
-    if (!p || p.odds == null) continue;
+    const p = oddsQuote(L, mkt, side);
+    if (!p?.actionable) continue;
     if (!best || oddsBetter(mkt, side, p, best)) best = { ...p, book: k };
     if (want != null && p.line === want && (!bestAt || oddsDec(p.odds) > oddsDec(bestAt.odds))) bestAt = { ...p, book: k };
   }
@@ -192,8 +219,8 @@ function oddsPriceAt(pk, mkt, side, book) {
   if (!oddsIsPre(g)) { const p = oddsLiveQuote(g, O, book, mkt, side); return p?.actionable ? p : null; }
   const f5 = String(mkt).startsWith('f5');
   const L = (f5 ? O?.f5 : O?.books)?.[book];
-  const p = oddsSide(L, f5 ? mkt.slice(2) || 'ml' : mkt, side);
-  return p && p.odds != null ? { ...p, book, seen: L.seen ?? null } : null;
+  const p = oddsQuote(L, f5 ? mkt.slice(2) || 'ml' : mkt, side);
+  return !ODDS_NOT_BETTABLE.has(book) && p?.actionable ? { ...p, book } : null;
 }
 
 // ------------------------------------------------------------ data in
@@ -240,6 +267,7 @@ function oddsPut(O, flash) {
 }
 function oddsLoad(d, flash) {
   if (!d) return;
+  if (d.sources || d.coverage || d.refresh) ODDS.status.set(d.date || S.date, { sources: d.sources, coverage: d.coverage, refresh: d.refresh });
   oddsSetBooks(d.books);
   const games = d.games || {};
   for (const O of Array.isArray(games) ? games : Object.values(games)) oddsPut(O, flash);
@@ -277,17 +305,20 @@ document.addEventListener('bbl:move', (ev) => {
 });
 
 // Other days (and today, if the snapshot came without odds): fetch once, retry a failure after a minute.
-async function oddsFetchDay(date) {
+async function oddsFetchDay(date, force = false) {
   const f = ODDS.fetched.get(date);
-  if (f && (f.ok || f.busy || Date.now() - f.at < 60e3)) return;
-  ODDS.fetched.set(date, { at: Date.now(), busy: true });
-  let ok = false;
-  try {
-    const r = await fetch(`api/odds?date=${encodeURIComponent(date)}`);
-    if (r.ok) { oddsLoad(await r.json(), false); ok = true; }
-  } catch { /* offline or not there yet */ }
-  ODDS.fetched.set(date, { at: Date.now(), ok });
+  if (!date || f?.busy || (!force && f && (f.ok || Date.now() - f.at < 60e3))) return;
+  ODDS.fetched.set(date, { at: Date.now(), busy: true, ok: !!f?.ok });
   oddsRepaint();
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 18000);
+  try {
+    const r = await fetch(`api/odds?date=${encodeURIComponent(date)}${force ? '&refresh=1' : ''}`, { signal: controller.signal });
+    if (!r.ok) throw new Error('Refresh unavailable');
+    oddsLoad(await r.json(), !!force);
+    ODDS.fetched.set(date, { at: Date.now(), ok: true });
+  } catch {
+    ODDS.fetched.set(date, { at: Date.now(), ok: !!f?.ok, error: 'Refresh unavailable. Existing quote status is unchanged.' });
+  } finally { clearTimeout(timer); oddsRepaint(); }
 }
 
 // ------------------------------------------------------------ repaint scheduling
@@ -305,9 +336,12 @@ function oddsSwap(el, html) {
   if (!el || el.dataset.key === html) return;
   const f = document.activeElement;
   const fk = f && el.contains(f) ? f.dataset.fk : null;
+  const selection = fk && typeof f.selectionStart === 'number' ? [f.selectionStart, f.selectionEnd] : null;
+  const scrolls = [...el.querySelectorAll('.odds-btwrap')].map((box) => box.scrollLeft);
   el.innerHTML = html;
   el.dataset.key = html;
-  if (fk) el.querySelector(`[data-fk="${CSS.escape(fk)}"]`)?.focus({ preventScroll: true });
+  if (fk) { const next = el.querySelector(`[data-fk="${CSS.escape(fk)}"]`); next?.focus({ preventScroll: true }); if (selection && next?.setSelectionRange) try { next.setSelectionRange(...selection); } catch {} }
+  el.querySelectorAll('.odds-btwrap').forEach((box, i) => { box.scrollLeft = scrolls[i] || 0; });
 }
 
 // ------------------------------------------------------------ Games tab: Scores | Odds
@@ -321,6 +355,7 @@ function oddsGamesHook() {
     host.innerHTML = '<div class="odds-switch seg" role="group" aria-label="Show scores or odds" id="oddsSwitch"></div><div id="oddsView" class="odds-view"></div>';
   }
   const on = ODDS.view === 'odds';
+  $('#view-games')?.classList.toggle('odds-mode', on);
   oddsSwap($('#oddsSwitch'), `<button type="button" data-odds-view="scores" aria-pressed="${!on}">Scores</button><button type="button" data-odds-view="odds" aria-pressed="${on}">Odds</button>`);
   $('#gamesList').hidden = on;
   const view = $('#oddsView');
@@ -332,47 +367,32 @@ function oddsDayGames() {
   return [...S.games.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || a.pk - b.pk);
 }
 function oddsViewHTML() {
-  if (S.loading) return '<div class="card empty"><b>Loading odds…</b></div>';
-  const games = oddsDayGames();
-  if (!games.length) return `<div class="card empty"><b>No games ${S.isToday ? 'today' : 'on this day'}</b>Pick another day above.</div>`;
-  const f = ODDS.fetched.get(S.date);
-  const any = games.some((g) => ODDS.games.has(g.pk));
-  if (!any) {
-    const busy = f?.busy || (!f && S.date);
-    return `<div class="card empty"><b>${busy ? 'Loading odds…' : 'No prices for this day'}</b>${busy ? '' : S.isToday ? 'Prices show up here once the books post them.' : 'Line history is only kept for days the app was running.'}</div>`;
-  }
-  const mkt = ODDS.mkt;
-  const edge = S.isToday ? oddsEdgeEntry() : '';
-  // The first five innings is a pregame market: only show the games that actually have one.
-  const shown = games.filter((g) => oddsPasses(g) && oddsMatches(g) && (mkt !== 'f5' || Object.keys(oddsGame(g.pk)?.f5 || {}).length));
-  // Games in progress first, then the ones still to come, with the finished ones folded at the bottom.
-  const grp = (list) => list.filter((g) => ODDS.games.has(g.pk));
-  const live = grp(shown.filter((g) => g.state === 'Live' && !isOff(g)));
-  const soon = grp(shown.filter((g) => oddsIsPre(g)));
-  const done = grp(shown.filter((g) => g.state === 'Final' || isOff(g)));
-  // The best price is only worth a column where you can still take it.
+  const games = oddsDayGames(), f = ODDS.fetched.get(S.date), mkt = ODDS.mkt;
+  const refresh = ODDS.status.get(S.date)?.refresh, busy = f?.busy || refresh?.in_progress;
+  const cooldown = Number.isFinite(refresh?.next_allowed_at) && refresh.next_allowed_at > serverNow();
+  const head = `<div class="odds-workspace-head"><div><p class="odds-kicker">MLB · Prices & movement</p><h1>MLB market board</h1></div><button type="button" class="odds-refresh" data-odds-refresh data-fk="refresh" ${busy || S.loading ? 'disabled aria-busy="true"' : cooldown ? 'disabled' : ''}>${busy ? 'Refreshing…' : cooldown ? `Refresh in ${Math.ceil((refresh.next_allowed_at - serverNow()) / 1000)}s` : 'Refresh odds'}</button></div>`;
+  if (S.loading) return `${head}<div class="card empty" role="status"><b>Loading this day’s games…</b></div>`;
+  if (!games.length) return `${head}<div class="card empty"><b>No games ${S.isToday ? 'today' : 'on this day'}</b>Choose another day above.</div>`;
+  const shown = games.filter((g) => oddsPasses(g) && oddsMatches(g));
+  const live = shown.filter((g) => g.state === 'Live' && !isOff(g));
+  const soon = shown.filter(oddsIsPre);
+  const done = shown.filter((g) => g.state === 'Final' || isOff(g));
   const block = (list) => { const best = list.some((g) => oddsIsPre(g) || (oddsIsLive(g) && mkt !== 'f5')); return `<div class="card odds-brd">${oddsRowHead(mkt, best)}${list.map((g) => oddsRow(g, mkt, best)).join('')}</div>${oddsBoardTable(list, mkt)}`; };
-  const section = (title, list) => (list.length ? `<div class="odds-grp"><h3>${esc(title)}</h3><span>${list.length === 1 ? '1 game' : `${list.length} games`}</span></div>${block(list)}` : '');
+  const section = (title, list) => list.length ? `<div class="odds-grp"><h2>${esc(title)}</h2><span>${list.length} game${list.length === 1 ? '' : 's'}</span></div>${block(list)}` : '';
   const wasOpen = document.getElementById('oddsDone')?.open;
-  const none = !live.length && !soon.length && !done.length;
-  const noneWhy = mkt === 'f5'
-    ? 'First five innings prices show up once the books post them, usually in the morning for that night\'s games.'
-    : ODDS.query ? `Nothing for “${esc(ODDS.query)}”.` : 'Try another filter.';
-  return `<p class="odds-lede">Every book side by side. The market price, then the best price and where it is. Tap a price to add it to a bet slip. <button type="button" class="odds-link" data-bets-books>Where to bet ↗</button><span id="oddsFresh">${oddsFreshText(games)}</span></p>
-    ${oddsMktSeg(mkt)}
-    ${oddsFilterBar(games)}
-    ${none ? `<div class="card empty"><b>${mkt === 'f5' && !ODDS.query ? 'No first-five prices yet' : 'No games match'}</b>${noneWhy}</div>` : ''}
-    <div class="odds-lay">
-      ${edge ? `<div class="odds-edge-slot">${edge}</div>` : ''}
-      <div class="odds-boards">
-        ${section('Playing now', live)}${section(live.length ? 'Still to come' : 'Today', soon)}
-        ${done.length ? `<details class="odds-done" id="oddsDone"${wasOpen || (!live.length && !soon.length) ? ' open' : ''}><summary class="odds-grp"><h3>Final</h3><span>${done.length === 1 ? '1 game' : `${done.length} games`} · closing prices ${ICON.chev}</span></summary>${block(done)}</details>` : ''}
-      </div>
-      <div class="odds-moves-slot">${oddsMovesHTML(games)}</div>
-    </div>`;
+  const contextOpen = document.getElementById('oddsContext')?.open;
+  return `${head}${oddsOverview(games, mkt)}<div class="odds-toolbar">${oddsMktSeg(mkt)}${oddsFilterBar(games)}</div>
+    ${f?.error ? `<p class="odds-health" role="status">${esc(f.error)} <button type="button" class="odds-link" data-odds-refresh>Retry</button></p>` : oddsRefreshFeedback(refresh)}
+    <div class="odds-lay"><div class="odds-boards">
+      ${section('Live', live)}${section(S.isToday ? 'Up next' : 'Scheduled', soon)}
+      ${done.length ? `<details class="odds-done" id="oddsDone"${wasOpen || (!live.length && !soon.length) ? ' open' : ''}><summary class="odds-grp"><h2>Final & off board</h2><span>${done.length} · recorded prices ${ICON.chev}</span></summary>${block(done)}</details>` : ''}
+      ${!shown.length ? `<div class="card empty"><b>No matching games</b>${ODDS.query ? `No team matches “${esc(ODDS.query)}”.` : 'This filter has no games on this day.'}<button type="button" class="lbtn" data-odds-reset>Clear filters</button></div>` : ''}
+    </div></div>
+    <p class="odds-board-guide">${mkt === 'f5' ? 'First five innings moneyline. ' : ''}Fresh book prices open a ticket. Aging, stale and unverified prices are reference only.<span class="odds-wide-guide"> Scroll across for every book →</span></p>
+    ${oddsSourceStatus()}<details class="odds-context" id="oddsContext"${contextOpen ? ' open' : ''}><summary>Market analysis <span>Recorded moves · price comparisons ${ICON.chev}</span></summary><div>${S.isToday ? oddsEdgeEntry() : ''}${oddsMovesHTML(games)}<button type="button" class="odds-link" data-bets-books>Sportsbook links ↗</button></div></details>`;
 }
-// Filters: everything, the ones that have moved, the ones the public is piling on, or your own bets.
-const ODDS_FILTERS = [['all', 'All'], ['moving', 'Moving'], ['public', 'Public heavy'], ['mine', 'My bets']];
+const ODDS_FILTERS = [['all', 'All games'], ['moving', 'Moving'], ['public', 'Public heavy'], ['mine', 'My bets']];
+
 function oddsPasses(g) {
   const f = ODDS.filter;
   if (f === 'all') return true;
@@ -397,22 +417,54 @@ function oddsMatches(g) {
   return ['home', 'away'].some((s) => { const t = oddsTeam(g, s); return [t.name, t.abbr, t.short].some((x) => String(x || '').toLowerCase().includes(q)); });
 }
 function oddsFilterBar(games) {
-  const counts = Object.fromEntries(ODDS_FILTERS.map(([f]) => { const was = ODDS.filter; ODDS.filter = f; const n = games.filter(oddsPasses).length; ODDS.filter = was; return [f, n]; }));
-  const chips = ODDS_FILTERS.filter(([f]) => counts[f] || f === 'all' || f === ODDS.filter)
-    .map(([f, label]) => `<button type="button" class="odds-fil" data-odds-filter="${f}" aria-pressed="${ODDS.filter === f}">${esc(label)}<span class="odds-n">${counts[f]}</span></button>`).join('');
-  return `<div class="odds-ctrl"><div class="odds-fils" role="group" aria-label="Filter games">${chips}</div>
-    <input class="odds-find" id="oddsFind" type="search" placeholder="Find a team" autocomplete="off" aria-label="Find a team" value="${esc(ODDS.query)}"></div>`;
+  const opts = ODDS_FILTERS.map(([f, label]) => `<option value="${f}"${ODDS.filter === f ? ' selected' : ''}>${esc(label)}</option>`).join('');
+  const keys = [...new Set([...ODDS.books, ...ODDS_BOOKS].map((b) => b.key))].filter((k) => !ODDS_NOT_BETTABLE.has(k));
+  return `<div class="odds-ctrl"><label class="odds-select-label"><span class="odds-control-label">Show</span><select id="oddsGameFilter" data-fk="filter">${opts}</select></label><label class="odds-select-label odds-book-select"><span class="odds-control-label">Book</span><select id="oddsBookPick" data-fk="book"><option value="cons"${ODDS.phoneBook === 'cons' ? ' selected' : ''}>Market</option>${keys.map((k) => `<option value="${esc(k)}"${ODDS.phoneBook === k ? ' selected' : ''}>${esc(oddsBookName(k))}</option>`).join('')}</select></label><input class="odds-find" id="oddsFind" data-fk="find" type="search" placeholder="Find a team" autocomplete="off" aria-label="Find a team" value="${esc(ODDS.query)}"></div>`;
 }
-// "checked 12s ago": the newest confirmation across the board.
-function oddsFreshText(games) {
-  let at = 0;
-  for (const g of games) { const O = ODDS.games.get(g.pk); for (const L of Object.values(O?.books || {})) if ((L.seen || 0) > at) at = L.seen; }
-  if (!at) return '';
-  const s = Math.max(0, Math.round((serverNow() - at) / 1000));
-  return ` Prices checked ${s < 60 ? `${s}s` : `${Math.round(s / 60)} min`} ago.`;
+function oddsCoverage(games, mkt) {
+  const counts = { FRESH: 0, AGING: 0, STALE: 0, UNVERIFIED: 0, SUSPENDED: 0, CONFLICTED: 0 }, books = new Set();
+  for (const g of games) {
+    if (!oddsIsPre(g) && !oddsIsLive(g)) continue;
+    const O = oddsGame(g.pk), set = oddsIsLive(g) ? O?.live : oddsBooksFor(O, mkt);
+    for (const [k, L] of Object.entries(set || {})) {
+      if (ODDS_NOT_BETTABLE.has(k)) continue;
+      for (const side of oddsSides(mkt)) {
+        const q = oddsIsLive(g) ? oddsLiveQuote(g, O, k, mkt, side) : oddsQuote(L, oddsBaseMkt(mkt), side);
+        if (q) { counts[q.freshness] = (counts[q.freshness] || 0) + 1; books.add(k); }
+      }
+    }
+  }
+  return { ...counts, books: books.size };
 }
+function oddsOverview(games, mkt) {
+  const c = oddsCoverage(games, mkt), unknown = c.UNVERIFIED + c.SUSPENDED + c.CONFLICTED;
+  return `<div class="odds-overview" aria-label="Selected market quote coverage"><span class="odds-health" data-state="FRESH"><b>${c.FRESH}</b> fresh prices</span><span class="odds-health" data-state="AGING"><b>${c.AGING}</b> aging</span><span class="odds-health" data-state="STALE"><b>${c.STALE}</b> stale</span><span class="odds-health"><b>${unknown}</b> unverified / unavailable</span><span class="odds-coverage-books">${c.books} books · ${games.length} games</span></div>`;
+}
+function oddsRefreshFeedback(refresh) {
+  if (!refresh || refresh.in_progress) return '';
+  const text = {
+    error: 'Feeds could not refresh. Existing prices keep their source status.',
+    partial: 'Some feeds could not refresh. Check feed coverage below.',
+    scheduled: 'No feed was due yet. Scheduled polling continues.',
+    historical: 'Recorded prices reloaded. Historical days do not request new quotes.',
+  }[refresh.result];
+  return text ? `<p class="odds-health odds-refresh-feedback" role="status">${text}</p>` : '';
+}
+function oddsSourceStatus() {
+  const status = ODDS.status.get(S.date);
+  if (!status?.sources) return '';
+  const open = document.getElementById('oddsSourceStatus')?.open;
+  const names = { an: 'Action', an1: 'Action v1', espn: 'ESPN', pin: 'Pinnacle', vsin: 'VSiN' };
+  const rows = Object.entries(status.sources).map(([key, source]) => {
+    const at = oddsStamp(source.source_observed_at), receipt = oddsStamp(source.received_at);
+    const state = { loading: 'Checking', ok: 'Responding', error: 'Unavailable', waiting: 'Waiting', idle: 'Idle' }[source.state] || 'Unavailable';
+    return `<div class="odds-source-row"><strong>${esc(names[key] || key)}</strong><span>${state}</span><small>Last check: ${Number.isFinite(receipt) ? esc(oddsAgo(receipt)) : 'not recorded'}<br>Newest source quote: ${Number.isFinite(at) ? esc(oddsAgo(at)) : 'time unavailable'}</small></div>`;
+  }).join('');
+  const missing = status.coverage?.missing?.length;
+  return `<details class="odds-source-status" id="oddsSourceStatus"${open ? ' open' : ''}><summary>Feed coverage <span>${Number.isFinite(missing) ? `${missing} incomplete book markets · ` : ''}Source checks ${ICON.chev}</span></summary><div>${rows}</div><p>A responding feed can contain old quotes. Source clocks determine each price’s status; a refresh never resets that clock.</p></details>`;
+}
+function oddsFreshText(games) { const c = oddsCoverage(games, ODDS.mkt); return `${c.FRESH} fresh prices · ${c.STALE} stale · source timestamps required`; }
 
-// Money, run line or total: one market at a time, the way the college football board does it.
 function oddsMktSeg(mkt) {
   const one = ([k, label]) => `<button type="button" data-odds-mkt="${k}" aria-pressed="${mkt === k}">${esc(label)}</button>`;
   return `<div class="seg odds-mseg" role="group" aria-label="Which market to show">${ODDS_MKT_TABS.map(one).join('')}</div>`;
@@ -445,7 +497,7 @@ function oddsSpokenPrice(mkt, side, p) {
   return `${side === 'over' ? 'over' : 'under'} ${oddsTrim(p.line)} at ${oddsSpoken(oddsFmt(p.odds))}`;
 }
 const ODDS_MKT_WORD = { ml: 'moneyline', rl: 'run line', t: 'total', f5: 'first five innings moneyline' };
-const ODDS_MKT_TABS = [['ml', 'Money'], ['rl', 'Run line'], ['t', 'Total'], ['f5', 'First 5']];
+const ODDS_MKT_TABS = [['ml', 'Moneyline'], ['rl', 'Run line'], ['t', 'Total'], ['f5', 'First 5']];
 // The first five innings is its own set of prices; everything else reads the full-game book.
 const oddsBooksFor = (O, mkt) => (mkt === 'f5' ? O?.f5 : O?.books) || {};
 const oddsBaseMkt = (mkt) => (mkt === 'f5' ? 'ml' : mkt);
@@ -457,8 +509,8 @@ function oddsBestIn(books, mkt, side) {
   let best = null;
   for (const [k, L] of Object.entries(books || {})) {
     if (k === 'cons' || k === 'open' || oddsStale(L)) continue;
-    const p = oddsSide(L, mkt, side);
-    if (!p || p.odds == null) continue;
+    const p = oddsQuote(L, mkt, side);
+    if (!p?.actionable) continue;
     if (!best || oddsBetter(mkt, side, p, best)) best = { ...p, book: k };
   }
   return best;
@@ -483,14 +535,15 @@ function oddsMktCell(g, O, mkt, side, pre) {
   const { main, sub } = oddsTwoLine(base, side, p);
   const word = oddsIsF5(mkt) || pre ? 'market' : mk.key === 'close' ? 'close' : 'last price';
   const fl = oddsFlash(g.pk, `m|${mkt}|${side}`);
-  const label = `${oddsWho(g, base, side)} ${ODDS_MKT_WORD[mkt]}, ${word} ${oddsSpokenPrice(base, side, p)}`;
-  return `<span class="odds-px na${fl.cls}"${fl.style} data-fk="m${g.pk}${mkt}${side}" role="img" aria-label="${esc(label)}"><span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}</span>`;
+  const state = pre ? oddsStateLabel(oddsQuote(mk.L, base, side)) : 'Recorded';
+  const label = `${oddsWho(g, base, side)} ${ODDS_MKT_WORD[mkt]}, ${word} ${oddsSpokenPrice(base, side, p)}, ${state}. ${pre ? oddsQuoteNote(oddsQuote(mk.L, base, side)) : 'Historical context'}`;
+  return `<span class="odds-px na${fl.cls}"${fl.style} data-fk="m${g.pk}${mkt}${side}" title="${esc(label)}" aria-label="${esc(label)}"><span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small>${state}</small></span>`;
 }
 // The best price anywhere, with the book underneath. Tapping it opens the slip at that book.
 function oddsBestCell(g, O, mkt, side, pre) {
   const base = oddsBaseMkt(mkt);
   const best = g?.state === 'Live' ? oddsLiveBest(g, O, mkt, side) : pre ? (oddsIsF5(mkt) ? oddsBestIn(O?.f5, base, side) : oddsBest(O, mkt, side)) : null;
-  if (!best) return '<span class="odds-px na" aria-hidden="true">—</span>';
+  if (!best) return '<span class="odds-px na">—<small>No fresh price</small></span>';
   const { main } = oddsTwoLine(base, side, best);
   const sub = base === 'ml' ? oddsBookCode(best.book) : `${oddsFmt(best.odds)} ${oddsBookCode(best.book)}`;
   const fl = oddsFlash(g.pk, `b|${mkt}|${side}`);
@@ -505,13 +558,14 @@ function oddsBookCell(g, O, mkt, side, book, best, pre) {
   const p = oddsSide(L, base, side);
   if (!p || p.odds == null) return '<span class="odds-px na" aria-hidden="true">—</span>';
   const { main, sub } = oddsTwoLine(base, side, p);
-  const isBest = pre && best && best.book === book;
-  const old = oddsStale(L);
+  const q = oddsQuote(L, base, side), canAct = pre && q?.actionable && !ODDS_NOT_BETTABLE.has(book);
+  const isBest = canAct && best && best.book === book;
+  const old = !q?.actionable;
   const fl = oddsFlash(g.pk, `k|${book}|${mkt}|${side}`);
-  const label = `${oddsBookFull(book)}, ${oddsWho(g, base, side)} ${oddsSpokenPrice(base, side, p)}${isBest ? ', best price' : ''}${L.m ? `, typed in ${oddsAgo(L.seen)}` : old ? `, last seen ${oddsAgo(L.seen)}` : ''}.${fl.label}${pre ? ' Opens a bet slip.' : ''}`;
+  const label = `${oddsBookFull(book)}, ${oddsWho(g, base, side)} ${oddsSpokenPrice(base, side, p)}${isBest ? ', best price' : ''}${L.m ? `, typed in ${oddsAgo(L.seen)}` : old ? `, last seen ${oddsAgo(L.seen)}` : ''}.${fl.label}${canAct ? ' Opens a bet slip.' : ''} ${pre ? oddsQuoteNote(q) : 'Recorded pregame price.'}`;
   const cls = `odds-px${isBest ? ' best' : ''}${old ? ' old' : ''}${L.m ? ' mine' : ''}${fl.cls}`;
-  const inner = `<span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}`;
-  if (!pre) return `<span class="${cls}"${fl.style} role="img" aria-label="${esc(label)}">${inner}</span>`;
+  const inner = `<span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small class="odds-px-state" data-state="${q?.freshness || 'UNVERIFIED'}">${pre ? oddsStateLabel(q) : 'Recorded'}</small>`;
+  if (!canAct) return `<span class="${cls}"${fl.style} title="${esc(label)}" aria-label="${esc(label)}">${inner}</span>`;
   // BetMGM Nevada is the one book this board links into: a real anchor, so one tap goes straight to a
   // prefilled slip. It carries data-mgmbet rather than data-odds-bet, because the odds click handler
   // calls preventDefault on everything it matches, which would kill the navigation.
@@ -580,8 +634,8 @@ function oddsWxCell(O, pre) {
 
 function oddsRowHead(mkt, showBest) {
   const name = { ml: 'Moneyline', rl: 'Run line', t: 'Total', f5: 'First 5 moneyline' }[mkt];
-  const mid = showBest || mkt === 'f5' ? 'Market' : 'Close';
-  return `<div class="odds-brhd${showBest ? '' : ' nb'}" aria-hidden="true"><span>${esc(name)}</span><span>${mid}</span>${showBest ? '<span>Best</span>' : ''}</div>`;
+  const mid = showBest ? oddsBookName(ODDS.phoneBook) : 'Recorded';
+  return `<div class="odds-brhd${showBest ? '' : ' nb'}" aria-hidden="true"><span>${esc(name)}</span><span>${mid}</span>${showBest ? '<span>Best fresh</span>' : ''}</div>`;
 }
 // One game on a phone: a row per side, then a line of context.
 function oddsRow(g, mkt, showBest = true) {
@@ -593,7 +647,7 @@ function oddsRow(g, mkt, showBest = true) {
   const side = (tSide, pSide) => {
     const t = oddsTeam(g, tSide);
     const trail = !pre && lead && lead !== tSide;
-    return `<div class="odds-br-t${trail ? ' trail' : ''}">${logo(t.id)}<span class="odds-br-n">${esc(t.abbr)}${mkt === 't' ? `<small>${pSide === 'over' ? 'Over' : 'Under'}</small>` : ''}</span><span class="odds-br-s num">${!pre && g[tSide]?.score != null ? g[tSide].score : ''}</span>${oddsMktCell(g, O, mkt, pSide, pre)}${showBest ? oddsBestCell(g, O, mkt, pSide, pre) : ''}</div>`;
+    return `<div class="odds-br-t${trail ? ' trail' : ''}">${logo(t.id)}<span class="odds-br-n">${esc(t.abbr)}${mkt === 't' ? `<small>${pSide === 'over' ? 'Over' : 'Under'}</small>` : ''}</span><span class="odds-br-s num">${!pre && g[tSide]?.score != null ? g[tSide].score : ''}</span>${showBest && ODDS.phoneBook !== 'cons' ? oddsBookCell(g, O, mkt, pSide, ODDS.phoneBook, null, pre) : oddsMktCell(g, O, mkt, pSide, pre)}${showBest ? oddsBestCell(g, O, mkt, pSide, pre) : ''}</div>`;
   };
   const move = oddsMoveBits(g, O, pre);
   const extra = pre ? oddsRowExtras(g, O) : '';
@@ -669,7 +723,7 @@ function oddsBoardTable(games, mkt) {
     const best1 = live ? oddsLiveBest(g, O, mkt, s1) : pre ? bestOf(s1) : null, best2 = live ? oddsLiveBest(g, O, mkt, s2) : pre ? bestOf(s2) : null;
     const move = oddsMoveBits(g, O, pre);
     return `<tr data-odds-open="${g.pk}">
-      <td class="l stk"><div class="odds-bt-mu"><div class="odds-bt-st">${live ? '<span class="dot"></span>' : ''}<b>${esc(pre ? timeLabel(g.start) : gameStatus(g))}</b></div><div class="odds-bt-tms">${tm('away', s1)}${tm('home', s2)}</div></div></td>
+      <td class="l stk"><button type="button" class="odds-bt-mu" data-odds-open="${g.pk}" data-fk="match${g.pk}" aria-label="${esc(oddsTeam(g, 'away').name + ' at ' + oddsTeam(g, 'home').name + ', line history and every book')}"><div class="odds-bt-st">${live ? '<span class="dot"></span>' : ''}<b>${esc(pre ? timeLabel(g.start) : gameStatus(g))}</b></div><div class="odds-bt-tms">${tm('away', s1)}${tm('home', s2)}</div></button></td>
       <td><div class="odds-st2">${open(s1)}${open(s2)}</div></td>
       <td><div class="odds-st2">${oddsMktCell(g, O, mkt, s1, pre)}${oddsMktCell(g, O, mkt, s2, pre)}</div></td>
       <td><div class="odds-bt-mv">${O && !oddsIsF5(mkt) ? oddsSpark(O, g) : ''}${move || (oddsIsF5(mkt) ? '<span class="faint">—</span>' : '<span class="faint">steady</span>')}</div></td>
@@ -678,7 +732,7 @@ function oddsBoardTable(games, mkt) {
       <td>${oddsWxCell(O, pre)}</td>
     </tr>`;
   }).join('');
-  return `<div class="odds-btwrap"><table class="odds-bt"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="odds-btwrap" tabindex="0" role="region" aria-label="Every sportsbook. Scroll horizontally to compare prices."><table class="odds-bt"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
 }
 
 // ------------------------------------------------------------ line moves, in plain words
@@ -729,7 +783,7 @@ function oddsOpenSheet(pk) {
   oddsLoadKeys().then((k) => { if (k && ODDS.sheetPk === Number(pk)) oddsSheetPaint(); });
   pk = Number(pk);
   ODDS.sheetPk = pk;
-  ODDS.sheetHist = null;
+  ODDS.sheetHist = null; ODDS.chartAt = null;
   openSheet(oddsSheetHTML(pk), 'odds');
   ODDS.sheetPaint = Date.now();
   oddsLoadHist(pk);
@@ -751,7 +805,8 @@ async function oddsLoadHist(pk) {
 // Keep the chart live: add the newest price per book when it differs from the last point.
 function oddsHistAppend(h, O) {
   if (!h?.b || !O?.books) return;
-  const t = O.at || serverNow();
+  const t = O.at;
+  if (!Number.isFinite(t) || t <= 0 || t > serverNow()) return;
   for (const [k, L] of Object.entries(O.books)) {
     const b = h.b[k] || (h.b[k] = {});
     const add = (m, row) => { const a = b[m] || (b[m] = []); const last = a[a.length - 1]; if (!last || last.slice(1).join() !== row.join()) a.push([t, ...row]); };
@@ -770,7 +825,7 @@ function oddsSheetPaint() {
   if (S.dlgKind !== 'odds' || ODDS.sheetPk == null) return;
   ODDS.sheetPaint = Date.now();
   const pk = ODDS.sheetPk;
-  oddsSwap($('#oddsChart'), oddsChartBlock(pk));
+  if (document.activeElement?.id !== 'oddsHistoryCursor') oddsSwap($('#oddsChart'), oddsChartBlock(pk));
   oddsSwap($('#oddsTable'), oddsTableHTML(pk));
   oddsSwap($('#oddsSheetMove'), oddsSheetMoveHTML(pk));
 }
@@ -881,14 +936,15 @@ function oddsFiveHTML(pk) {
     const isBest = oddsIsPre(g) && k !== 'cons' && b?.book === k;
     const who = m === 't' ? (side === 'over' ? 'Over' : 'Under') : oddsTeam(g, side).name;
     const label = `${oddsBookFull(k)}, first five innings, ${who} ${oddsSpokenPrice(m, side, p)}${isBest ? ', best price' : ''}. Opens a bet slip.`;
-    if (!oddsIsPre(g)) return `<span class="odds-px na"><span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small>Pregame</small></span>`;
+    const q = oddsQuote(f5[k], m, side);
+    if (!oddsIsPre(g) || !q?.actionable || ODDS_NOT_BETTABLE.has(k)) return `<span class="odds-px na" title="${esc(oddsQuoteNote(q))}"><span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small>${oddsIsPre(g) ? oddsStateLabel(q) : 'Recorded'}</small></span>`;
     return `<button type="button" class="odds-px${isBest ? ' best' : ''}" data-odds-bet="${pk}|f5${m}|${side}|${k}" aria-label="${esc(label)}"><span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}</button>`;
   };
-  const rows = keys.map((k) => `<tr><td><div class="odds-bk">${esc(oddsBookName(k))}</div></td><td>${cell(k, 'ml', 'away')}</td><td>${cell(k, 'ml', 'home')}</td><td>${cell(k, 't', 'over')}</td><td>${cell(k, 't', 'under')}</td></tr>`).join('');
+  const rows = keys.map((k) => `<tr><td><div class="odds-bk">${esc(oddsBookName(k))}</div></td><td>${cell(k, 'ml', 'away')}</td><td>${cell(k, 'ml', 'home')}</td><td>${cell(k, 'rl', 'away')}</td><td>${cell(k, 'rl', 'home')}</td><td>${cell(k, 't', 'over')}</td><td>${cell(k, 't', 'under')}</td></tr>`).join('');
   const ttCards = tt ? ['away', 'home'].filter((sd) => tt[sd]?.pts != null).map((sd) => `<div><div class="odds-tt-k">${esc(oddsTeam(g, sd).abbr)} team total</div><div class="odds-tt-v num">${oddsTrim(tt[sd].pts)}</div><div class="odds-tt-x">o ${esc(oddsFmt(tt[sd].over))} · u ${esc(oddsFmt(tt[sd].under))}</div></div>`).join('') : '';
   return `<section class="dlg-sec" aria-label="First five innings and team totals"><h3 class="sub-h">First five innings<span>${keys.length ? `${keys.length} books` : 'Team totals'}</span></h3>
-    ${rows ? `<div class="card odds-f5"><table class="odds-f5t"><thead><tr><th>Book</th><th>${esc(away.abbr)}</th><th>${esc(home.abbr)}</th><th>Over</th><th>Under</th></tr></thead><tbody>${rows}</tbody></table>
-      <p class="odds-note">First five innings settles on the score after five complete innings. If the game is called before that, these bets are void.</p></div>` : ''}
+    ${rows ? `<div class="card odds-f5"><table class="odds-f5t"><thead><tr><th>Book</th><th>${esc(away.abbr)} ML</th><th>${esc(home.abbr)} ML</th><th>${esc(away.abbr)} RL</th><th>${esc(home.abbr)} RL</th><th>Over</th><th>Under</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="odds-note">ML = moneyline · RL = run line; PK is a zero run line. First five innings settles on the score after five complete innings. If the game is called before that, these bets are void.</p></div>` : ''}
     ${ttCards ? `<div class="odds-tt">${ttCards}</div>` : ''}</section>`;
 }
 
@@ -941,7 +997,7 @@ function oddsSheetHTML(pk) {
       <div class="links odds-links">${links}</div>
     </section>
     ${g ? `<div class="links"><button type="button" class="lbtn" data-game="${pk}">Scores and every at-bat</button></div>` : ''}
-    <p class="odds-note">Prices come from each book's public odds and can be a few minutes behind. Pinnacle and Circa are the sharp books: they move first and take the biggest bets.</p>
+    <p class="odds-note">Source clocks determine quote status. A recent app check does not make an old price current. Recorded prices remain available as historical context.</p>
   </div>`;
 }
 function oddsSheetMoveHTML(pk) {
@@ -950,70 +1006,77 @@ function oddsSheetMoveHTML(pk) {
   return oddsMovement(g, O, oddsIsPre(g));
 }
 
-// Line history chart for one market: consensus bold, sharp books emphasized, the rest faint.
-const ODDS_CHART_MKTS = [['ml', 'Money'], ['rl', 'Run line'], ['t', 'Total']];
-function oddsChartBlock(pk) {
-  const h = ODDS.sheetHist;
-  const g = S.games.get(pk);
-  const seg = `<div class="seg odds-chart-seg" role="group" aria-label="Chart market">${ODDS_CHART_MKTS.map(([k, l]) => `<button type="button" data-odds-chart="${k}" data-fk="ch${k}" aria-pressed="${ODDS.chartMkt === k}">${l}</button>`).join('')}</div>`;
-  const head = `<h3 class="sub-h">Line history<span>${ODDS.chartMkt === 't' ? 'Total runs' : `${esc(oddsTeam(g, 'home').abbr)} price`}</span></h3>${seg}`;
-  if (!h) return `${head}<div class="odds-chart-empty">Loading the line history…</div>`;
-  const svg = oddsChartSVG(h, oddsGame(pk), g, ODDS.chartMkt, chartW());
-  if (!svg) return `${head}<div class="odds-chart-empty">${h.failed ? 'Line history isn’t available right now.' : 'Not enough history yet. The chart fills in as prices change.'}</div>`;
-  return `${head}${svg}
-    <div class="odds-legend" aria-hidden="true"><span><i class="c"></i>Market</span><span><i class="s"></i>Pinnacle, Circa</span><span><i class="o"></i>Other books</span><span><i class="op"></i>Open</span></div>`;
+// The chart uses only recorded observations. A receipt timestamp is never called a source quote time.
+const ODDS_CHART_MKTS = [['ml', 'Moneyline'], ['rl', 'Run line'], ['t', 'Total']];
+function oddsHistorySeries(h, mkt) {
+  const validOdds = (o) => Number.isFinite(o) && Math.abs(o) >= 100;
+  return Object.entries(h?.b || {}).filter(([k]) => k !== 'open').map(([k, b]) => ({ k,
+    pts: (b?.[mkt] || []).filter((r) => Array.isArray(r) && Number.isFinite(r[0]) && r[0] > 0 && r[0] <= serverNow() && (mkt === 'ml' ? validOdds(r[1]) : Number.isFinite(r[1]) && validOdds(r[2])))
+      .map((r) => ({ at: r[0], value: mkt === 'ml' ? oddsScale(r[1]) : r[1], line: mkt === 'ml' ? null : r[1], odds: mkt === 'ml' ? r[1] : r[2], opposite: mkt === 'ml' ? r[2] : r[3] }))
+      .sort((a, b) => a.at - b.at),
+  })).filter((s) => s.pts.length);
 }
-function oddsChartSVG(h, O, g, mkt, W) {
-  const val = (row) => (mkt === 't' ? row[1] : mkt === 'rl' ? oddsScale(row[2]) : oddsScale(row[1]));
-  const series = [];
-  for (const [k, b] of Object.entries(h.b || {})) {
-    if (k === 'open') continue;
-    const pts = (b?.[mkt] || []).filter((r) => r && r[0] && val(r) != null).map((r) => [r[0], val(r)]).sort((a, c) => a[0] - c[0]);
-    if (pts.length) series.push({ k, pts, tier: k === 'cons' ? 2 : oddsBook(k).sharp ? 1 : 0 });
-  }
-  if (!series.length) return '';
-  const openL = h.open || O?.open || O?.books?.open || null;
-  const openV = !openL ? null : mkt === 't' ? openL.t?.line ?? null : mkt === 'rl' ? oddsScale(openL.rl?.odds?.[0]) : oddsScale(openL.ml?.[0]);
-  const start = g?.start ? Date.parse(g.start) : null;
-  const pre = oddsIsPre(g);
-  let x0 = Math.min(...series.map((s) => s.pts[0][0]));
-  const lastT = Math.max(...series.map((s) => s.pts[s.pts.length - 1][0]));
-  const x1 = pre || !start ? Math.max(lastT, serverNow()) : Math.max(start, lastT);
-  if (x1 - x0 < 30 * 60e3) x0 = x1 - 30 * 60e3;
-  const all = series.flatMap((s) => s.pts.map((p) => p[1])).concat(openV != null ? [openV] : []);
-  let lo = Math.min(...all), hi = Math.max(...all);
-  const minSpan = mkt === 't' ? 1 : 20;
-  if (hi - lo < minSpan) { const m = (hi + lo) / 2; lo = m - minSpan / 2; hi = m + minSpan / 2; }
-  const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
-  const H = W < 500 ? 210 : 240, Lf = 46, R = 58, T = 14, B = 26;
-  const X = (t) => Lf + ((clamp(t, x0, x1) - x0) / (x1 - x0)) * (W - Lf - R);
-  const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
-  const path = (pts) => {
-    let d = '';
-    pts.forEach((p, i) => { d += i ? ` H${X(p[0]).toFixed(1)} V${Y(p[1]).toFixed(1)}` : `M${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`; });
-    return `${d} H${X(x1).toFixed(1)}`;
-  };
-  const fmtV = (v) => (mkt === 't' ? oddsTrim(Math.round(v * 2) / 2) : oddsFmt(oddsUnscale(v)));
-  // three gridlines on round values
-  const step = mkt === 't' ? 0.5 : [5, 10, 20, 25, 50, 100].find((s) => (hi - lo) / s <= 4) || 100;
-  const ticks = [];
-  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(v);
-  const grid = ticks.slice(0, 6).map((v) => `<line class="gl" x1="${Lf}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text class="ax" x="${Lf - 8}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end">${esc(fmtV(v))}</text>`).join('');
-  const lines = [...series].sort((a, b) => a.tier - b.tier).map((s) => `<path class="ln t${s.tier}" d="${path(s.pts)}"><title>${esc(oddsBookFull(s.k))}</title></path>`).join('');
-  const cons = series.find((s) => s.k === 'cons') || series.find((s) => s.tier === 1) || series[0];
-  const endV = cons.pts[cons.pts.length - 1][1];
-  const openLine = openV != null ? `<line class="op" x1="${Lf}" x2="${W - R}" y1="${Y(openV).toFixed(1)}" y2="${Y(openV).toFixed(1)}"/><text class="opl" x="${Lf + 4}" y="${(Y(openV) - 5).toFixed(1)}">Open ${esc(fmtV(openV))}</text>` : '';
-  const fp = start && start >= x0 && start <= x1 ? `<line class="fp" x1="${X(start).toFixed(1)}" x2="${X(start).toFixed(1)}" y1="${T}" y2="${H - B}"/><text class="fpl" x="${(X(start) - 4).toFixed(1)}" y="${T + 10}" text-anchor="end">First pitch</text>` : '';
-  const tl = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const who = mkt === 't' ? 'Total' : `${oddsTeam(g, 'home').abbr} ${mkt === 'ml' ? 'moneyline' : 'run line price'}`;
-  const openTxt = openV != null ? `, open ${oddsSpoken(fmtV(openV))}` : '';
-  return `<svg class="odds-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(`${who} over time from ${series.length} sources${openTxt}. ${oddsBookFull(cons.k)} now ${oddsSpoken(fmtV(endV))}.`)}">
-    ${grid}${openLine}${fp}${lines}
-    <circle class="end" cx="${X(x1).toFixed(1)}" cy="${Y(endV).toFixed(1)}" r="3.5"/>
-    <text class="endl" x="${(X(x1) + 7).toFixed(1)}" y="${(Y(endV) + 4).toFixed(1)}">${esc(fmtV(endV))}</text>
-    <text class="ax" x="${Lf}" y="${H - 6}">${esc(tl(x0))}</text>
-    <text class="ax" x="${W - R}" y="${H - 6}" text-anchor="end">${esc(pre ? 'Now' : tl(x1))}</text>
-  </svg>`;
+function oddsHistorySelection(series) {
+  const one = series.find((s) => s.k === ODDS.chartBook) || series.find((s) => s.k === 'cons') || series[0];
+  if (!one) return null;
+  let index = one.pts.length - 1;
+  if (Number.isFinite(ODDS.chartAt)) { index = one.pts.findLastIndex((p) => p.at <= ODDS.chartAt); if (index < 0) index = 0; }
+  return { one, index, point: one.pts[index] };
+}
+function oddsObservationText(sel, mkt, g) {
+  if (!sel) return '';
+  const p = sel.point, side = mkt === 't' ? 'over' : 'home';
+  const when = new Date(p.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' });
+  const who = mkt === 't' ? 'Over' : oddsTeam(g, 'home').abbr;
+  const opposite = Number.isFinite(p.opposite) && Math.abs(p.opposite) >= 100 ? ` · ${mkt === 't' ? 'Under' : oddsTeam(g, 'away').abbr} ${oddsFmt(p.opposite)}` : '';
+  return `${oddsBookFull(sel.one.k)} · ${who} ${oddsMainTxt(mkt, side, p)}${opposite}. Recorded ${when}. Observation ${sel.index + 1} of ${sel.one.pts.length}.`;
+}
+function oddsChartBlock(pk) {
+  const h = ODDS.sheetHist, g = S.games.get(pk), mkt = ODDS.chartMkt;
+  const seg = `<div class="seg odds-chart-seg" role="group" aria-label="History market">${ODDS_CHART_MKTS.map(([k, l]) => `<button type="button" data-odds-chart="${k}" data-fk="ch${k}" aria-pressed="${mkt === k}">${l}</button>`).join('')}</div>`;
+  const head = `<h3 class="sub-h">Price history<span>${mkt === 't' ? 'Total runs' : esc(oddsTeam(g, 'home').abbr) + (mkt === 'rl' ? ' run line' : ' moneyline')}</span></h3>${seg}`;
+  if (!h) return `${head}<div class="odds-chart-empty" role="status">Loading recorded observations…</div>`;
+  const series = oddsHistorySeries(h, mkt), sel = oddsHistorySelection(series);
+  if (!sel) return `${head}<div class="odds-chart-empty">${h.failed ? 'History could not be loaded.' : 'No recorded observations for this market yet.'}${h.failed ? '<button type="button" class="lbtn" data-odds-history-retry>Retry history</button>' : ''}</div>`;
+  return `${head}<div class="odds-chart-panel"><div class="odds-history-controls"><label>Sportsbook<select id="oddsHistoryBook" data-fk="historybook">${series.map((s) => `<option value="${esc(s.k)}"${s.k === sel.one.k ? ' selected' : ''}>${esc(oddsBookName(s.k))} · ${s.pts.length} observation${s.pts.length === 1 ? '' : 's'}</option>`).join('')}</select></label><span>${series.length} recorded sources</span></div>
+    ${oddsChartSVG(h, oddsGame(pk), g, mkt, chartW())}
+    <label class="odds-history-scrub">Explore observations<input type="range" id="oddsHistoryCursor" data-fk="historycursor" min="0" max="${sel.one.pts.length - 1}" step="1" value="${sel.index}"${sel.one.pts.length === 1 ? ' disabled' : ''} aria-label="Recorded price observation" aria-valuetext="${esc(oddsObservationText(sel, mkt, g))}"></label>
+    <p class="odds-observation" id="oddsObservation" aria-live="polite">${esc(oddsObservationText(sel, mkt, g))}</p>
+    <p class="odds-history-note">Times are app records. Historical source quote timestamps are unavailable. Lines stop at their last observation.${mkt === 'rl' ? ' Run line changes are shown in runs; price is listed with each observation.' : ''}</p></div>`;
+}
+function oddsChartSVG(h, O, g, mkt, width) {
+  const series = oddsHistorySeries(h, mkt), sel = oddsHistorySelection(series);
+  if (!sel) return '';
+  const W = Math.max(270, width || 600), H = W < 500 ? 210 : 238, left = 46, right = 22, top = 20, bottom = 30;
+  const all = series.flatMap((s) => s.pts), first = Math.min(...all.map((p) => p.at)), last = Math.max(...all.map((p) => p.at));
+  const x0 = first === last ? first - 60e3 : first, x1 = first === last ? last + 60e3 : last;
+  let lo = Math.min(...all.map((p) => p.value)), hi = Math.max(...all.map((p) => p.value));
+  const minSpan = mkt === 'ml' ? 20 : 1;
+  if (hi - lo < minSpan) { const mid = (lo + hi) / 2; lo = mid - minSpan / 2; hi = mid + minSpan / 2; }
+  const pad = (hi - lo) * .15; lo -= pad; hi += pad;
+  const X = (t) => (left + (t - x0) / (x1 - x0) * (W - left - right)).toFixed(1);
+  const Y = (v) => (top + (1 - (v - lo) / (hi - lo)) * (H - top - bottom)).toFixed(1);
+  const fmt = (v) => mkt === 'ml' ? oddsFmt(oddsUnscale(v)) : mkt === 'rl' ? oddsFmtLine(v) : oddsTrim(v);
+  const step = mkt === 'ml' ? [5, 10, 20, 50, 100].find((n) => (hi - lo) / n <= 4) || 100 : [0.5, 1, 2, 5, 10].find((n) => (hi - lo) / n <= 4) || 10;
+  const ticks = []; for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(v);
+  const grid = ticks.map((v) => `<line class="gl" x1="${left}" x2="${W - right}" y1="${Y(v)}" y2="${Y(v)}"/><text class="ax" x="${left - 8}" y="${+Y(v) + 4}" text-anchor="end">${esc(fmt(v))}</text>`).join('');
+  const path = (pts) => pts.map((p, i) => i ? `H${X(p.at)} V${Y(p.value)}` : `M${X(p.at)},${Y(p.value)}`).join(' ');
+  const lines = [...series].sort((a, b) => Number(a.k === sel.one.k) - Number(b.k === sel.one.k)).map((s) => `<path class="ln ${s.k === sel.one.k ? 't2' : 't0'}" d="${path(s.pts)}"><title>${esc(oddsBookFull(s.k))}</title></path>`).join('');
+  const dots = sel.one.pts.map((p, i) => `<circle class="odds-history-point${i === sel.index ? ' selected' : ''}" data-history-point="${i}" cx="${X(p.at)}" cy="${Y(p.value)}" r="${i === sel.index ? 4.5 : 2.5}"/>`).join('');
+  const time = (t) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `<svg class="odds-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(`${oddsBookFull(sel.one.k)} recorded ${mkt === 'ml' ? 'moneyline' : mkt === 'rl' ? 'run line' : 'total'}. ${sel.one.pts.length} observations. ${oddsObservationText(sel, mkt, g)}`)}">${grid}${lines}<line class="odds-history-line" id="oddsHistoryLine" x1="${X(sel.point.at)}" x2="${X(sel.point.at)}" y1="${top}" y2="${H - bottom}"/>${dots}<text class="ax" x="${left}" y="${H - 6}">${esc(time(first))}</text><text class="ax" x="${W - right}" y="${H - 6}" text-anchor="end">${esc(time(last))}</text></svg>`;
+}
+function oddsHistoryScrub(index) {
+  const series = oddsHistorySeries(ODDS.sheetHist, ODDS.chartMkt), sel = oddsHistorySelection(series);
+  if (!sel) return;
+  const n = Math.max(0, Math.min(sel.one.pts.length - 1, Math.round(Number(index) || 0)));
+  ODDS.chartAt = sel.one.pts[n].at;
+  const next = { one: sel.one, index: n, point: sel.one.pts[n] };
+  const text = oddsObservationText(next, ODDS.chartMkt, S.games.get(ODDS.sheetPk));
+  const readout = $('#oddsObservation'); if (readout) readout.textContent = text;
+  $('#oddsHistoryCursor')?.setAttribute('aria-valuetext', text);
+  const points = document.querySelectorAll('[data-history-point]');
+  points.forEach((p) => { const selected = Number(p.dataset.historyPoint) === n; p.classList.toggle('selected', selected); p.setAttribute('r', selected ? '4.5' : '2.5'); if (selected) { const x = p.getAttribute('cx'); $('#oddsHistoryLine')?.setAttribute('x1', x); $('#oddsHistoryLine')?.setAttribute('x2', x); } });
 }
 
 // Every book: moneyline, run line and total, best price marked, price age when it's over 5 minutes.
@@ -1041,8 +1104,9 @@ function oddsTableHTML(pk) {
     const who = mkt === 't' ? (side === 'over' ? 'Over' : 'Under') : (side === 'home' ? home : away).abbr;
     const fl = oddsFlash(pk, `k|${k}|${mkt}|${side}`);
     const spoken = `${oddsBookFull(k)}, ${who} ${ODDS_MKT_WORD[mkt]} ${oddsSpokenPrice(mkt, side, p)}${isBest ? ', best price' : ''}.${fl.label}`;
-    if (!pre || ODDS_NOT_BETTABLE.has(k)) return `<span class="odds-tp na${isBest ? ' best' : ''}${fl.cls}"${fl.style} role="img" aria-label="${esc(spoken)}"><span class="num">${esc(txt)}</span></span>`;
-    return `<button type="button" class="odds-tp${isBest ? ' best' : ''}${fl.cls}"${fl.style} data-fk="t${k}${mkt}${side}" data-odds-bet="${pk}|${mkt}|${side}|${k}" aria-label="${esc(`${spoken} Opens a bet slip.`)}"><span class="num">${esc(txt)}</span>${isBest ? '<small>Best</small>' : ''}</button>`;
+    const q = oddsQuote(L, mkt, side), state = k === 'open' || !pre ? 'Recorded' : oddsStateLabel(q);
+    if (!pre || ODDS_NOT_BETTABLE.has(k) || !q?.actionable) return `<span class="odds-tp na${isBest ? ' best' : ''}${fl.cls}"${fl.style} role="img" title="${esc(oddsQuoteNote(q))}" aria-label="${esc(spoken + ' ' + state)}"><span class="num">${esc(txt)}</span><small>${state}</small></span>`;
+    return `<button type="button" class="odds-tp${isBest ? ' best' : ''}${fl.cls}"${fl.style} data-fk="t${k}${mkt}${side}" data-odds-bet="${pk}|${mkt}|${side}|${k}" aria-label="${esc(`${spoken} Opens a bet slip.`)}"><span class="num">${esc(txt)}</span><small>${isBest ? 'Best · fresh' : 'Fresh'}</small></button>`;
   };
   const rows = keys.map((k) => {
     const L = k === 'open' ? O.open || O.books?.open : O.books[k];
@@ -1113,8 +1177,8 @@ function oddsSharp(O, mkt) {
   const [a, b] = base === 't' ? ['over', 'under'] : ['home', 'away'];
   for (const k of ODDS_EDGE_SRC) {
     const L = set[k];
-    const age = L?.seen ? serverNow() - L.seen : null;
-    if (!L || age == null || age > ODDS_SHARP_FRESH) continue; // sharp prices must be recent
+    const q = oddsQuote(L, base, a), age = q?.seen ? serverNow() - q.seen : null;
+    if (!oddsPairFresh(L, base) || age == null || age > ODDS_SHARP_FRESH) continue; // sharp prices must be recent
     const pa = oddsSide(L, base, a), pb = oddsSide(L, base, b);
     if (!pa || !pb || pa.odds == null || pb.odds == null) continue;
     if (base !== 'ml' && pa.line == null) continue;
@@ -1129,7 +1193,7 @@ function oddsMarketP(O, mkt, side, line, exclude) {
   const base = oddsBase(mkt);
   const ps = [];
   for (const [k, L] of Object.entries(oddsSetFor(O, mkt))) {
-    if (k === exclude || ODDS_NOT_BETTABLE.has(k) || !L || oddsStale(L)) continue;
+    if (k === exclude || ODDS_NOT_BETTABLE.has(k) || !oddsPairFresh(L, base)) continue;
     const a = oddsSide(L, base, side), b = oddsSide(L, base, oddsOther(side));
     if (!a || !b || a.odds == null || b.odds == null) continue;
     if (base !== 'ml' && a.line !== line) continue;
@@ -1147,8 +1211,8 @@ function oddsOnlyBook(O, mkt, side, line, odds, book) {
   const d0 = oddsDec(odds);
   for (const [k, L] of Object.entries(oddsSetFor(O, mkt))) {
     if (k === book || ODDS_NOT_BETTABLE.has(k) || !L || oddsStale(L)) continue;
-    const px = oddsSide(L, base, side);
-    if (!px || px.odds == null) continue;
+    const px = oddsQuote(L, base, side);
+    if (!px?.actionable) continue;
     if (base !== 'ml') {
       const better = base === 't' ? (side === 'over' ? px.line < line : px.line > line) : px.line > line;
       if (better) return false;
@@ -1166,6 +1230,8 @@ function oddsEdgePrice(pk, mkt, side, line, odds, book = null) {
   if (!O || (!ODDS_MKTS.includes(mkt) && !ODDS_F5_BASE[mkt]) || odds == null || !Number.isFinite(+odds) || Math.abs(odds) < 100) return null;
   if (g && !oddsIsPre(g)) return null;
   if (!['home', 'away', 'over', 'under'].includes(side) || (base === 't') !== (side === 'over' || side === 'under')) return null;
+  const target = book ? oddsQuote(oddsSetFor(O, mkt)[book], base, side) : null;
+  if (book && (!target?.actionable || target.odds !== +odds || (base !== 'ml' && target.line !== +line))) return null;
   const F = oddsSharp(O, mkt);
   if (!F) return null;
   const pSide = side === F.sideA ? F.p : 1 - F.p;
@@ -1189,7 +1255,7 @@ function oddsEdgePrice(pk, mkt, side, line, odds, book = null) {
     pk, g, mkt, side, book, line: base === 'ml' ? null : +line, odds: +odds, ev, evMkt, mktN: M?.n || 0,
     p: pSide, push, fairAm: oddsProbToAm(pSide), src: F.book, srcAge: F.age, sig, conf,
     onlyBook: book ? oddsOnlyBook(O, mkt, side, +line, +odds, book) : false,
-    age: L?.seen ? serverNow() - L.seen : null,
+    age: target?.seen ? serverNow() - target.seen : null,
   };
 }
 // For the bet slip: the fair chance of this price, from the same calculation as the list.
@@ -1343,10 +1409,13 @@ async function oddsClearCounter(pk, book) {
 
 // ------------------------------------------------------------ clicks (data-odds-* only)
 document.addEventListener('click', (ev) => {
-  const t = ev.target.closest('[data-odds-view],[data-odds-filter],[data-odds-mkt],[data-odds-bet],[data-odds-open],[data-odds-edges],[data-odds-edge-mkt],[data-odds-weak],[data-odds-chart],[data-odds-moves],[data-odds-mbook],[data-odds-msave],[data-odds-mdel]');
+  const t = ev.target.closest('[data-odds-refresh],[data-odds-reset],[data-odds-history-retry],[data-odds-view],[data-odds-filter],[data-odds-mkt],[data-odds-bet],[data-odds-open],[data-odds-edges],[data-odds-edge-mkt],[data-odds-weak],[data-odds-chart],[data-odds-moves],[data-odds-mbook],[data-odds-msave],[data-odds-mdel]');
   if (!t) return;
   const d = t.dataset;
   ev.preventDefault();
+  if (d.oddsRefresh !== undefined) { oddsFetchDay(S.date, true); return; }
+  if (d.oddsReset !== undefined) { ODDS.filter = 'all'; ODDS.query = ''; store.set('oddsFilter', 'all'); oddsRepaint(); return; }
+  if (d.oddsHistoryRetry !== undefined) { ODDS.sheetHist = null; oddsSheetPaint(); oddsLoadHist(ODDS.sheetPk); return; }
   if (d.oddsView) {
     ODDS.view = d.oddsView === 'odds' ? 'odds' : 'scores';
     store.set('gamesView', ODDS.view);
@@ -1369,13 +1438,14 @@ document.addEventListener('click', (ev) => {
   else if (d.oddsEdges !== undefined) oddsEdgeOpen();
   else if (d.oddsEdgeMkt) { ODDS.edgeMkt = d.oddsEdgeMkt; oddsEdgePaint(); }
   else if (d.oddsWeak !== undefined) { store.set('edgeWeak', !oddsShowWeak()); oddsEdgePaint(); oddsRepaint(); }
-  else if (d.oddsChart) { ODDS.chartMkt = d.oddsChart; store.set('oddsChart', ODDS.chartMkt); oddsSwap($('#oddsChart'), oddsChartBlock(ODDS.sheetPk)); }
+  else if (d.oddsChart) { ODDS.chartMkt = d.oddsChart; ODDS.chartAt = null; store.set('oddsChart', ODDS.chartMkt); oddsSwap($('#oddsChart'), oddsChartBlock(ODDS.sheetPk)); }
   else if (d.oddsMoves !== undefined) oddsMovesSheet();
   else if (d.oddsMbook) { ODDS.counterBook = d.oddsMbook; oddsSheetPaint(); }
   else if (d.oddsMsave) oddsSaveCounter(d.oddsMsave);
   else if (d.oddsMdel) { const [pk, book] = d.oddsMdel.split('|'); oddsClearCounter(pk, book); }
 });
 document.addEventListener('input', (ev) => {
+  if (ev.target.id === 'oddsHistoryCursor') { oddsHistoryScrub(ev.target.value); return; }
   if (ev.target.id !== 'oddsFind') return;
   ODDS.query = ev.target.value;
   const at = ev.target.selectionStart;
@@ -1398,6 +1468,16 @@ document.addEventListener('click', (ev) => {
   if (!oddsIsPre(S.games.get(Number(pk)))) { ev.preventDefault(); if (typeof betsToast === 'function') betsToast('Pregame links are unavailable after first pitch. Use a current live price.'); return; }
   try {
     const px = typeof oddsPriceAt === 'function' ? oddsPriceAt(pk, mkt, side, book) : null;
+    if (!px) { ev.preventDefault(); if (typeof betsToast === 'function') betsToast('This quote is no longer fresh. Refresh odds or enter your ticket manually.'); return; }
     if (typeof betsOpenSlip === 'function') betsOpenSlip({ pk: Number(pk), mkt, side, book, line: px?.line ?? null, odds: px?.odds ?? null });
-  } catch (e) { /* the link still opens */ }
+  } catch (e) { ev.preventDefault(); }
 });
+
+document.addEventListener('change', (ev) => {
+  const t = ev.target;
+  if (t.id === 'oddsBookPick') { ODDS.phoneBook = t.value; store.set('oddsBook', t.value); oddsRepaint(); }
+  if (t.id === 'oddsGameFilter') { ODDS.filter = t.value; store.set('oddsFilter', t.value); oddsRepaint(); }
+  if (t.id === 'oddsHistoryBook') { ODDS.chartBook = t.value; ODDS.chartAt = null; oddsSwap($('#oddsChart'), oddsChartBlock(ODDS.sheetPk)); }
+});
+
+document.addEventListener('bbl:odds_status', (ev) => { const d = ev.detail; if (!d?.date) return; ODDS.status.set(d.date, { sources: d.sources, coverage: d.coverage, refresh: d.refresh }); oddsRepaint(); });

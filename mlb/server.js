@@ -1318,7 +1318,8 @@ async function oddsRoutes(req, res, url, uid) {
   if (p === '/api/odds' && M === 'GET') {
     const date = url.searchParams.get('date') || today?.date || baseballToday();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) { sendJSON(res, 400, { error: 'Use ?date=YYYY-MM-DD' }); return true; }
-    sendJSON(res, 200, Odds.forDate(date));
+    const refresh = url.searchParams.get('refresh') === '1' ? Odds.requestRefresh(date) : null;
+    sendJSON(res, 200, { ...Odds.forDate(date), ...(refresh ? { refresh } : {}) });
     return true;
   }
   const om = /^\/api\/odds\/(\d+)$/.exec(p);

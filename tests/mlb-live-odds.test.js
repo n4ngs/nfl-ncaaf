@@ -38,6 +38,7 @@ function engine(initial = feed()) {
       if (id === './util') return { ...util, log: () => {} };
       if (id === './lines') return { OddsDay };
       if (id === './books') return books;
+      if (id === './quote-evidence') return require('../mlb/lib/quote-evidence');
       if (id === './action') return { ...AN, fetchAN: async () => typeof response === 'function' ? response() : response };
       if (id === './keys') return { keys: () => {} };
       if (id.startsWith('./')) return {};

@@ -100,20 +100,20 @@ function betsInningText(g) {
 // ------------------------------------------------------------ prices
 // { line, odds } for one side at one book. Book lines keep the run line from the HOME side; legs keep the bettor's side.
 const betsOddsFor = (pk) => (typeof oddsGame === 'function' ? oddsGame(pk) : null) || BETS.odds.get(Number(pk)) || null;
-function betsPrice(pk, book, mkt, side) {
-  const O = betsOddsFor(pk), g = betsGame(pk);
-  if (!betsIsPre(g)) {
-    const p = typeof oddsLiveQuote === 'function' ? oddsLiveQuote(g, O, book, mkt, side) : null;
-    return p?.actionable ? p : null;
-  }
+// Current quote evidence for display. Reference/open/close prices never become slip prefills.
+function betsQuote(pk, book, mkt, side) {
   const f5 = String(mkt).startsWith('f5'), base = f5 ? mkt.slice(2) : mkt;
-  const L = !O ? null : book === 'open' ? O.open : book === 'close' ? O.close : (f5 ? O.f5 : O.books)?.[book];
-  if (!L) return null;
-  const i = side === 'home' || side === 'over' ? 0 : 1;
-  if (base === 'ml') return L.ml?.[i] != null ? { line: null, odds: L.ml[i] } : null;
-  if (base === 'rl') return L.rl?.line != null ? { line: side === 'home' ? L.rl.line : -L.rl.line, odds: L.rl.odds?.[i] ?? null } : null;
-  if (base === 't') return L.t?.line != null ? { line: L.t.line, odds: L.t.odds?.[i] ?? null } : null;
-  return null;
+  if (['open', 'close'].includes(book) || !['ml', 'rl', 't'].includes(base) || !(base === 't' ? ['over', 'under'] : ['home', 'away']).includes(side)) return null;
+  const O = betsOddsFor(pk), g = betsGame(pk);
+  if (g?.state === 'Live') return typeof oddsLiveQuote === 'function' ? oddsLiveQuote(g, O, book, mkt, side) : null;
+  if (!betsIsPre(g) || /suspend/i.test(g.detail || '')) return null;
+  const L = (f5 ? O?.f5 : O?.books)?.[book];
+  if (L?.is_live === true) return null;
+  return typeof oddsQuote === 'function' ? oddsQuote(L, base, side) : null;
+}
+function betsPrice(pk, book, mkt, side) {
+  const p = betsQuote(pk, book, mkt, side);
+  return p?.actionable && p.freshness === 'FRESH' ? p : null;
 }
 function betsLegLabel(g, l) {
   const who = l.side === 'home' || l.side === 'away' ? (g ? g[l.side].abbr : l.side === 'home' ? 'Home' : 'Away') : null;
@@ -215,7 +215,7 @@ function betsReturn(r) {
 function betsLegFrom(pk, mkt, side, book) {
   pk = Number(pk);
   const b = book && book !== 'cons' && book !== 'open' && book !== 'close' ? book : '';
-  const p = betsPrice(pk, book || 'cons', mkt, side) || (betsIsPre(betsGame(pk)) && book !== 'cons' ? betsPrice(pk, 'cons', mkt, side) : null) || {};
+  const p = betsPrice(pk, book || 'cons', mkt, side) || {};
   return { pk, mkt, side, line: mkt === 'ml' || mkt === 'f5ml' ? null : p.line ?? NaN, odds: p.odds ?? NaN, book: b };
 }
 function betsOpenSlip(opts = {}) {
@@ -223,12 +223,13 @@ function betsOpenSlip(opts = {}) {
   let slip;
   if (opts.parlay) slip = { legs: BETS.parlay.map((l) => ({ ...l })), stake: NaN, book: BETS.parlay.find((l) => l.book)?.book || '', parlay: true };
   else if (opts.pk && opts.mkt && opts.side) {
-    const g = betsGame(opts.pk), live = g?.state === 'Live';
-    const fresh = live ? betsPrice(opts.pk, opts.book || 'cons', opts.mkt, opts.side) : null;
-    if (live && opts.book && !['cons', 'open', 'close'].includes(opts.book) && !fresh) { betsToast('This live price is unavailable. Enter your ticket manually.'); return; }
     const l = betsLegFrom(opts.pk, opts.mkt, opts.side, opts.book);
-    if (!live && opts.mkt !== 'ml' && opts.mkt !== 'f5ml' && Number.isFinite(opts.line)) l.line = opts.line; // the price that was tapped wins
-    if (!live && Number.isFinite(opts.odds)) l.odds = opts.odds;
+    // A named book is a quoted handoff. Re-read it now; rendered opts can already be out of date.
+    // The manual picker has no named book and remains usable with blank price fields.
+    if (l.book && !Number.isFinite(l.odds)) {
+      betsToast(`This ${betsGame(opts.pk)?.state === 'Live' ? 'live ' : ''}price is unavailable. Enter your ticket manually.`);
+      return;
+    }
     slip = { legs: [l], stake: NaN, book: l.book };
   } else slip = { legs: [], stake: NaN, book: '', pick: true };
   slip.returnTo = returnTo;
@@ -257,38 +258,36 @@ function betsBookIcon(k, size = 32) {
   const name = k === 'other' ? '…' : (betsBook(k)?.short || k || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase();
   return `<span class="bets-bk-ico bets-bk-mono" style="width:${size}px;height:${size}px" aria-hidden="true">${esc(name)}</span>`;
 }
-const betsStale = (L) => !!(L?.seen && serverNow() - L.seen > 15 * 60e3);
 // Better for the bettor: the better number first, then the better price.
 function betsBetter(mkt, side, a, b) {
   if (mkt !== 'ml' && a.line !== b.line) return mkt === 't' ? (side === 'over' ? a.line < b.line : a.line > b.line) : a.line > b.line;
   return (betsDec(a.odds) || 0) > (betsDec(b.odds) || 0);
 }
-// Every book's price for this exact pick, best first, as big tappable tiles. Tapping one switches the slip to it.
-// Live tiles use per-selection source evidence; pregame/closing books stay separate.
+// Every book's price for this exact pick. Only fresh selection evidence can change the slip.
 function betsSlipBooksHTML(l, sel) {
-  const g = betsGame(l?.pk);
-  if (!l || (g && !betsIsPre(g) && g.state !== 'Live')) return '';
-  const live = g?.state === 'Live';
-  if (live && l.mkt.startsWith('f5')) return '';
-  const O = betsOddsFor(l.pk);
-  if (!(live ? O?.live : O?.books)) return '';
+  if (!l) return '';
+  const g = betsGame(l.pk), live = g?.state === 'Live';
+  if (!betsIsPre(g) && !live) return '';
+  const f5 = l.mkt.startsWith('f5'), base = f5 ? l.mkt.slice(2) : l.mkt;
+  if (live && f5) return '';
+  const O = betsOddsFor(l.pk), books = live ? O?.live : f5 ? O?.f5 : O?.books;
+  if (!books) return '';
   const rows = [];
   for (const b of betsBookList()) {
-    const L = (live ? O.live : l.mkt.startsWith('f5') ? O.f5 : O.books)?.[b.key];
-    const p = live && typeof oddsLiveQuote === 'function' ? oddsLiveQuote(g, O, b.key, l.mkt, l.side) : betsPrice(l.pk, b.key, l.mkt, l.side);
-    if (!p || p.odds == null || (l.mkt !== 'ml' && l.mkt !== 'f5ml' && p.line == null)) continue;
-    rows.push({ k: b.key, p, typed: !live && !!L?.m, old: live ? !p.actionable : betsStale(L), enabled: !live || p.actionable, state: live ? p.actionable ? 'Live' : p.freshness : null });
+    const L = books[b.key], p = betsQuote(l.pk, b.key, l.mkt, l.side);
+    if (!p || p.odds == null || (base !== 'ml' && p.line == null)) continue;
+    const enabled = p.actionable && p.freshness === 'FRESH';
+    rows.push({ k: b.key, p, typed: !live && !!L?.m, old: !enabled, enabled,
+      state: live ? enabled ? 'Live' : p.freshness : typeof oddsStateLabel === 'function' ? oddsStateLabel(p) : p.freshness });
   }
   if (!rows.length) return '';
-  let best = null;
-  try { best = live ? oddsLiveBest(g, O, l.mkt, l.side)?.book || null : typeof oddsBest === 'function' ? oddsBest(O, l.mkt, l.side)?.book || null : null; } catch { best = null; }
-  if (!best) best = rows.filter((r) => !r.old).reduce((a, r) => (!a || betsBetter(l.mkt, l.side, r.p, a.p) ? r : a), null)?.k || null;
-  rows.sort((a, b) => (a.k === best ? -1 : b.k === best ? 1 : 0) || (betsBetter(l.mkt, l.side, a.p, b.p) ? -1 : betsBetter(l.mkt, l.side, b.p, a.p) ? 1 : 0));
-  const priceTxt = (p) => (l.mkt === 'ml' ? betsFmtOdds(p.odds) : `${l.mkt === 't' ? (l.side === 'over' ? 'o' : 'u') + betsFmtTot(p.line) : betsFmtLine(p.line)} ${betsFmtOdds(p.odds)}`);
+  const best = rows.filter((r) => r.enabled).reduce((a, r) => (!a || betsBetter(base, l.side, r.p, a.p) ? r : a), null)?.k || null;
+  rows.sort((a, b) => (a.k === best ? -1 : b.k === best ? 1 : 0) || Number(b.enabled) - Number(a.enabled) || (betsBetter(base, l.side, a.p, b.p) ? -1 : betsBetter(base, l.side, b.p, a.p) ? 1 : 0));
+  const priceTxt = (p) => (base === 'ml' ? betsFmtOdds(p.odds) : `${base === 't' ? (l.side === 'over' ? 'o' : 'u') + betsFmtTot(p.line) : betsFmtLine(p.line)} ${betsFmtOdds(p.odds)}`);
   const spoken = (s) => s.replace(new RegExp(BETS_MINUS, 'g'), 'minus ').replace(/\+/g, 'plus ');
-  return `<div class="bets-books-h"><span>Where to bet</span><span>Tap a book to use its price · <button type="button" class="bets-k" data-bets-books>book links</button></span></div>
-    <div class="bets-books" role="group" aria-label="Choose a book">${rows.map((r) => `<button type="button" class="bets-bk${sel === r.k ? ' on' : ''}${r.old ? ' old' : ''}" ${r.enabled ? `data-bets-book="${r.k}"` : 'disabled'} aria-pressed="${sel === r.k}" aria-label="${esc(spoken(`${betsBookFull(r.k)}: ${priceTxt(r.p)}${r.k === best ? ', best price' : ''}${r.typed ? ', typed in' : ''}${r.old ? ', price may be old' : ''}`))}">
-      ${betsBookIcon(r.k)}<span class="bets-bk-n">${esc(betsBookName(r.k))}</span><span class="bets-bk-p num">${esc(priceTxt(r.p))}</span>${live ? `<span class="bets-bk-tag">${esc(r.state)}${r.k === best ? ' · Best' : ''}</span>` : r.k === best ? '<span class="bets-bk-tag">Best</span>' : r.typed ? '<span class="bets-bk-tag">Typed</span>' : r.old ? '<span class="bets-bk-tag">Old</span>' : ''}
+  return `<div class="bets-books-h"><span>Where to bet</span><span>Tap a fresh price to use it · <button type="button" class="bets-k" data-bets-books>book links</button></span></div>
+    <div class="bets-books" role="group" aria-label="Choose a book">${rows.map((r) => `<button type="button" class="bets-bk${sel === r.k ? ' on' : ''}${r.old ? ' old' : ''}" ${r.enabled ? `data-bets-book="${r.k}"` : 'disabled'} aria-pressed="${sel === r.k}" aria-label="${esc(spoken(`${betsBookFull(r.k)}: ${priceTxt(r.p)}, ${r.state}${r.k === best ? ', best price' : ''}${r.typed ? ', typed in' : ''}${r.old ? ', unavailable for prefill' : ''}`))}">
+      ${betsBookIcon(r.k)}<span class="bets-bk-n">${esc(betsBookName(r.k))}</span><span class="bets-bk-p num">${esc(priceTxt(r.p))}</span><span class="bets-bk-tag">${esc(r.state)}${r.k === best ? ' · Best' : ''}${r.typed ? ' · Typed' : ''}</span>
     </button>`).join('')}
       <button type="button" class="bets-bk${sel === 'other' ? ' on' : ''}" data-bets-book="other" aria-pressed="${sel === 'other'}" aria-label="Another book. Type the price.">${betsBookIcon('other')}<span class="bets-bk-n">Other</span><span class="bets-bk-p">Type the price</span></button>
     </div>${betsWhereHTML(sel)}`;
@@ -1134,12 +1133,13 @@ document.addEventListener('click', (ev) => {
   if (d.betsBook && BETS.slip?.legs.length === 1) { // a book tile in the slip: use that book and its price
     betsReadSlip();
     const sl = BETS.slip, l = sl.legs[0];
-    if (d.betsBook !== 'other' && betsGame(l.pk)?.state === 'Live' && !betsPrice(l.pk, d.betsBook, l.mkt, l.side)) { betsToast('This live price is no longer available.'); betsPaintSlip(); return; }
+    const p = d.betsBook === 'other' ? null : betsPrice(l.pk, d.betsBook, l.mkt, l.side);
+    if (d.betsBook !== 'other' && !p) { betsToast('This price is no longer available.'); betsPaintSlip(); return; }
     sl.book = d.betsBook;
     if (d.betsBook === 'other') l.book = '';
     else {
-      const p = betsPrice(l.pk, d.betsBook, l.mkt, l.side);
-      if (p?.odds != null) { l.odds = p.odds; if (l.mkt !== 'ml' && p.line != null) l.line = p.line; }
+      l.odds = p.odds;
+      if (l.mkt !== 'ml' && l.mkt !== 'f5ml') l.line = p.line;
       l.book = d.betsBook;
     }
     betsPaintSlip();

@@ -6,6 +6,7 @@
 
 const { getText, num, norm, etStampTime, pairGames, flipLine, cleanLine } = require('./util');
 const { BOOKS } = require('./books');
+const { sourceTime, lineMeta, flipMeta } = require('./quote-evidence');
 
 const URL_ = 'https://data.vsin.com/vegas-odds-linetracker/?sportid=mlb';
 const keyOf = Object.fromEntries(BOOKS.filter((b) => b.vsin).map((b) => [norm(b.vsin), b.key]));
@@ -46,12 +47,19 @@ function parse(html) {
         const [rs, rj] = pair(r.td[c]), [hs, hj] = pair(h.td[c]);
         const [tot, oj] = pair(r.td[c + 2]), [tot2, uj] = pair(h.td[c + 2]);
         const line = hs ?? (rs == null ? null : -rs);
-        const L = cleanLine({
+        let L = cleanLine({
           ml: [plain(h.td[c + 1]), plain(r.td[c + 1])],
-          rl: line != null && Math.abs(line) === (five ? 0.5 : 1.5) ? { line, odds: [hj, rj] } : null,
+          rl: line != null && (five ? [0, 0.5].includes(Math.abs(line)) : Math.abs(line) === 1.5) ? { line, odds: [hj, rj] } : null,
           t: { line: tot ?? tot2, odds: [oj, uj] },
         });
-        if (L) (five ? G.f5 : G.books)[book] = L;
+        if (L) {
+          L = lineMeta(L, { source_observed_at: sourceTime(etStampTime(stamp)), market_status: 'active', is_live: false });
+          if (L.quote_meta.rl?.home) L.quote_meta.rl.home.line_value = hs;
+          if (L.quote_meta.rl?.away) L.quote_meta.rl.away.line_value = rs;
+          if (L.quote_meta.t?.over) L.quote_meta.t.over.line_value = tot;
+          if (L.quote_meta.t?.under) L.quote_meta.t.under.line_value = tot2;
+          (five ? G.f5 : G.books)[book] = L;
+        }
       });
       byId.set(key, G);
     }
@@ -67,7 +75,7 @@ async function fetchVsin() {
   if (stamp && stamp === last.stamp) return { ...last, same: true };
   const p = parse(html);
   if (!p.games.length) throw new Error('VSiN MLB table not found (the page layout may have changed)');
-  last = { ...p, at: Date.now(), t: etStampTime(p.stamp) || Date.now() };
+  last = { ...p, at: Date.now(), t: etStampTime(p.stamp) };
   return last;
 }
 
@@ -79,7 +87,7 @@ function matchVsin(vgames, games, date) {
   for (const f of feed) {
     const m = pairs.get(f.key);
     if (!m) continue;
-    const side = (o) => Object.fromEntries(Object.entries(o).map(([k, L]) => [k, m.swap ? flipLine(L) : L]));
+    const side = (o) => Object.fromEntries(Object.entries(o).map(([k, L]) => [k, m.swap ? flipMeta(L, flipLine(L)) : L]));
     out.set(m.pk, { books: side(f.v.books), f5: side(f.v.f5 || {}) });
   }
   return out;

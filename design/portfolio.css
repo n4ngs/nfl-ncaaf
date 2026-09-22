@@ -161,3 +161,82 @@ select.portfolio-sport,.portfolio-sport select{padding-right:8px;font-size:13px;
 .portfolio-entry-more[open] > summary::after{transform:rotate(225deg)}
 .portfolio-entry-more > :is(div,section,.portfolio-entry-content){min-width:0;padding:0 14px 14px;overflow-wrap:anywhere}
 .portfolio-entry-more > :is(div,section) > :first-child{margin-top:0}
+
+/* Read-only insight panels: the trace uses settlement dates, exposure uses open stakes. */
+.portfolio-insights{min-width:0;margin:16px 0 0;border:1px solid var(--edge);border-radius:18px;background:var(--surface);overflow:hidden}
+.portfolio-insights > summary{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:64px;padding:14px 18px;list-style:none;cursor:pointer}
+.portfolio-insights > summary::-webkit-details-marker{display:none}
+.portfolio-insights > summary strong{display:block;color:var(--ink);font-size:14px;font-weight:650;letter-spacing:-.015em}
+.portfolio-insights > summary small{display:block;margin-top:3px;color:var(--ink-2);font-size:11px;line-height:1.45}
+.portfolio-insight-toggle{display:flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;border:1px solid var(--line);border-radius:50%;color:var(--ink-2)}
+.portfolio-insight-toggle::after{content:'';width:7px;height:7px;margin-top:-3px;border-bottom:1.5px solid currentColor;border-right:1.5px solid currentColor;transform:rotate(45deg)}
+.portfolio-insights[open] .portfolio-insight-toggle::after{transform:rotate(225deg);margin-top:3px}
+.portfolio-insights[open] > summary{border-bottom:1px solid var(--line)}
+.portfolio-insight-body{min-width:0;padding:18px}
+.portfolio-insight-grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(0,1fr);gap:24px}
+.portfolio-insight-grid > section{min-width:0}
+.portfolio-insight-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.portfolio-insight-heading h2{margin:0;color:var(--ink);font-size:12px;font-weight:650;letter-spacing:.015em;line-height:1.4}
+.portfolio-insight-heading > span{color:var(--ink-2);font-size:10px}
+.portfolio-insight-readout{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;min-height:58px;margin:0 0 8px;font-variant-numeric:tabular-nums}
+.portfolio-insight-readout > div{min-width:0}
+.portfolio-insight-readout > div > span{display:block;color:var(--ink-2);font-size:11px}
+.portfolio-insight-readout strong{display:block;margin-top:2px;color:var(--ink);font-size:30px;font-weight:650;letter-spacing:-.045em;line-height:1.15;overflow-wrap:anywhere}
+.portfolio-insight-readout p{margin:0 0 2px;color:var(--ink);font-size:11px;text-align:right;line-height:1.5}
+.portfolio-insight-readout p span{display:block;color:var(--ink-2)}
+.portfolio-insight-chart{display:block;width:100%;height:auto;max-height:188px;overflow:visible;color:var(--brand-text,var(--accent));cursor:crosshair;touch-action:pan-y}
+.portfolio-chart-grid{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.portfolio-chart-grid.is-zero{stroke:var(--ink-3);stroke-dasharray:3 5}
+.portfolio-chart-label{fill:var(--ink-2);font:11px system-ui,sans-serif;font-variant-numeric:tabular-nums}
+.portfolio-chart-line{fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.portfolio-chart-marker{fill:var(--surface);stroke:currentColor;stroke-width:2.5;vector-effect:non-scaling-stroke}
+.portfolio-chart-dates{display:flex;justify-content:space-between;gap:8px;margin:2px 0 0 12%;color:var(--ink-2);font-size:10px;line-height:1.4}
+.portfolio-chart-controls{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:10px;align-items:center;margin-top:4px}
+.portfolio-chart-controls button{display:inline-flex;align-items:center;justify-content:center;width:44px;min-height:44px;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit;font-size:18px;cursor:pointer}
+.portfolio-chart-controls label{display:flex;min-width:0;align-items:center;min-height:44px}
+.portfolio-chart-controls input[type=range]{display:block;min-width:0;width:100%;height:44px;margin:0;padding:0;accent-color:var(--brand-text,var(--accent));cursor:pointer}
+.portfolio-insight-note{margin:10px 0 0;color:var(--ink-2);font-size:10px;line-height:1.55;overflow-wrap:anywhere}
+.portfolio-exposure{padding-left:24px;border-left:1px solid var(--line)}
+.portfolio-exposure-switch{display:flex;gap:2px;padding:2px;margin-top:-5px;border:1px solid var(--line);border-radius:11px;background:var(--fill)}
+.portfolio-exposure-switch button{flex:1;min-width:44px;min-height:44px;padding:0 8px;border:0;border-radius:8px;background:transparent;color:var(--ink-2);font:inherit;font-size:11px;font-weight:550;cursor:pointer}
+.portfolio-exposure-switch button[aria-pressed=true]{background:var(--surface);box-shadow:0 1px 4px color-mix(in srgb,var(--ink) 8%,transparent);color:var(--ink)}
+.portfolio-exposure-row{margin-top:16px}
+.portfolio-exposure-row > div:first-child{display:flex;justify-content:space-between;align-items:baseline;gap:12px;color:var(--ink);font-size:12px;line-height:1.4}
+.portfolio-exposure-row > div:first-child > span{min-width:0;overflow-wrap:anywhere}
+.portfolio-exposure-row strong{flex:none;font-size:12px;font-weight:650;font-variant-numeric:tabular-nums}
+.portfolio-exposure-track{height:5px;margin:6px 0;background:var(--fill);border-radius:5px;overflow:hidden}
+.portfolio-exposure-track span{display:block;height:100%;background:var(--brand-text,var(--accent));border-radius:inherit}
+.portfolio-exposure-row small{display:block;color:var(--ink-2);font-size:10px;line-height:1.4}
+.portfolio-insight-empty{display:flex;flex-direction:column;justify-content:center;min-height:160px;max-width:42ch;padding:16px 0}
+.portfolio-insight-empty strong{color:var(--ink);font-size:18px;font-weight:600;letter-spacing:-.025em;line-height:1.35}
+.portfolio-insight-empty p{max-width:36ch;margin:8px 0 0;color:var(--ink-2);font-size:12px;line-height:1.6}
+.portfolio-exposure .portfolio-insight-empty{min-height:118px}
+.portfolio-insight-data{min-width:0;margin-top:18px;border-top:1px solid var(--line)}
+.portfolio-insight-data summary{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:44px;cursor:pointer;color:var(--ink);font-size:11px;list-style:none}
+.portfolio-insight-data summary::-webkit-details-marker{display:none}
+.portfolio-insight-data summary span{color:var(--ink-2)}
+.portfolio-insight-table{overflow:auto;max-height:280px}
+.portfolio-insight-table table{border-collapse:collapse;width:100%;color:var(--ink);font-size:11px;font-variant-numeric:tabular-nums}
+.portfolio-insight-table caption{padding:0 0 10px;color:var(--ink-2);font-size:10px;line-height:1.5;text-align:left}
+.portfolio-insight-table :is(th,td){padding:10px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+.portfolio-insight-table th{font-weight:550}
+.portfolio-insight-table :is(th,td):first-child{padding-left:0;text-align:left}
+.portfolio-insight-table thead th{color:var(--ink-2)}
+@media(max-width:699px){
+  .portfolio-insight-grid{grid-template-columns:minmax(0,1fr);gap:20px}
+  .portfolio-insight-body{padding:14px}
+  .portfolio-insights > summary{padding:12px 14px}
+  .portfolio-exposure{padding:18px 0 0;border-left:0;border-top:1px solid var(--line)}
+  .portfolio-exposure-switch{max-width:240px}
+  .portfolio-insight-readout strong{font-size:28px}
+  .portfolio-insight-chart{min-height:125px}
+}
+@media(max-width:359px){
+  .portfolio-insight-readout{align-items:flex-start;flex-direction:column;gap:4px}
+  .portfolio-insight-readout p{text-align:left}
+  .portfolio-insight-readout p span{display:inline}
+  .portfolio-chart-dates{font-size:9px}
+  .portfolio-insight-table :is(th,td){padding:10px 5px;font-size:10px}
+}
+
+@media(max-width:480px){.portfolio-chart-label{font-size:22px}}

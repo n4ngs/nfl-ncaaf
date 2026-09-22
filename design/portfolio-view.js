@@ -33,6 +33,121 @@
       net: knownNet.reduce((n, t) => n + t.profit, 0), knownNet: knownNet.length, missingNet: settled.length - knownNet.length,
       won: settled.filter((t) => t.status === 'won').length, lost: settled.filter((t) => t.status === 'lost').length };
   }
+  function insightBook(value) {
+    const label = String(value || '').trim(), alias = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const labels = { mgm: 'BetMGM', betmgm: 'BetMGM', dk: 'DraftKings', draftkings: 'DraftKings', fd: 'FanDuel', fanduel: 'FanDuel',
+      circa: 'Circa', circasports: 'Circa', pin: 'Pinnacle', pinnacle: 'Pinnacle', stn: 'Station', station: 'Station', stationcasinos: 'Station',
+      boom: "Boomer's", boomers: "Boomer's", czr: 'Caesars', caesars: 'Caesars', sp: 'South Point', southpoint: 'South Point',
+      wg: 'Westgate', westgate: 'Westgate', westgatesuperbook: 'Westgate', wynn: 'Wynn' };
+    const known = Object.prototype.hasOwnProperty.call(labels, alias) ? labels[alias] : null;
+    return { key: known || label.toLowerCase() || 'unknown', label: known || label || 'Book not recorded' };
+  }
+  // Insights use recorded settlement times only. Entries without dates stay in the balance,
+  // but cannot invent a point on the timeline. The caller supplies the private loaded scope.
+  function insightData(tickets, grouping = 'sport') {
+    const days = new Map(), exposure = new Map();
+    let missingNet = 0, missingDate = 0, settled = 0, dated = 0, open = 0, missingStake = 0, risk = 0;
+    for (const t of tickets) {
+      if (isSettled(t) && t.status !== 'void') {
+        settled++;
+        if (!Number.isFinite(t.profit)) missingNet++;
+        else {
+          const time = typeof t.settledAt === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/i.test(t.settledAt) ? Date.parse(t.settledAt) : NaN;
+          if (!Number.isFinite(time)) missingDate++;
+          else {
+            const day = new Date(time).toISOString().slice(0, 10);
+            const row = days.get(day) || { day, net: 0, count: 0 };
+            row.net += t.profit; row.count++; dated++; days.set(day, row);
+          }
+        }
+      }
+      if (t.status !== 'open') continue;
+      open++;
+      const book = insightBook(t.book), key = grouping === 'book' ? book.key : t.sport;
+      const row = exposure.get(key) || { key, label: grouping === 'book' ? book.label : names[key] || key, stake: 0, count: 0, missing: 0 };
+      row.count++;
+      if (Number.isFinite(t.stake) && t.stake >= 0) { row.stake += t.stake; risk += t.stake; }
+      else { row.missing++; missingStake++; }
+      exposure.set(key, row);
+    }
+    let cumulative = 0;
+    const points = [...days.values()].sort((a, b) => a.day.localeCompare(b.day)).map((row) => ({ ...row, cumulative: cumulative += row.net }));
+    return { points, net: cumulative, settled, dated, missingNet, missingDate, open, risk, missingStake,
+      exposure: [...exposure.values()].sort((a, b) => b.stake - a.stake || a.label.localeCompare(b.label)) };
+  }
+  function chooseInsightDay(points, selectedDay, action) {
+    if (!points.length) return '';
+    const found = points.findIndex((p) => p.day === selectedDay);
+    const index = found < 0 ? points.length - 1 : found;
+    const next = action === 'previous' ? Math.max(0, index - 1) : action === 'next' ? Math.min(points.length - 1, index + 1) : index;
+    return points[next].day;
+  }
+  const insightDay = (day) => new Date(day + 'T00:00:00Z').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  function chartGeometry(points) {
+    const values = [0, ...points.map((p) => p.cumulative)];
+    const low = Math.min(...values), high = Math.max(...values);
+    const span = high - low || 1;
+    const first = Date.parse(points[0]?.day), last = Date.parse(points.at(-1)?.day);
+    const x = (p) => points.length === 1 ? 350 : 76 + (Date.parse(p.day) - first) / (last - first) * 544;
+    const y = (value) => high === low ? 82 : 16 + (high - value) / span * 132;
+    return { low, high, x, y, path: points.map((p, i) => `${i ? 'L' : 'M'}${x(p).toFixed(2)},${y(p.cumulative).toFixed(2)}`).join(' ') };
+  }
+  function insightReadout(point) {
+    return `<div><span>Through ${esc(insightDay(point.day))}</span><strong>${money(point.cumulative, true)}</strong></div><p>${money(point.net, true)} that day <span>· ${point.count} ${point.count === 1 ? 'ticket' : 'tickets'} settled</span></p>`;
+  }
+  const insightPreferences = { expanded: null };
+  function renderInsights(model, state = {}) {
+    const { points } = model;
+    const selectedDay = chooseInsightDay(points, state.day);
+    const index = points.findIndex((p) => p.day === selectedDay), point = points[index];
+    const missing = [model.missingNet ? `${model.missingNet} settled ${model.missingNet === 1 ? 'ticket has' : 'tickets have'} no recorded net result.` : '',
+      model.missingDate ? `${model.missingDate} ${model.missingDate === 1 ? 'result has' : 'results have'} no settlement time.` : ''].filter(Boolean).join(' ');
+    const geometry = chartGeometry(points), compactMoney = (n) => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(n);
+    const graph = point ? `<div class="portfolio-insight-readout" data-pf-readout aria-live="polite" aria-atomic="true">${insightReadout(point)}</div>
+      <svg class="portfolio-insight-chart" data-pf-plot viewBox="0 0 640 168" role="img" aria-label="Cumulative recorded net by settlement day. Use the date slider or previous and next buttons to explore.">
+        ${[...new Set([geometry.high, 0, geometry.low])].map((n) => `<line x1="76" x2="620" y1="${geometry.y(n)}" y2="${geometry.y(n)}" class="portfolio-chart-grid${n === 0 ? ' is-zero' : ''}"/><text x="0" y="${geometry.y(n) + 4}" class="portfolio-chart-label">${esc(compactMoney(n))}</text>`).join('')}
+        ${points.length > 1 ? `<path d="${geometry.path}" class="portfolio-chart-line"/>` : ''}<circle data-pf-marker cx="${geometry.x(point)}" cy="${geometry.y(point.cumulative)}" r="5" class="portfolio-chart-marker"/>
+      </svg><div class="portfolio-chart-dates"><span>${esc(insightDay(points[0].day))}</span><span>${points.length > 1 ? esc(insightDay(points.at(-1).day)) : 'One recorded day'}</span></div>
+      <div class="portfolio-chart-controls"><button type="button" data-pf-day-step="previous" data-pf-insight-control="previous" aria-label="Previous settlement day" ${index <= 0 ? 'disabled' : ''}>←</button><label><span class="sr-only">Settlement day</span><input type="range" min="0" max="${points.length - 1}" step="1" value="${index}" data-pf-day data-pf-insight-control="day" aria-label="Settlement day" aria-valuetext="${esc(insightDay(point.day))}: ${esc(money(point.cumulative, true))} cumulative net" ${points.length < 2 ? 'disabled' : ''}></label><button type="button" data-pf-day-step="next" data-pf-insight-control="next" aria-label="Next settlement day" ${index >= points.length - 1 ? 'disabled' : ''}>→</button></div>`
+      : `<div class="portfolio-insight-empty"><strong>${model.settled ? 'A result needs a date to tell its story.' : 'Your first result starts the line.'}</strong><p>${model.settled ? 'The timeline appears when a settled ticket has both a recorded net result and settlement time.' : 'Settle a saved ticket to start your performance history.'}</p></div>`;
+    const rows = model.exposure.map((row) => `<div class="portfolio-exposure-row"><div><span>${esc(row.label)}</span><strong>${row.missing === row.count ? '—' : money(row.stake)}</strong></div><div class="portfolio-exposure-track" aria-hidden="true"><span style="width:${model.risk ? Math.max(0, Math.min(100, row.stake / model.risk * 100)) : 0}%"></span></div><small>${row.count} ${row.count === 1 ? 'open ticket' : 'open tickets'}${row.missing ? ` · ${row.missing} stake unavailable` : ''}</small></div>`).join('');
+    return `<div class="portfolio-insight-grid"><section class="portfolio-trend" aria-label="Settled performance"><div class="portfolio-insight-heading"><h2>Settled net</h2><span>Recorded history</span></div>${graph}<p class="portfolio-insight-note">Settlement days use UTC. ${model.dated ? `${model.dated} dated ${model.dated === 1 ? 'result' : 'results'} shown.` : ''}${missing ? ' ' + esc(missing) + ' These are excluded from the line.' : ''}</p></section>
+      <section class="portfolio-exposure" aria-label="Open stake exposure"><div class="portfolio-insight-heading"><h2>Where you’re exposed</h2></div><div class="portfolio-exposure-switch" role="group" aria-label="Group open stake">${[['sport','By sport'],['book','By book']].map(([key, title]) => `<button type="button" data-pf-exposure="${key}" data-pf-insight-control="${key}" aria-pressed="${(state.group || 'sport') === key}">${title}</button>`).join('')}</div>${rows || '<div class="portfolio-insight-empty"><strong>No open tickets</strong><p>Open stakes will appear here as you log bets.</p></div>'}<p class="portfolio-insight-note">${model.open ? `${model.missingStake === model.open ? 'Open stake unavailable' : money(model.risk) + ' in known open stakes'}.${model.missingStake ? ` ${model.missingStake} ${model.missingStake === 1 ? 'stake is' : 'stakes are'} unavailable.` : ''}` : 'Open stakes are grouped from your saved tickets.'}</p></section></div>
+      ${points.length ? `<details class="portfolio-insight-data"><summary data-pf-insight-control="table">View settlement data <span>${points.length} ${points.length === 1 ? 'day' : 'days'}</span></summary><div class="portfolio-insight-table"><table><caption>${points.length > 30 ? 'Most recent 30 settlement days; the chart includes all recorded days.' : 'Recorded net by settlement day (UTC).'}</caption><thead><tr><th scope="col">Day</th><th scope="col">Tickets</th><th scope="col">Net</th><th scope="col">Cumulative</th></tr></thead><tbody>${points.slice(-30).reverse().map((p) => `<tr><th scope="row">${esc(insightDay(p.day))}</th><td>${p.count}</td><td>${money(p.net, true)}</td><td>${money(p.cumulative, true)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
+  }
+  function updateInsightSelection(s, day) {
+    const body = s.root.querySelector('.portfolio-insight-body'), points = s.insightModel?.points || [];
+    if (!body || !points.length) return;
+    s.insightDay = chooseInsightDay(points, day);
+    const index = points.findIndex((p) => p.day === s.insightDay), point = points[index], geometry = chartGeometry(points);
+    const readout = body.querySelector('[data-pf-readout]');
+    if (readout) readout.innerHTML = insightReadout(point);
+    const marker = body.querySelector('[data-pf-marker]');
+    marker?.setAttribute('cx', String(geometry.x(point))); marker?.setAttribute('cy', String(geometry.y(point.cumulative)));
+    const range = body.querySelector('[data-pf-day]');
+    if (range) { range.value = String(index); range.setAttribute('aria-valuetext', `${insightDay(point.day)}: ${money(point.cumulative, true)} cumulative net`); }
+    const previous = body.querySelector('[data-pf-day-step="previous"]'), next = body.querySelector('[data-pf-day-step="next"]');
+    if (previous) previous.disabled = index <= 0;
+    if (next) next.disabled = index >= points.length - 1;
+    body.dataset.modelKey = JSON.stringify([s.insightModel, s.insightDay, s.insightGroup || 'sport']);
+  }
+  function updateInsights(s, tickets) {
+    const body = s.root.querySelector('.portfolio-insight-body'); if (!body) return;
+    const model = insightData(tickets, s.insightGroup || 'sport'); s.insightModel = model;
+    s.insightDay = chooseInsightDay(model.points, s.insightDay);
+    const brief = s.root.querySelector('[data-pf-insight-brief]');
+    if (brief) brief.textContent = `Loaded logs · ${s.filter.sport === 'all' ? 'All sports' : names[s.filter.sport]} · ${model.open} open · ${model.dated} dated results`;
+    const modelKey = JSON.stringify([model, s.insightDay, s.insightGroup || 'sport']);
+    if (body.dataset.modelKey === modelKey) return;
+    body.dataset.modelKey = modelKey;
+    const html = renderInsights(model, { day: s.insightDay, group: s.insightGroup });
+    if (body.dataset.renderKey === html) return;
+    const focused = body.contains(document.activeElement) ? document.activeElement?.dataset?.pfInsightControl : null;
+    const tableOpen = Boolean(body.querySelector('.portfolio-insight-data')?.open);
+    body.innerHTML = html; body.dataset.renderKey = html;
+    const table = body.querySelector('.portfolio-insight-data'); if (table) table.open = tableOpen;
+    if (focused) [...body.querySelectorAll('[data-pf-insight-control]')].find((control) => control.dataset.pfInsightControl === focused)?.focus({ preventScroll: true });
+  }
   function evidence(leg) {
     const i = leg.integrity;
     if (!i) return '<p class="portfolio-meta">Verified CLV evidence is unavailable for this entry.</p>';
@@ -65,6 +180,7 @@
     const data = s.data || { tickets: [], sources: [] };
     const scoped = select(data.tickets, { sport: s.filter.sport });
     const stats = summarize(scoped);
+    updateInsights(s, scoped);
     const summaryHTML = `<div class="portfolio-stat"><span class="portfolio-stat-label">At risk</span><strong class="portfolio-stat-value">${stats.open && stats.missingStake === stats.open ? '—' : money(stats.risk)}</strong><small class="portfolio-stat-detail">${stats.missingStake ? `${stats.missingStake} stake missing` : 'Open tickets'}</small></div><div class="portfolio-stat"><span class="portfolio-stat-label">Open</span><strong class="portfolio-stat-value">${stats.open}<small>${stats.live ? ` · ${stats.live} live` : ''}</small></strong><small class="portfolio-stat-detail">${stats.won} won · ${stats.lost} lost</small></div><div class="portfolio-stat"><span class="portfolio-stat-label">Settled net</span><strong class="portfolio-stat-value">${stats.missingNet && !stats.knownNet ? '—' : money(stats.net, true)}</strong><small class="portfolio-stat-detail">${stats.missingNet ? `Known net · ${stats.missingNet} result unavailable` : 'All recorded stakes'}</small></div>`;
     if (s.summary.innerHTML !== summaryHTML) s.summary.innerHTML = summaryHTML;
     s.root.querySelectorAll('[data-pf-status]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pfStatus === s.filter.status)));
@@ -125,12 +241,31 @@
     if (!s) {
       root.classList.add('portfolio'); root.parentElement.classList.add('portfolio-mode');
       root.innerHTML = `<div class="portfolio-head"><div><p class="portfolio-eyebrow">Your action, in one place</p><h1>My bets</h1></div><div class="portfolio-actions"><select class="portfolio-entry-sport" aria-label="Sport for new bet">${Object.entries(names).map(([k,n]) => `<option value="${k}" ${k === options.sport ? 'selected' : ''}>${n}</option>`).join('')}</select><button type="button" class="btn" data-pf-new>＋ Log a bet</button></div></div>
-        <div class="portfolio-summary"></div><div class="portfolio-toolbar"><div class="portfolio-tabs" role="group" aria-label="Ticket status">${[['open','Open'],['live','Live'],['upcoming','Upcoming'],['settled','Settled'],['all','All']].map(([k,l])=>`<button type="button" data-pf-status="${k}" aria-pressed="${k==='open'}">${l}</button>`).join('')}</div><label class="portfolio-sport"><span class="sr-only">Sport</span><select aria-label="Filter tickets by sport"><option value="all">All sports</option><option value="nfl">NFL</option><option value="ncaaf">College</option><option value="mlb">MLB</option></select></label><label class="portfolio-search"><span class="sr-only">Search tickets</span><input type="search" aria-label="Search tickets" placeholder="Team, pick or book" autocomplete="off"></label></div>
+        <div class="portfolio-summary"></div><details class="portfolio-insights"><summary><span><strong>Portfolio insights</strong><small data-pf-insight-brief>Across your loaded sports</small></span><span class="portfolio-insight-toggle" aria-hidden="true"></span></summary><div class="portfolio-insight-body"></div></details><div class="portfolio-toolbar"><div class="portfolio-tabs" role="group" aria-label="Ticket status">${[['open','Open'],['live','Live'],['upcoming','Upcoming'],['settled','Settled'],['all','All']].map(([k,l])=>`<button type="button" data-pf-status="${k}" aria-pressed="${k==='open'}">${l}</button>`).join('')}</div><label class="portfolio-sport"><span class="sr-only">Sport</span><select aria-label="Filter tickets by sport"><option value="all">All sports</option><option value="nfl">NFL</option><option value="ncaaf">College</option><option value="mlb">MLB</option></select></label><label class="portfolio-search"><span class="sr-only">Search tickets</span><input type="search" aria-label="Search tickets" placeholder="Team, pick or book" autocomplete="off"></label></div>
         <div class="portfolio-tools"><p class="portfolio-notice" role="status"></p><button type="button" class="portfolio-manage" data-pf-refresh>Refresh</button><button type="button" class="portfolio-manage" data-pf-results>${names[options.sport]} results</button><details class="portfolio-export"><summary>Export CSV</summary>${Object.entries(names).map(([k,n]) => `<a class="portfolio-manage" href="/${k}/api/bets.csv" download>${n} CSV</a>`).join('')}</details></div><div class="portfolio-list"></div><div class="portfolio-analysis" hidden></div>`;
       s = { root, options, filter: { sport: 'all', status: 'open', query: '' }, peerGames: {}, peerBets: {}, summary: root.querySelector('.portfolio-summary'), notice: root.querySelector('.portfolio-notice'), list: root.querySelector('.portfolio-list') };
       states.set(root, s);
+      const disclosure = root.querySelector('.portfolio-insights');
+      if (disclosure) {
+        disclosure.open = insightPreferences.expanded ?? Boolean(globalThis.matchMedia?.('(min-width: 760px)').matches);
+        disclosure.addEventListener('toggle', () => { insightPreferences.expanded = disclosure.open; });
+      }
+      root.addEventListener('input', (ev) => {
+        if (!ev.target.hasAttribute?.('data-pf-day')) return;
+        const point = s.insightModel?.points[Number(ev.target.value)];
+        if (point) updateInsightSelection(s, point.day);
+      });
       root.addEventListener('click', (ev) => {
+        const plot = ev.target.closest('[data-pf-plot]');
+        if (plot && s.insightModel?.points.length) {
+          const box = plot.getBoundingClientRect(), points = s.insightModel.points, geometry = chartGeometry(points);
+          const x = (ev.clientX - box.left) / box.width * 640;
+          const nearest = points.reduce((a, p) => Math.abs(geometry.x(p) - x) < Math.abs(geometry.x(a) - x) ? p : a);
+          updateInsightSelection(s, nearest.day); return;
+        }
         const b = ev.target.closest('button'); if (!b) return;
+        if (b.dataset.pfExposure) { s.insightGroup = b.dataset.pfExposure; updateInsights(s, select(s.data?.tickets || [], { sport: s.filter.sport })); return; }
+        if (b.dataset.pfDayStep) { updateInsightSelection(s, chooseInsightDay(s.insightModel?.points || [], s.insightDay, b.dataset.pfDayStep)); return; }
         if (b.hasAttribute('data-pf-new')) { const sport = root.querySelector('.portfolio-entry-sport').value; if (sport === s.options.sport) s.options.onNew?.(); else location.assign(`/${sport}/?portfolio=new#${sport === 'mlb' ? 'following' : 'bets'}`); }
         if (b.dataset.pfStatus) { s.filter.status = b.dataset.pfStatus; s.limit = 40; updateList(s); }
         if (b.hasAttribute('data-pf-more')) { s.limit = (s.limit || 40) + 40; updateList(s); }
@@ -166,5 +301,5 @@
     refresh(s);
     return true;
   }
-  return { mount, select, summarize, toWin, renderTicket, evidence };
+  return { mount, select, summarize, toWin, renderTicket, evidence, insightData, chooseInsightDay, renderInsights };
 });

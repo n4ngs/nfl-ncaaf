@@ -4,6 +4,9 @@
 
 const { getJSON, num, pairGames, cleanLine } = require('./util');
 
+const { sourceTime, lineMeta, flipMeta } = require('./quote-evidence');
+const { flipLine } = require('./util');
+
 const SITE = 'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard';
 
 async function fetchEspn(date) {
@@ -21,7 +24,16 @@ function dkLine(o) {
     rl: rlLine != null && Math.abs(rlLine) === 1.5 ? { line: rlLine, odds: [n(ps.home?.close?.odds), n(ps.away?.close?.odds)] } : null,
     t: { line: n(tot.over?.close?.line) ?? num(o.overUnder), odds: [n(tot.over?.close?.odds), n(tot.under?.close?.odds)] },
   };
-  return cleanLine(L);
+  const cleaned = cleanLine(L);
+  if (!cleaned) return null;
+  const result = lineMeta(cleaned, { source_observed_at: sourceTime(o.updated_at ?? o.lastUpdated), market_status: 'active', is_live: false });
+  // Each selection keeps its actual ESPN line. Inferring the away/under line here
+  // would disguise a mismatched or missing pair as comparable pricing evidence.
+  const fields = { rl: { home: ps.home?.close, away: ps.away?.close }, t: { over: tot.over?.close, under: tot.under?.close } };
+  for (const [market, sides] of Object.entries(fields)) for (const [side, quote] of Object.entries(sides)) {
+    if (result.quote_meta[market]?.[side]) result.quote_meta[market][side].line_value = n(quote?.line);
+  }
+  return lineMeta(result);
 }
 
 // Returns Map pk -> L (DraftKings, MLB orientation).
@@ -43,7 +55,7 @@ function parseEspn(j, games) {
     const m = pairs.get(f.key);
     if (!m) continue;
     const L = f.L;
-    out.set(m.pk, m.swap ? { ...L, ml: L.ml && [L.ml[1], L.ml[0]], rl: L.rl && { line: -L.rl.line, odds: [L.rl.odds[1], L.rl.odds[0]] } } : L);
+    out.set(m.pk, m.swap ? flipMeta(L, flipLine(L)) : L);
   }
   return out;
 }

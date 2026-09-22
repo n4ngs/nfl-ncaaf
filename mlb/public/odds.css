@@ -335,3 +335,189 @@ button.odds-tp:hover{background:var(--fill)}
 
 /* The "Where to bet" link in the board's opening line. */
 .odds-lede .odds-link{font-size:13px;font-weight:600;color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+
+/* Market workspace: quote hierarchy first, analysis on demand. */
+#view-games.odds-mode > .view-h{display:none}
+#view-games.odds-mode,#oddsHost,.odds-view,.odds-toolbar,.odds-lay,.odds-boards{min-width:0;max-width:100%}
+.odds-workspace-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:16px 0 12px}
+.odds-workspace-head > div{min-width:0}
+.odds-kicker{font-size:11px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);margin:0 0 5px}
+.odds-workspace-head h1{font-size:clamp(24px,3vw,34px);line-height:1.12;letter-spacing:-.045em;margin:0;font-weight:700}
+.odds-refresh{min-height:44px;padding:0 15px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font:600 13px var(--font);color:var(--ink);white-space:nowrap;flex:none}
+.odds-refresh:disabled{color:var(--ink-2);cursor:wait}
+.odds-overview{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;padding:11px 0;margin-bottom:12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-2)}
+.odds-health{margin:0;line-height:1.5;font-size:12px;color:var(--ink-2)}
+.odds-health b{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink);margin-right:3px}
+.odds-health[data-state="FRESH"] b{color:var(--odds-good,#32805b)}
+.odds-health[data-state="STALE"] b{color:var(--odds-warn,#9b6b21)}
+.odds-coverage-books{margin-left:auto}
+.odds-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:center}
+.odds-toolbar .odds-mseg{margin:0;display:flex;min-width:0;border-radius:11px;padding:3px;background:var(--fill);border:1px solid var(--line);gap:2px}
+.odds-toolbar .odds-mseg button{min-height:44px;padding:0 16px;font-size:13px;font-weight:600;border-radius:8px;color:var(--ink-2);white-space:nowrap}
+.odds-toolbar .odds-mseg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px color-mix(in srgb,var(--ink) 10%,transparent)}
+.odds-ctrl{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:8px;margin:0;min-width:0}
+.odds-select-label{display:flex;align-items:center;gap:8px;min-width:0;min-height:46px;padding:0 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:11px;color:var(--ink-2);white-space:nowrap}
+.odds-select-label select,.odds-history-controls select{min-width:0;min-height:44px;width:100%;max-width:100%;border:0;background:var(--surface);font:500 14px var(--font);color:var(--ink);padding:0 18px 0 0}
+.odds-find{width:160px;max-width:220px;min-width:0;height:46px;border:1px solid var(--line);border-radius:10px;font-size:16px;background:var(--surface);padding:0 12px}
+.odds-board-guide{margin:10px 0 6px;font-size:12px;line-height:1.5;color:var(--ink-2)}
+.odds-wide-guide{margin-left:8px;color:var(--ink)}
+.odds-lay{display:block}
+.odds-boards{gap:9px}
+.odds-grp{display:flex;align-items:baseline;justify-content:space-between;margin:17px 0 0;gap:10px;color:var(--ink-2);font-size:12px}
+.odds-grp h2,.odds-grp h3{font-size:17px;line-height:1.2;letter-spacing:-.02em;color:var(--ink);margin:0;font-weight:650}
+.odds-done > .odds-grp{min-height:44px;margin-top:12px;align-items:center}
+.odds-done > .odds-grp h2{display:inline}
+.odds-done > .odds-grp span{display:flex;gap:6px;align-items:center}
+.odds-done > .odds-grp svg{width:12px;height:12px}
+.odds-context{margin:24px 0 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.odds-context > summary{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:54px;font-size:14px;font-weight:650;cursor:pointer;list-style:none}
+.odds-context > summary::-webkit-details-marker{display:none}
+.odds-context > summary > span{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:400;color:var(--ink-2)}
+.odds-context > summary svg{width:12px;height:12px;flex:none;transform:rotate(90deg)}
+.odds-context[open] > summary svg{transform:rotate(-90deg)}
+.odds-context > div{display:grid;gap:12px;padding-bottom:16px}
+.odds-context .odds-edge-entry{border:1px solid var(--line);border-radius:12px;box-shadow:none}
+.odds-link{min-height:44px;color:var(--ink);font-size:13px;font-weight:600;text-decoration:underline;text-underline-offset:3px;text-align:left}
+.odds-px.old,.odds-tbl .stale{opacity:1}
+.odds-px,.odds-tp{font-variant-numeric:tabular-nums}
+.odds-px > .num{font-size:16px;font-weight:680;letter-spacing:-.025em}
+.odds-px small{font-size:10px;line-height:1.2}
+.odds-px .odds-px-state{font-weight:500}
+.odds-px .odds-px-state[data-state="FRESH"]{color:var(--odds-good,#32805b)}
+.odds-px .odds-px-state[data-state="STALE"]{color:var(--odds-warn,#9b6b21)}
+span.odds-px{background:transparent;box-shadow:none;cursor:default;color:var(--ink-2)}
+span.odds-px > .num{font-weight:550;color:var(--ink-2)}
+button.odds-px,a.odds-px{border:1px solid var(--line);background:var(--surface);color:var(--ink);text-decoration:none}
+button.odds-px:hover,a.odds-px:hover{background:var(--fill);border-color:var(--ink-2);box-shadow:none}
+button.odds-px.best,a.odds-px.best{background:color-mix(in srgb,var(--odds-good,#32805b) 7%,var(--surface));border-color:color-mix(in srgb,var(--odds-good,#32805b) 45%,var(--line));color:var(--ink);box-shadow:none}
+.odds-px.best small{color:var(--ink-2)}
+.odds-brd{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--surface);box-shadow:none}
+.odds-brhd,.odds-br-t{grid-template-columns:22px minmax(34px,1fr) 20px 78px 78px;column-gap:6px;padding-left:12px;padding-right:12px}
+.odds-brhd{padding-top:13px;padding-bottom:6px;color:var(--ink-2)}
+.odds-brhd span:nth-child(2){grid-column:4}
+.odds-brhd span:nth-child(3){grid-column:5}
+.odds-br-t{height:60px}
+.odds-br .odds-px{min-width:0;width:100%;height:54px;min-height:54px;padding:4px 7px;border-radius:8px}
+.odds-br-n{font-size:16px;font-weight:700;letter-spacing:-.025em}
+.odds-br-n small{display:block;font-size:10px;line-height:1.2;margin:3px 0 0}
+.odds-br-f{min-height:48px;padding:9px 12px;margin-top:4px;border-top:1px solid var(--line);font-size:11px;gap:5px 8px;background:color-mix(in srgb,var(--fill) 50%,var(--surface))}
+.odds-br-f .odds-br-spk{margin-left:auto}
+.odds-brhd.nb,.odds-br.nb .odds-br-t{grid-template-columns:22px minmax(0,1fr) 20px 90px}
+.odds-br.nb .odds-brhd span:nth-child(2){grid-column:4}
+.odds-br-f .odds-open{font-size:11px}
+.odds-btwrap,.odds-tbl-wrap{max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
+.odds-tbl{min-width:460px}
+.odds-tp{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;min-height:50px;gap:3px}
+.odds-tp small{display:block;font-size:10px;font-weight:500;color:var(--ink-2)}
+.odds-tp.na{color:var(--ink-2)}
+.odds-f5t .odds-px{min-height:54px;height:54px;min-width:72px}
+.odds-sheet .dlg-sec{min-width:0}
+.odds-chart-panel{padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--surface);min-width:0}
+.odds-history-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:11px;color:var(--ink-2)}
+.odds-history-controls label{display:flex;flex-direction:column;gap:3px;min-width:0;max-width:75%}
+.odds-history-controls select{height:44px;font-size:14px}
+.odds-history-controls > span{font-variant-numeric:tabular-nums;text-align:right}
+.odds-chart .ax{fill:var(--ink-2)}
+.odds-chart .ln.t0{opacity:.22;stroke-width:1}
+.odds-chart .ln.t2{stroke:var(--ink);stroke-width:2.5}
+.odds-history-point{fill:var(--surface);stroke:var(--ink);stroke-width:1.5}
+.odds-history-point.selected{fill:var(--ink);stroke:var(--surface);stroke-width:2}
+.odds-history-line{stroke:var(--ink-2);stroke-dasharray:3 4;stroke-width:1}
+.odds-history-scrub{display:flex;align-items:center;gap:16px;font-size:11px;color:var(--ink-2);margin-top:5px}
+.odds-history-scrub input{min-width:0;width:100%;height:44px;accent-color:var(--ink);cursor:ew-resize}
+.odds-observation{padding:12px 0 0;border-top:1px solid var(--line);font-size:13px;color:var(--ink);line-height:1.55;font-variant-numeric:tabular-nums;margin:0}
+.odds-history-note{font-size:11px;color:var(--ink-2);line-height:1.5;margin:8px 0 0}
+.odds-view :is(button,a,select,input,summary):focus-visible,.odds-sheet :is(button,a,select,input,summary):focus-visible,.odds-btwrap:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.odds-switch button::before,.odds-chart-seg button::before{display:none}
+.odds-switch button,.odds-chart-seg button{min-height:44px}
+html[data-theme="dark"] .odds-view,html[data-theme="dark"] .odds-sheet{--odds-good:#8bcdad;--odds-warn:#dfb777}
+@media(prefers-color-scheme:dark){html:not([data-theme="light"]) .odds-view,html:not([data-theme="light"]) .odds-sheet{--odds-good:#8bcdad;--odds-warn:#dfb777}}
+@media(min-width:1024px){
+  .odds-book-select{display:none}
+  .odds-btwrap{border:1px solid var(--line);border-radius:14px}
+  .odds-bt .stk{min-width:310px;width:310px;max-width:310px}
+  .odds-bt .odds-bt-mu{width:302px;grid-template-columns:68px minmax(0,1fr);gap:8px;padding:0 5px 0 8px;text-align:left;background:none;color:var(--ink);border:0;min-height:114px}
+  .odds-bt .odds-bt-st{white-space:normal;line-height:1.3}
+  .odds-bt .odds-bt-st b{font-size:12px}
+  .odds-bt-tms,.odds-st2{grid-template-rows:54px 54px;gap:4px}
+  .odds-bt-tms > div{min-width:0}
+  .odds-bt-n{width:auto;flex:1;min-width:0;font-size:14px;line-height:1.35}
+  .odds-bt-n small{display:block;margin:2px 0 0}
+  .odds-bt-tms img{flex:none;width:22px;height:22px}
+  .odds-bt-s{min-width:16px;flex:none;padding-right:2px}
+  .odds-bt .odds-px{min-width:80px;height:54px;padding:5px 7px}
+  .odds-bt th{font-size:11px;color:var(--ink-2);padding:13px 7px;text-align:right}
+  .odds-bt td{padding:9px 5px}
+  .odds-bt tbody tr:hover td{background:var(--surface)}
+  .odds-bt .odds-bt-mu:hover{background:var(--fill)}
+}
+@media(max-width:1100px){.odds-toolbar{grid-template-columns:1fr}.odds-ctrl{justify-content:stretch}.odds-find{flex:1;max-width:none}.odds-select-label{flex:1}.odds-toolbar .odds-mseg button{flex:1}}
+@media(max-width:1023px){.odds-wide-guide{display:none}.odds-coverage-books{display:none}.odds-toolbar .odds-mseg button{padding:0 8px}.odds-toolbar{gap:8px}.odds-overview{gap:5px 12px}.odds-health{font-size:11px}.odds-health b{font-size:14px}.odds-board-guide{font-size:11px}.odds-grp{margin-top:12px}.odds-context > summary > span{font-size:11px}.odds-history-controls label{max-width:100%}}
+@media(max-width:600px){
+  .odds-workspace-head{gap:10px;margin:10px 0}
+  .odds-workspace-head h1{font-size:24px;max-width:200px}
+  .odds-kicker{font-size:10px;letter-spacing:.07em}
+  .odds-refresh{padding:0 10px;font-size:12px}
+  .odds-ctrl{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .odds-find{grid-column:1/-1;width:100%;height:44px}
+  .odds-select-label{gap:5px;padding:0 9px}
+  .odds-select-label select{font-size:16px}
+  .odds-context > summary > span{max-width:52%;text-align:right}
+  .odds-chart-panel{padding:12px}
+  .odds-history-controls{flex-wrap:wrap;gap:4px}
+  .odds-history-controls label{flex:1}
+  .odds-history-controls > span{display:none}
+  .odds-history-scrub{gap:8px}
+}
+@media(max-width:359px){
+  .odds-workspace-head h1{font-size:22px}.odds-refresh{padding:0 8px;font-size:11px}
+  .odds-brhd,.odds-br-t{grid-template-columns:20px minmax(28px,1fr) 16px 73px 73px;column-gap:4px;padding-left:8px;padding-right:8px}
+  .odds-br-t img{width:20px;height:20px}.odds-br-n{font-size:14px}.odds-br .odds-px{padding:4px 5px}
+  .odds-toolbar .odds-mseg button{font-size:12px;padding:0 6px}
+}
+@media(prefers-reduced-motion:reduce){.odds-px.tick,.odds-tp.tick,.odds-px.tick small{animation:none;transform:none;will-change:auto}}
+
+.odds-px .odds-px-state[data-state="AGING"],.odds-health[data-state="AGING"] b{color:var(--odds-warn,#9b6b21)}
+.odds-source-status{margin-top:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink)}
+.odds-source-status > summary{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:48px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer;list-style:none}
+.odds-source-status > summary::-webkit-details-marker{display:none}
+.odds-source-status > summary span{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:400;color:var(--ink-2);text-align:right}
+.odds-source-status > summary svg{width:12px;height:12px;flex:none;transform:rotate(90deg)}
+.odds-source-status[open] > summary svg{transform:rotate(-90deg)}
+.odds-source-status > div{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;padding:4px 14px 12px}
+.odds-source-row{display:grid;grid-template-columns:1fr auto;gap:4px 8px;padding:10px 0;border-top:1px solid var(--line);font-size:12px}
+.odds-source-row span{color:var(--ink-2)}
+.odds-source-row small{grid-column:1/-1;font-size:11px;line-height:1.55;color:var(--ink-2)}
+.odds-source-status > p{font-size:11px;line-height:1.5;margin:0;padding:0 14px 14px;color:var(--ink-2)}
+
+/* Keep the established switch in place in the DOM while sharing its header row. */
+@media(min-width:1024px){
+  #view-games.odds-mode #oddsHost{position:relative}
+  #view-games.odds-mode #oddsSwitch{position:absolute;top:0;right:0;width:164px;margin:0;z-index:2}
+  #view-games.odds-mode #oddsSwitch button{flex:1;min-width:0;padding:0 12px}
+  #view-games.odds-mode .odds-workspace-head{min-height:54px;margin:0 0 8px;padding-right:178px;gap:18px}
+  .odds-overview{padding-top:8px;padding-bottom:8px;margin-bottom:10px}
+  .odds-grp{margin-top:10px}
+}
+@media(max-width:600px){
+  #view-games.odds-mode #oddsHost{position:relative}
+  #view-games.odds-mode #oddsSwitch{position:absolute;top:54px;left:0;width:164px;margin:0;z-index:2}
+  #view-games.odds-mode #oddsSwitch button{flex:1;min-width:0;padding:0 12px}
+  #view-games.odds-mode .odds-workspace-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin:0 0 10px}
+  #view-games.odds-mode .odds-workspace-head > div{grid-column:1/-1}
+  #view-games.odds-mode .odds-workspace-head h1{max-width:none}
+  #view-games.odds-mode .odds-workspace-head .odds-refresh{grid-column:2;min-height:52px}
+  .odds-overview{gap:5px 10px}
+  .odds-health{font-size:10px}.odds-health b{font-size:13px}
+  .odds-grp{margin-top:8px}
+}
+@media(max-width:359px){#view-games.odds-mode #oddsSwitch{top:52px;width:150px}}
+
+/* One scroll container in the price-history sheet; the native dialog still owns its focus trap. */
+#dlg:has(.odds-sheet){overflow:hidden}
+.odds-refresh-feedback{margin:8px 0 0}
+@media(max-width:480px){
+  .odds-select-label .odds-control-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .odds-select-label{gap:0}
+  .odds-select-label select{width:100%}
+}

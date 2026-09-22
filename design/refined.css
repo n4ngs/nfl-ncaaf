@@ -1,0 +1,156 @@
+/* THE.BOARD — a shared control and layout system. Loaded last by every sport.
+   Keep team/market colours meaningful, make actions easy to find, and preserve native controls. */
+:root{
+  --bg:#F5F4F0;--surface:#FFFFFF;--surface-2:#F0F1ED;
+  --ink:#182436;--ink-2:#526174;--ink-3:#626F7D;
+  --line:rgba(32,49,67,.13);--edge:rgba(32,49,67,.16);--fill:rgba(32,49,67,.055);
+  --brand:#E9B64D;--brand-ink:#202619;--brand-text:#805000;--brand-wash:#F9EDCD;--focus:#936017;
+  --control-radius:10px;--panel-radius:16px;--panel-shadow:0 2px 6px rgba(24,36,54,.025);
+  --chart-blue:#4669A2;--chart-green:#217663;--chart-amber:#A96A12;
+  --glass:rgba(255,255,255,.96);--gutter:clamp(16px,2.5vw,36px);
+}
+:root[data-theme="dark"]{
+  --bg:#0B1018;--surface:#141D29;--surface-2:#1A2635;
+  --ink:#F0F4FA;--ink-2:#B6C2D2;--ink-3:#A0AEC2;
+  --line:rgba(191,210,234,.13);--edge:rgba(191,210,234,.18);--fill:rgba(191,210,234,.07);
+  --brand:#E9B64D;--brand-ink:#202619;--brand-text:#F0C269;--brand-wash:#302A1D;--focus:#F0C269;
+  --panel-shadow:0 3px 12px rgba(0,0,0,.1);--chart-blue:#93B8F3;--chart-green:#77CCAD;--chart-amber:#F0C269;
+  --glass:rgba(20,29,41,.97);
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0B1018;--surface:#141D29;--surface-2:#1A2635;
+  --ink:#F0F4FA;--ink-2:#B6C2D2;--ink-3:#A0AEC2;
+  --line:rgba(191,210,234,.13);--edge:rgba(191,210,234,.18);--fill:rgba(191,210,234,.07);
+  --brand:#E9B64D;--brand-ink:#202619;--brand-text:#F0C269;--brand-wash:#302A1D;--focus:#F0C269;
+  --panel-shadow:0 3px 12px rgba(0,0,0,.1);--chart-blue:#93B8F3;--chart-green:#77CCAD;--chart-amber:#F0C269;
+  --glass:rgba(20,29,41,.97);
+}}
+html{scroll-padding-top:20px}
+body{background:var(--bg);font-feature-settings:"ss01";text-rendering:optimizeLegibility}
+#app.wrap{max-width:1560px;min-width:0}
+#main,.view,.lay,.hero-main,.hero-side,.gs-grid,.tools,.tool,.fgrid > *{min-width:0}
+.view > *{max-width:100%}
+
+/* A strong masthead and a quiet section rail create a consistent hierarchy. */
+html #xsport{height:62px;background:#142030;color:#F3F6FC;border:0;gap:24px;padding-left:max(var(--gutter),env(safe-area-inset-left));padding-right:max(var(--gutter),env(safe-area-inset-right))}
+html #xsport .wm{color:#F3F6FC;font-size:13px;letter-spacing:.05em}
+html #xsport .xseg{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.10);padding:3px;border-radius:11px;gap:3px}
+html #xsport .xseg a{min-height:44px;border-radius:7px;padding:0 20px;color:#BFCDDD;font-size:13px;font-weight:650}
+html #xsport .xseg a.on{background:#F0BD55;color:#142030;box-shadow:none}
+html #xsport .xadm{background:transparent;border-color:rgba(255,255,255,.22);color:#F3F6FC;border-radius:9px;height:40px}
+body:has(#xsport) .top{min-height:64px;margin-bottom:8px;border-bottom:1px solid var(--line);gap:16px;padding-top:0}
+.nav{gap:4px}
+.nav a{min-height:48px;border-radius:0;padding:0 16px;transition:color .15s ease}
+.nav a.on{background:transparent;box-shadow:inset 0 -3px 0 var(--brand);font-weight:650}
+.top-actions{gap:8px}
+.top-actions .pill{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--surface);font-size:12px}
+.top-actions .ibtn{width:40px;height:40px;border-radius:9px;background:var(--surface);border:1px solid var(--line)}
+
+/* Type and spacing keep data closer to the title. */
+.head,.view-h{padding:20px 0 22px;gap:20px}
+.head h1,.view-h h1{font-size:clamp(30px,3vw,44px);font-weight:650;line-height:1.08;letter-spacing:-.045em}
+.head p,.view-h p{font-size:14px;margin-top:8px;line-height:1.5}
+.eyebrow,.sub-h{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase}
+.sec{margin-top:32px}
+.sec-h h2{font-size:21px;letter-spacing:-.03em}
+.card,.gcard,.ab,.lc,.tool{border-radius:var(--panel-radius);box-shadow:var(--panel-shadow)}
+.card.chart,.card.glance,.card.learn{box-shadow:var(--panel-shadow)}
+.card.empty{padding:28px 20px;border:1px solid var(--edge);line-height:1.6}
+.card.empty b{font-size:18px;letter-spacing:-.02em}
+.card.empty p{margin:8px 0 16px}
+.card.empty .btn{margin-top:12px}
+
+/* All normal fields share a real boundary, generous targets, and an unmistakable focus state. */
+:is(input,select,textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not(#dateInput){
+  min-width:0;min-height:46px;border:1px solid var(--edge);border-radius:var(--control-radius);background-color:var(--surface);color:var(--ink);
+  padding:10px 13px;font-family:inherit;font-size:16px;line-height:1.35;box-shadow:0 1px 2px rgba(24,36,54,.025);transition:border-color .15s ease,box-shadow .15s ease;
+}
+:is(input,select,textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):focus-visible{
+  outline:2px solid var(--focus);outline-offset:2px;border-color:var(--focus);box-shadow:0 0 0 4px var(--brand-wash);
+}
+input::placeholder,textarea::placeholder{color:var(--ink-3);opacity:1;font-weight:400}
+select.inp{padding-right:36px}
+textarea.inp{height:auto;min-height:86px;resize:vertical}
+:is(input,select,textarea)[aria-invalid="true"]{border-color:#BB4D31;outline-color:#BB4D31}
+:is(input,select,textarea):disabled{background-color:var(--surface-2);color:var(--ink-3);cursor:not-allowed}
+input[type="range"]{accent-color:var(--chart-blue);min-height:44px;cursor:pointer}
+input[type="checkbox"],input[type="radio"]{accent-color:var(--chart-green)}
+.fgrid{gap:16px}
+.fgrid label,.fgrid .fl,.field label{color:var(--ink-2);font-size:12px;font-weight:600;line-height:1.45}
+
+/* A primary action is solid; choices sit on a common rail; supporting controls have a border. */
+.btn{min-height:46px;border-radius:var(--control-radius);font-size:14px;font-weight:650;letter-spacing:-.01em;padding:11px 18px;box-shadow:none}
+.btn:not(.ghost){border:1px solid transparent;background:var(--brand);color:var(--brand-ink)}
+.btn.ghost{background:var(--surface);border:1px solid var(--edge);color:var(--ink)}
+:is(.seg,.portfolio-tabs){border:1px solid var(--line);border-radius:11px;padding:3px;background:var(--fill);gap:3px}
+.seg button{border-radius:7px;min-height:40px;padding:8px 14px;font-size:13px;font-weight:500}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 4px rgba(24,36,54,.09),inset 0 0 0 1px var(--edge);font-weight:650}
+.pbtn,.chip,.lg{border-radius:8px;min-height:40px;font-size:12px}
+.ibtn{border:1px solid var(--edge);border-radius:9px;min-width:44px;min-height:44px}
+:is(button,a):focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+button:disabled{cursor:default}
+button[aria-busy="true"]{cursor:progress}
+.refine > summary{border-radius:10px;box-shadow:var(--panel-shadow)}
+.refine[open] > summary{border-radius:10px 10px 0 0}
+
+/* Keep schedule browsing compact without reducing the touch target. */
+.days{margin-top:12px;margin-bottom:8px;padding:8px;background:var(--surface);border:1px solid var(--line);border-radius:13px}
+.days-in{gap:4px}
+.days .day{min-width:48px;min-height:48px;height:48px;border-radius:8px;background:transparent;border:1px solid transparent}
+.days .day[aria-pressed="true"]{background:var(--brand-wash);box-shadow:none;border-color:var(--brand);color:var(--ink)}
+.days .day .dw{font-size:10px}.days .day .dn{font-size:16px}
+.days .day-cal{min-width:44px;min-height:44px;width:44px;height:44px;border:1px solid var(--edge);border-radius:9px;background:var(--surface)}
+
+/* Bet entry and calculation panels use the same form rhythm. */
+.dlg{border:1px solid var(--edge);border-radius:20px;background:var(--bg)}
+.dlg-head,.dlg-top{border-bottom:1px solid var(--line);background:var(--surface)}
+.tool{padding:22px;border:1px solid var(--edge)}
+.tool h3{font-size:17px;font-weight:650;letter-spacing:-.02em;margin-bottom:8px}
+.tool p{color:var(--ink-2);line-height:1.55}
+.chart svg,.pnl svg,.clv-chart svg{font-variant-numeric:tabular-nums}
+.chart .grid,.pnl .grid{stroke:var(--line)}
+
+@media(hover:hover){
+  .nav a:hover{color:var(--ink)}
+  .btn:not(:disabled):hover{filter:brightness(1.025);box-shadow:0 3px 9px rgba(24,36,54,.10)}
+  .btn.ghost:not(:disabled):hover,.ibtn:not(:disabled):hover{border-color:var(--ink-3);background:var(--surface-2)}
+  .gcard:hover,.card[data-open]:hover{border-color:var(--ink-3)}
+}
+@media(min-width:1024px){
+  #view-board .ctrl{padding:12px;border:1px solid var(--edge);border-radius:14px;background:var(--surface);gap:20px}
+  #view-board .ctrl-row:has(.search){flex:1;max-width:340px}
+  #view-board .ctrl-row .search{width:100%;background:var(--bg)}
+  #view-board .view-h{padding:20px 0}
+  .board-refine{margin-top:12px}
+}
+@media(max-width:899px){
+  body:has(#xsport) .top{min-height:52px;margin-bottom:0;border-bottom:0}
+  html #xsport{height:60px;gap:10px}
+  html #xsport .xseg a{min-height:44px;padding:0 14px}
+  .top-actions .ibtn{width:44px;height:44px}
+  .tabbar{padding-top:6px;border-top:1px solid var(--edge);background:var(--glass)}
+  .tabbar a{border-radius:10px;min-height:48px;padding:5px 8px}
+  .tabbar a.on{background:var(--brand-wash);color:var(--ink)}
+  .head,.view-h{padding:16px 0 18px}
+  .sec{margin-top:26px}
+}
+@media(max-width:560px){
+  html #xsport{padding-left:12px;padding-right:12px}
+  html #xsport .xseg a{padding:0 11px;font-size:12px}
+  html #xsport .xadm{padding:0 9px;font-size:12px;min-height:44px}
+  .seg button{min-height:44px;padding:8px 11px;font-size:12px}
+  .tool{padding:18px}
+  .days{padding:6px;margin-top:6px}
+  .days .day{min-width:44px;min-height:48px}
+  .fgrid{gap:12px}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+
+@media(max-width:1023px),(pointer:coarse){
+  .seg button,.pbtn,.chip,.lg,.top-actions .pill{min-height:44px}
+}
+
+/* The board wraps these native selects in one labelled control boundary. */
+#app #oddsView .odds-select-label select{border:0;box-shadow:none;background:transparent;padding:0 18px 0 0;min-height:44px}

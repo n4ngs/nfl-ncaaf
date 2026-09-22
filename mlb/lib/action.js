@@ -5,13 +5,14 @@
 
 const { getJSON, num, pairGames, flipLine, cleanLine } = require('./util');
 const { BOOKS, AN_IDS } = require('./books');
+const { sourceTime, marketState, lineMeta, flipMeta } = require('./quote-evidence');
 
 const AN = 'https://api.actionnetwork.com/web/v2/scoreboard/mlb';
 const AN1 = 'https://api.actionnetwork.com/web/v1/scoreboard/publicbetting/mlb';
 const url = (date) => `${AN}?bookIds=${AN_IDS.join(',')}&date=${date.replace(/-/g, '')}&periods=event`;
 // The older public-betting feed is the one that carries first-five-innings lines.
-const F5_IDS = [15, 30, 18, 68, 69, 75];
-const F5_BOOK = { 15: 'cons', 30: 'open', 18: 'stn', 68: 'dk', 69: 'fd', 75: 'mgm' };
+const F5_IDS = [...new Set([...AN_IDS, 18])];
+const F5_BOOK = { ...Object.fromEntries(BOOKS.flatMap((b) => (b.an || []).map((id) => [id, b.key]))), 18: 'stn' };
 const url1 = (date) => `${AN1}?bookIds=${F5_IDS.join(',')}&date=${date.replace(/-/g, '')}`;
 
 async function fetchAN(date) {
@@ -36,7 +37,7 @@ function readTeamTotals(ev, homeId, awayId, swap) {
 }
 
 // First five innings, from the public-betting feed. Returns Map pk -> { bookKey: L }.
-function parseAN1(j, games) {
+function parseAN1(j, games, period = 'firstfiveinnings') {
   const feed = [];
   for (const ag of j.games || []) {
     const th = ag.teams?.find((t) => t.id === ag.home_team_id);
@@ -52,14 +53,27 @@ function parseAN1(j, games) {
     const books = {};
     for (const o of f.ag.odds || []) {
       const key = F5_BOOK[o.book_id];
-      if (!key || o.type !== 'firstfiveinnings') continue;
+      // V1's type names the market period, not its live/pregame phase. Explicit
+      // conflicting flags must never be rewritten as a pregame observation.
+      if (!key || o.type !== period || o.is_live || o.isLive || o.live || o.is_alt_market || o.isAlternate
+        || (o.period != null && o.period !== period && !(period === 'game' && o.period === 'event'))) continue;
       const line = num(o.spread_home);
-      const L = cleanLine({
+      let L = cleanLine({
         ml: [num(o.ml_home), num(o.ml_away)],
-        rl: line != null && Math.abs(line) === 0.5 ? { line, odds: [num(o.spread_home_line), num(o.spread_away_line)] } : null,
+        rl: line != null && (period === 'firstfiveinnings' ? [0, 0.5].includes(Math.abs(line)) : Math.abs(line) === 1.5) ? { line, odds: [num(o.spread_home_line), num(o.spread_away_line)] } : null,
         t: { line: num(o.total), odds: [num(o.over), num(o.under)] },
       });
-      if (L) books[key] = m.swap ? flipLine(L) : L;
+      if (L) {
+        const parentState = o.is_suspended ? 'suspended' : marketState(o.market_status ?? o.status, 'active');
+        L = lineMeta(L, { source_observed_at: sourceTime(o.inserted), market_status: parentState, is_live: false, provider_event_id: f.ag.id });
+        for (const [market, sides] of Object.entries(L.quote_meta)) for (const [side, q] of Object.entries(sides)) {
+          const field = market === 'ml' ? `ml_${side}` : market === 'rl' ? `spread_${side}` : side;
+          q.market_status = parentState === 'active' ? marketState(o.line_status?.[field]) : parentState;
+          if (market === 'rl') q.line_value = num(o[`spread_${side}`]);
+        }
+        L = lineMeta(L); // Recheck exact opposite-side lines after reading V1's side fields.
+        books[key] = m.swap ? flipMeta(L, flipLine(L)) : L;
+      }
     }
     if (Object.keys(books).length) out.set(m.pk, books);
   }
@@ -68,15 +82,10 @@ function parseAN1(j, games) {
 
 // A provider quote's own timestamp and state; never substitute the fetch clock.
 function quoteMeta(o, live) {
-  const raw = o.updated_at ?? o.updated ?? o.last_updated ?? o.inserted;
-  const numeric = typeof raw === 'number' || (typeof raw === 'string' && /^\d+(?:\.\d+)?$/.test(raw));
-  const at = raw == null ? NaN : numeric ? Number(raw) * (Number(raw) < 1e12 ? 1000 : 1) : Date.parse(raw);
-  const status = String(o.market_status || o.status || '').toLowerCase();
-  return { source_observed_at: Number.isFinite(new Date(at).getTime()) ? new Date(at).toISOString() : null,
-    market_status: o.is_suspended || /suspend|lock|pause/.test(status) ? 'suspended'
-      : /remove|closed|settled/.test(status) ? 'removed' : status && !/^(open|active|available)$/.test(status) ? 'unverified' : 'active',
+  return { source_observed_at: sourceTime(o.updated_at ?? o.updated ?? o.last_updated ?? o.inserted),
+    market_status: o.is_suspended ? 'suspended' : marketState(o.market_status ?? o.status ?? o.line_status, 'active'),
     is_live: live, line_value: num(o.value), american_odds: num(o.odds),
-    provider_quote_id: o.id ?? null };
+    provider_quote_id: o.outcome_id ?? o.id ?? null };
 }
 
 // The live projection retains one-sided and suspended evidence; it never enters OddsDay history.
@@ -112,7 +121,11 @@ function readMarkets(ev, homeId, awayId, live = false) {
   for (const [a, b, spread] of [[q.rl.home, q.rl.away, true], [q.t.over, q.t.under, false]]) {
     if (a?.line_value != null && b?.line_value != null && a.line_value !== (spread ? -b.line_value : b.line_value)) a.conflicted = b.conflicted = true;
   }
-  if (!live) return cleanLine(L);
+  // Keep one-sided evidence, but an entirely absent market is not a null-valued quote.
+  if (!live) {
+    for (const market of ['ml', 'rl', 't']) if (!Object.keys(q[market]).length) L[market] = null;
+    return Object.values(q).some((market) => Object.keys(market).length) ? { ...L, is_live: false, quote_meta: q } : null;
+  }
   if (!Object.values(q).some((market) => Object.keys(market).length)) return null;
   return { ...L, is_live: true, quote_meta: q };
 }
@@ -167,7 +180,7 @@ function parseAN(j, games) {
         if (!ev) continue;
         if (!books[b.key]) {
           const L = readMarkets(ev, ag.home_team_id, ag.away_team_id);
-          if (L) books[b.key] = m.swap ? flipLine(L) : L;
+          if (L) books[b.key] = { ...(m.swap ? flipMeta(L, flipLine(L)) : L), provider_event_id: ag.id };
         }
         if (b.key !== 'open' && !live[b.key]) {
           const L = readMarkets(ev, ag.home_team_id, ag.away_team_id, true);
@@ -185,4 +198,4 @@ function parseAN(j, games) {
   return out;
 }
 
-module.exports = { fetchAN, parseAN, fetchAN1, parseAN1, readMarkets };
+module.exports = { fetchAN, parseAN, fetchAN1, parseAN1, parseAN1Full: (j, games) => parseAN1(j, games, 'game'), readMarkets };

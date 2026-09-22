@@ -53,7 +53,7 @@ function connect() {
   es.onerror = () => { S.connected = false; renderPill(); };
   on('snapshot', (d) => { S.today = d.date; if (S.isToday && !S.loading) loadSnapshot(d); else invalidate(); document.dispatchEvent(new CustomEvent('bbl:snapshot', { detail: d })); });
   // Betting stack (odds.js, bets.js) listens for these as DOM events.
-  for (const t of ['odds', 'move', 'bets']) on(t, (d) => document.dispatchEvent(new CustomEvent(`bbl:${t}`, { detail: d })));
+  for (const t of ['odds', 'odds_status', 'move', 'bets']) on(t, (d) => document.dispatchEvent(new CustomEvent(`bbl:${t}`, { detail: d })));
   on('tick', (d) => { S.offset = d.now - Date.now(); if (S.isToday) { S.liveCount = d.live; S.feedAt = d.feedAt; } renderPill(); });
   on('event', (e) => {
     const wasHR = T.hr.get(e.id);

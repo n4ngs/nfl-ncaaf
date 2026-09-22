@@ -4,6 +4,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { retryAfterMs } = require('../../shared/poll-scheduler');
 
 const DATA = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data');
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
@@ -24,12 +25,12 @@ async function getJSON(url, { timeout = 15000, headers = {}, text = false } = {}
   const host = hostOf(url);
   const h = hosts.get(host) || { ok: 0, fail: 0, lastOk: 0, lastErr: null, until: 0 };
   hosts.set(host, h);
-  if (h.until > Date.now()) throw new Error(`${host} paused after errors`);
+  if (h.until > Date.now()) { const error = new Error(`${host} paused after errors`); error.retryAfterMs = h.until - Date.now(); throw error; }
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeout);
   try {
     const r = await fetch(url, { signal: ctl.signal, headers: { accept: text ? 'text/html' : 'application/json', 'user-agent': UA, 'accept-language': 'en-US,en;q=0.9', ...headers } });
-    if (!r.ok) throw new Error(`HTTP ${r.status} ${url.split('?')[0]}`);
+    if (!r.ok) { const error = new Error(`HTTP ${r.status} ${url.split('?')[0]}`); error.retryAfterMs = retryAfterMs(r.headers.get('retry-after')); throw error; }
     const body = text ? await r.text() : await r.json();
     h.ok++; h.fail = 0; h.lastOk = Date.now(); h.lastErr = null; h.until = 0;
     return body;
@@ -37,7 +38,7 @@ async function getJSON(url, { timeout = 15000, headers = {}, text = false } = {}
     h.fail++;
     h.lastErr = `${new Date().toISOString()} ${e.name === 'AbortError' ? 'timeout' : e.message}`;
     // Back off a host that keeps failing: 5 s, 10 s, 20 s … up to 5 min.
-    if (h.fail >= 2) h.until = Date.now() + Math.min(300e3, 5000 * 2 ** (h.fail - 2));
+    if (h.fail >= 2 || e.retryAfterMs > 0) h.until = Date.now() + Math.max(e.retryAfterMs || 0, h.fail >= 2 ? Math.min(300e3, 5000 * 2 ** (h.fail - 2)) : 0);
     throw e;
   } finally {
     clearTimeout(timer);
