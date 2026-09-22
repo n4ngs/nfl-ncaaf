@@ -97,9 +97,11 @@
 
     <!-- ============ BOARD ============ -->
     <section class="view" id="view-board" data-view="board" aria-label="Board">
-      <div class="view-h">
-        <div><h1 id="boardTitle">The board</h1><p id="boardSub"></p></div>
+      <div class="view-h board-heading">
+        <p class="eyebrow">College football · Market board</p>
+        <h1 id="boardTitle">The board</h1>
         <div class="wk" id="weekNav"></div>
+        <p id="boardSub"></p>
       </div>
       <div class="ctrl">
         <div class="ctrl-row">
@@ -112,15 +114,24 @@
         </div>
         <div class="ctrl-row"><input class="search" id="search" type="search" placeholder="Find a team" autocomplete="off" aria-label="Find a team"></div>
       </div>
-      <div class="pills" id="filters" role="group" aria-label="Filter"></div>
-      <div class="pills books" id="phBooks" role="group" aria-label="Which book to show"></div>
+      <div class="board-refine">
+        <details class="refine" id="boardFilters">
+          <summary><span class="refine-label">Show</span><span id="filterLabel">All games</span><svg class="refine-chevron" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary>
+          <div class="refine-panel"><div class="pills" id="filters" role="group" aria-label="Filter games"></div></div>
+        </details>
+        <details class="refine refine-book" id="boardBooks">
+          <summary><span class="refine-label">Book</span><span id="bookLabel">Market</span><svg class="refine-chevron" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary>
+          <div class="refine-panel"><div class="pills books" id="phBooks" role="group" aria-label="Which book to show"></div></div>
+        </details>
+        <span class="board-count" id="boardCount" role="status" aria-live="polite"></span>
+      </div>
       <div id="boardBody"></div>
     </section>
 
     <!-- ============ BETS ============ -->
     <section class="view" id="view-bets" data-view="bets" aria-label="My bets">
       <div class="view-h">
-        <div><h1>My bets</h1><p id="betsSub">Every ticket, sweating live, graded the second it's final.</p></div>
+        <div><h1>My bets</h1><p id="betsSub">Your tickets, from entry to settlement.</p></div>
         <div class="seg" id="betSeg" role="group" aria-label="Show">
           <button type="button" data-bseg="open">Open</button>
           <button type="button" data-bseg="settled">Settled</button>

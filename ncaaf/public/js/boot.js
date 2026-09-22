@@ -12,7 +12,11 @@ function setTab(tab, push = true) {
   if (tab === 'admin' && !canAdmin()) tab = 'live';
   S.tab = tab;
   for (const v of $$('.view')) v.classList.toggle('on', v.dataset.view === tab);
-  for (const a of $$('[data-tab]')) a.classList.toggle('on', a.dataset.tab === tab && !a.classList.contains('brand'));
+  for (const a of $$('[data-tab]')) {
+    const active = a.dataset.tab === tab && !a.classList.contains('brand');
+    a.classList.toggle('on', active);
+    if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
   store.set('lastTab', tab);
   if (push && location.hash !== `#${tab}`) history.replaceState(null, '', `#${tab}`);
   if (tab === 'board' && !S.boardWeek) S.boardWeek = S.def;
@@ -88,8 +92,18 @@ document.addEventListener('click', (ev) => {
   if (d.open) { ev.preventDefault(); openGame(d.open); return; }
   if (d.week !== undefined && d.week) { openWeek(d.week); return; }
   if (d.mkt) { S.mkt = d.mkt; store.set('mkt', S.mkt); renderBoard(); return; }
-  if (d.filter) { S.filter = d.filter; store.set('filter', S.filter); renderBoard(); return; }
-  if (d.phbook) { S.phBook = d.phbook; store.set('phBook', S.phBook); renderBoard(); return; }
+  if (d.filter) {
+    const disclosure = t.closest('details.refine');
+    S.filter = d.filter; store.set('filter', S.filter); renderBoard();
+    if (disclosure) { disclosure.open = false; disclosure.querySelector('summary')?.focus(); }
+    return;
+  }
+  if (d.phbook) {
+    const disclosure = t.closest('details.refine');
+    S.phBook = d.phbook; store.set('phBook', S.phBook); renderBoard();
+    if (disclosure) { disclosure.open = false; disclosure.querySelector('summary')?.focus(); }
+    return;
+  }
   if (d.bseg) { S.bseg = d.bseg; store.set('bseg', S.bseg); renderBets(); return; }
   if (d.cm) { S.sheet.chartMkt = d.cm; if (d.cm !== 'ml') S.sheet.tableMkt = d.cm; paintGame(); return; }
   if (d.tm) { S.sheet.tableMkt = d.tm; paintGame(); return; }

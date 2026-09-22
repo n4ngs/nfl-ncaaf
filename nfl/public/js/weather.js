@@ -2,7 +2,8 @@
 /* Pick Six — Weather watch (Board tab). Pre-game outdoor games in the week on the board with strong wind
    (15+ mph sustained or 25+ mph gusts, averaged kickoff through the second half; lib/weather.js), with the total's
    move since it opened. Informational only: what the forecast says and what the number did, no advice. The card
-   is hidden when no game is windy. renderBoard (views.js) calls wxBoard(week) on every paint. */
+   is hidden when no game is windy. The summary stays visible for affected games; details expand on demand.
+   renderBoard (views.js) calls wxBoard(week) on every paint. */
 
 const WX_WIND = 15;  // sustained, mph
 const WX_GUST = 25;  // gusts, mph
@@ -37,18 +38,32 @@ function wxRow(g) {
 function wxBoard(W) {
   let sec = $('#wxWatch');
   if (!sec) {
-    sec = document.createElement('section');
+    sec = document.createElement('details');
     sec.id = 'wxWatch';
     sec.className = 'card wx';
     sec.setAttribute('aria-labelledby', 'wxTitle');
+    sec.innerHTML = `<summary class="wx-h"><h3 id="wxTitle">${ICON.wind}Weather watch</h3><span class="wx-count"></span></summary>
+      <div class="wx-list"></div>
+      <p class="wx-note">Strong wind has tended to lower scoring. It’s one factor among many. Forecast from Open-Meteo, kickoff through the second half.</p>`;
     const body = $('#boardBody');
     if (!body?.parentNode) return;
     body.parentNode.insertBefore(sec, body);
   }
   const games = W ? [...W.games.values()].filter(wxWindy).sort((a, b) => Date.parse(a.start) - Date.parse(b.start)) : [];
-  const html = games.length ? `<div class="wx-h"><h3 id="wxTitle">${ICON.wind}Weather watch</h3><span>${plural(games.length, 'game')} · wind ${WX_WIND}+ mph or gusts ${WX_GUST}+</span></div>
-    <div class="wx-list">${games.map(wxRow).join('')}</div>
-    <p class="wx-note">Strong wind has tended to lower scoring. It’s one factor among many. Forecast from Open-Meteo, kickoff through the second half.</p>` : '';
+  const summary = sec.querySelector('.wx-h'), count = sec.querySelector('.wx-count'), list = sec.querySelector('.wx-list');
+  const label = `${plural(games.length, 'game')} affected · wind ${WX_WIND}+ mph / gusts ${WX_GUST}+ mph`;
+  if (count.textContent !== label) count.textContent = label;
+  const html = games.map(wxRow).join('');
+  const activeRow = document.activeElement?.closest?.('.wx-row');
+  const focusedGame = activeRow && sec.contains(activeRow) ? activeRow.dataset.open : null;
   sec.hidden = !games.length;
-  if (sec.dataset.html !== html) { sec.innerHTML = html; sec.dataset.html = html; }
+  // Keep the disclosure and summary stable; restore a focused game after changed forecast rows.
+  if (list.dataset.html !== html) {
+    list.innerHTML = html;
+    list.dataset.html = html;
+    if (focusedGame && !sec.hidden) {
+      const target = [...list.querySelectorAll('.wx-row')].find((row) => row.dataset.open === focusedGame) || summary;
+      target.focus({ preventScroll: true });
+    }
+  }
 }

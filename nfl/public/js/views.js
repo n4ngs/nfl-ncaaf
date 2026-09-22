@@ -373,10 +373,24 @@ function matchesQuery(g) {
   return [g.home, g.away].some((t) => [t.name, t.abbr, t.short, t.loc].some((x) => String(x || '').toLowerCase().includes(q)));
 }
 
+// Live feed paints must not interrupt a person choosing a filter.
+function syncBoardChoices(selector, html, dataKey) {
+  const root = $(selector);
+  if (!root || root.dataset.choicesHtml === html) return;
+  const active = document.activeElement;
+  const focusedChoice = root.contains(active) ? active.dataset?.[dataKey] : null;
+  root.innerHTML = html;
+  root.dataset.choicesHtml = html;
+  if (focusedChoice != null) {
+    const choice = [...root.querySelectorAll('button')].find((button) => button.dataset[dataKey] === focusedChoice);
+    (choice || root.closest('details')?.querySelector('summary'))?.focus();
+  }
+}
+
 function renderBoard(loading = false) {
   const W = boardWeek();
   const meta = W?.meta || S.cal.find((c) => c.id === S.boardWeek) || {};
-  $('#boardTitle').textContent = meta.label ? `${meta.label} board` : 'The board';
+  $('#boardTitle').textContent = meta.label || 'The board';
   const idx = S.cal.findIndex((c) => c.id === (meta.id || S.boardWeek));
   const prev = S.cal[idx - 1], next = S.cal[idx + 1];
   $('#weekNav').innerHTML = `<button class="ibtn" type="button" data-week="${prev?.id || ''}" ${prev ? '' : 'disabled'} aria-label="Previous week">${ICON.back}</button><span class="lab">${esc(meta.detail || meta.label || '')}</span><button class="ibtn" type="button" data-week="${next?.id || ''}" ${next ? '' : 'disabled'} aria-label="Next week">${ICON.chev}</button>`;
@@ -386,12 +400,27 @@ function renderBoard(loading = false) {
 
   const games = [...W.games.values()].filter((g) => g.state !== 'off' || true);
   const counts = Object.fromEntries(FILTERS.map(([f]) => [f, games.filter((g) => passes(g, f)).length]));
-  $('#filters').innerHTML = FILTERS.filter(([f]) => counts[f] || f === 'all' || f === S.filter).map(([f, l]) => `<button class="pbtn" type="button" data-filter="${esc(f)}" aria-pressed="${S.filter === f}">${f === 'mine' ? ICON.starOn.replace('<svg', '<svg width="12" height="12"') : ''}${esc(l)}<span class="n">${counts[f]}</span></button>`).join('');
+  syncBoardChoices('#filters', FILTERS.filter(([f]) => counts[f] || f === 'all' || f === S.filter).map(([f, l]) => `<button class="pbtn" type="button" data-filter="${esc(f)}" aria-pressed="${S.filter === f}">${f === 'mine' ? ICON.starOn.replace('<svg', '<svg width="12" height="12"') : ''}${esc(l)}<span class="n">${counts[f]}</span></button>`).join(''), 'filter');
   const shown = games.filter((g) => passes(g, S.filter) && matchesQuery(g)).sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || (a.rot?.away || 0) - (b.rot?.away || 0));
+  const filterLabel = $('#filterLabel'), boardCount = $('#boardCount');
+  if (filterLabel) filterLabel.textContent = S.filter === 'all' ? 'All games' : (FILTERS.find(([f]) => f === S.filter)?.[1] || 'All games');
+  const resultCount = S.filter !== 'all' || S.query.trim() ? plural(shown.length, 'game') + ' shown' : '';
+  if (boardCount && boardCount.textContent !== resultCount) boardCount.textContent = resultCount;
   const live = games.filter(isLive).length;
   const feeds = S.books.filter((b) => b.feed).length;
-  $('#boardSub').innerHTML = `${plural(games.length, 'game')}${live ? ` · ${live} live` : ''} · ${feeds} books with live feeds${W.meta.tracked === false ? ' · archive' : ''}<span id="fresh"></span>`;
+  $('#boardSub').innerHTML = `${plural(games.length, 'game')}${live ? ` · ${live} live` : ''} · ${feeds} book feeds${W.meta.tracked === false ? ' · archive' : ''}<span id="fresh"></span>`;
   renderFreshness();
+
+  // Keep book controls current even when a filter has no results.
+  const availableBooks = visibleBooks();
+  if (S.phBook !== 'mkt' && !availableBooks.some((b) => b.key === S.phBook)) S.phBook = 'mkt';
+  const bookLabel = $('#bookLabel');
+  if (bookLabel) bookLabel.textContent = S.phBook === 'mkt' ? 'Market' : bookName(S.phBook);
+
+  // Every book, always — a book with nothing on this slate shows dashes rather than vanishing (owner: "all books everywhere").
+  const cols = availableBooks;
+  syncBoardChoices('#phBooks', [['mkt', 'Market'], ...cols.map((b) => [b.key, b.short])]
+    .map(([k, l]) => `<button class="pbtn" type="button" data-phbook="${esc(k)}" aria-pressed="${S.phBook === k}">${esc(l)}${k !== 'mkt' && S.books.find((b) => b.key === k)?.sharp ? '<span class="tag sharp">S</span>' : ''}</button>`).join(''), 'phbook');
 
   if (!shown.length) { $('#boardBody').innerHTML = `<div class="card empty" style="margin-top:24px"><b>No games match</b>${S.query ? `Nothing for “${esc(S.query)}”.` : 'Try another filter.'}</div>`; return; }
 
@@ -405,11 +434,6 @@ function renderBoard(loading = false) {
     grp.games.push(g);
   }
   const mkt = S.mkt;
-  // Every book, always — a book with nothing on this slate shows dashes rather than vanishing (owner: "all books everywhere").
-  const cols = visibleBooks();
-  if (S.phBook !== 'mkt' && !cols.some((b) => b.key === S.phBook)) S.phBook = 'mkt'; // that book has nothing on this slate
-  $('#phBooks').innerHTML = [['mkt', 'Market'], ...cols.map((b) => [b.key, b.short])]
-    .map(([k, l]) => `<button class="pbtn" type="button" data-phbook="${esc(k)}" aria-pressed="${S.phBook === k}">${esc(l)}${k !== 'mkt' && S.books.find((b) => b.key === k)?.sharp ? '<span class="tag sharp">S</span>' : ''}</button>`).join('');
   const colName = S.phBook === 'mkt' ? 'Market' : bookName(S.phBook);
   const head = `<div class="br-hd"><span>${esc(mkt === 't' ? 'Over / under' : mkt === 'ml' ? 'Moneyline' : mkt === 'h1' ? '1st-half spread' : 'Spread')}</span><span>${esc(colName)}</span><span>Best</span></div>`;
   const block = (games) => `<div class="card brd m">${head}${games.map((g) => boardRow(g, mkt)).join('')}</div>${boardTable(games, mkt, cols)}`;
@@ -526,7 +550,7 @@ function boardTable(games, mkt, books = visibleBooks()) {
       <td><div class="spl">${a != null ? `<div class="bar2" title="Tickets: ${esc(aw)} ${a}% / ${esc(hm)} ${100 - a}%"><i style="width:${Math.max(a, 18)}%">${a}%</i><i>${100 - a}%</i></div>` : ''}${am != null ? `<div class="bar2 m" style="margin-top:4px" title="Money: ${esc(aw)} ${am}% / ${esc(hm)} ${100 - am}%"><i style="width:${Math.max(am, 18)}%">${am}%</i><i>${100 - am}%</i></div>` : ''}${a == null ? '<span class="faint">—</span>' : ''}</div></td>
     </tr>`;
   }).join('');
-  return `<div class="bt-wrap"><table class="bt">${head}<tbody>${rows}</tbody></table></div>`;
+  return `<div class="bt-wrap" tabindex="0" role="region" aria-label="Sportsbook odds comparison. Scroll horizontally for all books."><table class="bt">${head}<tbody>${rows}</tbody></table></div>`;
 }
 
 // "Lines checked 12s ago": how fresh the board is, updated every tick without redrawing it.
