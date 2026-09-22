@@ -82,14 +82,61 @@ function integrityShort(l) {
   const status = integrityStatus(l), pts = integrityMetric(l, 'line_clv_points');
   return `${status.replace(/_/g, ' ')}${pts == null ? '' : ` · ${pts > 0 ? '+' : ''}${pts} pts line CLV`}`;
 }
+function provenanceLabel(value, fallback = 'Unavailable') {
+  const labels = {
+    FRESH: 'Fresh', AGING: 'Aging', STALE: 'Stale', SUSPENDED: 'Suspended', UNVERIFIED: 'Unverified',
+    CONFLICTED: 'Conflicting evidence', VERIFIED: 'Verified close', PROVISIONAL: 'Provisional close', UNAVAILABLE: 'Unavailable',
+    EVENT_NOT_STARTED: 'Awaiting kickoff', VERIFIED_ACTUAL_START: 'Verified kickoff', SCHEDULED_START: 'Scheduled kickoff',
+    ACTUAL_KICKOFF_UNAVAILABLE: 'Actual kickoff unverified', VERIFIED_ACTUAL_KICKOFF: 'Verified actual kickoff',
+    SOURCE_CONFLICT: 'Conflicting evidence', STALE_CLOSE: 'Closing quote too old', MISSING_CLOSE: 'Closing quote unavailable',
+    POST_KICK_CONTAMINATION: 'Only post-kickoff quotes available', MISSING_KICKOFF_TIMESTAMP: 'Kickoff time unavailable',
+    SUSPENDED_MARKET: 'Market suspended', REMOVED_MARKET: 'Market removed', MISSING_SOURCE_TIMESTAMP: 'Source time unavailable',
+    INVALID_INTEGRITY_JOURNAL: 'Evidence history could not be verified', TIMESTAMP_CONFLICT: 'Conflicting timestamps'
+  };
+  return labels[value] || fallback;
+}
+function provenanceBook(key) {
+  const known = { czr: 'Caesars', mgm: 'BetMGM', pin: 'Pinnacle', dk: 'DraftKings', fd: 'FanDuel', stn: 'Station', sp: 'South Point', wg: 'Westgate', circa: 'Circa', wynn: 'Wynn', cons: 'Market consensus' };
+  return known[key] || (key ? bookName(key) : 'Sportsbook unavailable');
+}
+function provenanceSource(key) {
+  return { vsin: 'VSiN', an: 'Action Network', an1: 'Action Network', pin: 'Pinnacle', espn: 'ESPN', manual: 'Manual entry' }[key] || key || 'Source unavailable';
+}
+function provenanceTime(value) {
+  const n = typeof value === 'number' ? value : Date.parse(value);
+  if (!Number.isFinite(n)) return '<span class="provenance-time">Time unavailable</span>';
+  const d = new Date(n), iso = d.toISOString();
+  const day = d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' });
+  return `<time class="provenance-time" datetime="${esc(iso)}" title="${esc(integrityUTC(value))}"><span>${esc(day)}</span><span>${iso.slice(11,16)} UTC</span></time>`;
+}
+function provenancePrice(q, market) {
+  if (!q) return '<span class="provenance-missing">Unavailable</span>';
+  const line = q.line_value ?? q.line, odds = q.american_odds ?? q.odds;
+  const price = Number.isFinite(odds) ? fmtOdds(odds) : 'Price unavailable';
+  if (market === 'ml') return `<span class="provenance-value">${esc(price)}</span>`;
+  const number = !Number.isFinite(line) ? 'Line unavailable' : market === 's' && line === 0 ? 'PK' : market === 's' && line > 0 ? '+' + line : String(line).replace('-', '−');
+  return `<span class="provenance-value">${esc(number)}</span><span class="provenance-price">${esc(price)}</span>`;
+}
+function provenanceQuote(q, market, phase, status, emptyLabel = 'Unavailable') {
+  const tone = ['FRESH','VERIFIED'].includes(status) ? 'good' : ['AGING','PROVISIONAL'].includes(status) ? 'caution' : ['STALE','SUSPENDED','CONFLICTED'].includes(status) ? 'warn' : 'neutral';
+  return `<div class="provenance-quote${phase === 'Current' ? ' provenance-current' : ''}"><span class="provenance-phase">${phase}</span><div class="provenance-amount">${q ? provenancePrice(q, market) : `<span class="provenance-missing">${esc(emptyLabel)}</span>`}</div>${q ? `<span class="provenance-book">${esc(provenanceBook(q.sportsbook))}</span>` : ''}${status ? `<span class="provenance-status provenance-${tone}" data-status="${esc(status)}">${esc(provenanceLabel(status))}</span>` : ''}</div>`;
+}
 function integrityGamePanel(g) {
-  const rows = [['s','home',`${g.home?.abbr || 'Home'} spread`],['t','over','Total'],['ml','home',`${g.home?.abbr || 'Home'} moneyline`]].map(([m,s,label]) => {
+  const audit = [], rows = [['s','home',`${g.home?.abbr || 'Home'} spread`],['t','over','Total · Over'],['ml','home',`${g.home?.abbr || 'Home'} moneyline`]].map(([m,s,label]) => {
     const r = canonicalResolution(g,m,s);
     if (!r) return '';
-    const q = r.current, f = q ? quoteFreshness(q,g).status : 'UNVERIFIED';
-    return `<div><b>${esc(label)}</b><div class="note">Open: ${esc(integrityQuoteText(r.open))}<br>${esc(integrityUTC(r.open?.source_observed_at))} · ${esc(r.open?.sportsbook || 'source unavailable')} / ${esc(r.open?.source || 'unverified')}<br>Current: ${esc(integrityQuoteText(q))} · ${esc(f)}<br>${esc(integrityUTC(q?.source_observed_at))} · ${esc(q?.sportsbook || 'source unavailable')} / ${esc(q?.source || 'unverified')}<br>Close: ${esc(integrityQuoteText(r.close))} · ${esc(r.close_status || 'UNAVAILABLE')}<br>${esc(r.kickoff_basis || 'kickoff unverified')} · ${esc(r.reason_code || '')}</div>${r.close ? `<div class="note">${esc(integrityUTC(r.close.source_observed_at))} · ${esc(bookName(r.close.sportsbook))} / ${esc(r.close.source)}</div>` : ''}</div>`;
+    const rawFresh = typeof r.current_freshness === 'string' ? r.current_freshness : r.current_freshness?.status;
+    // A suppressed current quote stays suppressed; retain its reason without promoting latest_snapshot.
+    const fresh = r.current ? quoteFreshness(r.current,g).status : ['STALE','SUSPENDED','CONFLICTED'].includes(rawFresh) ? rawFresh : 'UNVERIFIED';
+    const closeStatus = r.close_status || 'UNAVAILABLE';
+    const pending = !r.close && r.reason_code === 'EVENT_NOT_STARTED';
+    const reason = provenanceLabel(r.reason_code, 'Closing evidence unavailable');
+    const basis = provenanceLabel(r.kickoff_basis, 'Kickoff unverified');
+    const currentSource = r.current ? `<div class="provenance-current-meta"><span>Current quote via ${esc(provenanceSource(r.current.source))}</span>${provenanceTime(r.current.source_observed_at)}</div>` : '';
+    audit.push(`<div class="provenance-audit-market"><h4>${esc(label)}</h4><dl>${[['Opening',r.open],['Current',r.current],['Close',r.close]].map(([phase,q]) => `<div><dt>${phase}</dt><dd>${q ? `${esc(integrityUTC(q.source_observed_at))}<br>${esc(provenanceBook(q.sportsbook))} · ${esc(provenanceSource(q.source))}<br><span class="provenance-id">Snapshot: ${esc(q.snapshot_id || 'unavailable')}</span>` : 'No eligible quote'}</dd></div>`).join('')}<div><dt>Closing check</dt><dd>${esc(basis)} · ${esc(reason)}<br><code>${esc(closeStatus)} · ${esc(r.kickoff_basis || 'UNAVAILABLE')} · ${esc(r.reason_code || 'MISSING_CLOSE')}</code></dd></div></dl></div>`);
+    return `<article class="provenance-market"><h4>${esc(label)}</h4><div class="provenance-quotes">${provenanceQuote(r.open,m,'Opening',null)}${provenanceQuote(r.current,m,'Current',fresh)}${provenanceQuote(r.close,m,'Close',pending ? null : closeStatus,pending ? 'Awaiting kickoff' : provenanceLabel(closeStatus))}</div>${currentSource}${pending ? '' : `<p class="provenance-close-note">${esc(r.close ? closeStatus === 'VERIFIED' ? basis : basis + ' · ' + reason : reason)}</p>`}</article>`;
   }).filter(Boolean);
-  return `<div class="card integrity-panel"><h3>Market provenance</h3><p class="note">RETROSPECTIVE MARKET MOVE · Opening-to-current or opening-to-close movement is market history. Earned CLV requires a timestamped entry snapshot.</p>${rows.join('') || '<p class="note">UNVERIFIED · Historical lines have no canonical quote evidence.</p>'}</div>`;
+  return `<section class="card integrity-panel provenance-panel" aria-label="Market provenance"><header class="provenance-head"><div><p class="provenance-eyebrow">Quote history</p><h3>Market provenance</h3></div><span class="provenance-kind">Market history</span></header><p class="provenance-intro">Earliest recorded prices, current quotes and closing evidence. Earned CLV requires a timestamped entry snapshot.</p>${rows.length ? `<div class="provenance-markets">${rows.join('')}</div><details class="provenance-details"><summary>Source details<span aria-hidden="true">+</span></summary><div class="provenance-audit"><p>RETROSPECTIVE MARKET MOVE · Opening-to-current or opening-to-close movement describes market history. It is not earned CLV.</p>${audit.join('')}</div></details>` : '<div class="provenance-empty"><b>Quote history unavailable</b><p>These historical lines have no canonical quote evidence. Source, timing and closing status remain unverified.</p></div>'}</section>`;
 }
 const integritySignals = new Map();
 function recordDisplayedSignal(g, e, model = 'edge-existing-v1') {

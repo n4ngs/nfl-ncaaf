@@ -154,3 +154,56 @@ button[aria-busy="true"]{cursor:progress}
 
 /* The board wraps these native selects in one labelled control boundary. */
 #app #oddsView .odds-select-label select{border:0;box-shadow:none;background:transparent;padding:0 18px 0 0;min-height:44px}
+
+
+/* Market provenance: compare quote stages first, disclose the audit trail on demand. */
+.provenance-panel.integrity-panel{margin-top:18px;padding:0;overflow:hidden;background:var(--surface);border:1px solid var(--edge);color:var(--ink)}
+.provenance-panel .provenance-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:20px 20px 0}
+.provenance-panel .provenance-eyebrow{margin:0 0 5px;font-size:10px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.provenance-panel h3{margin:0;font-size:20px;font-weight:650;line-height:1.2;letter-spacing:-.03em}
+.provenance-kind{flex:none;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-size:10px;font-weight:600;color:var(--ink-2);white-space:nowrap}
+.provenance-panel .provenance-intro{margin:10px 20px 18px;color:var(--ink-2);font-size:12px;line-height:1.55;max-width:58ch}
+.provenance-panel > .provenance-markets{margin:0}
+.provenance-market{padding:16px 20px;border-top:1px solid var(--line)}
+.provenance-panel h4{margin:0 0 12px;font-size:13px;font-weight:650;letter-spacing:-.01em;line-height:1.4}
+.provenance-quotes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.provenance-quote{min-width:0;display:flex;flex-direction:column;align-items:flex-start;padding:10px 0;gap:5px}
+.provenance-current{padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--fill)}
+.provenance-phase{font-size:10px;font-weight:600;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase}
+.provenance-amount{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;min-height:28px;margin:2px 0;font-variant-numeric:tabular-nums;line-height:1.15}
+.provenance-value{font-size:24px;font-weight:650;letter-spacing:-.045em;overflow-wrap:anywhere}
+.provenance-price{font-size:13px;color:var(--ink-2);font-weight:550}
+.provenance-missing{font-size:14px;font-weight:550;line-height:1.4;color:var(--ink-3);overflow-wrap:anywhere}
+.provenance-status{display:inline-flex;border:1px solid var(--line);padding:3px 5px;border-radius:5px;font-size:10px;font-weight:600;line-height:1.2;max-width:100%;overflow-wrap:anywhere}
+.provenance-good{color:var(--chart-green);border-color:color-mix(in srgb,var(--chart-green) 30%,transparent)}
+.provenance-caution{color:var(--chart-amber);border-color:color-mix(in srgb,var(--chart-amber) 30%,transparent)}
+.provenance-warn{color:var(--ink-2);border-style:dashed}
+.provenance-neutral{color:var(--ink-3)}
+.provenance-book{font-size:11px;font-weight:600;color:var(--ink-2);line-height:1.4;overflow-wrap:anywhere}
+.provenance-current-meta{display:flex;align-items:baseline;flex-wrap:wrap;gap:3px 5px;margin-top:10px;font-size:11px;line-height:1.5;color:var(--ink-2);overflow-wrap:anywhere}
+.provenance-current-meta > span:first-child{color:var(--ink-3);margin-right:3px}.provenance-current-meta b{font-weight:600;color:var(--ink)}
+.provenance-current-meta time{margin-left:auto}
+.provenance-time{display:flex;flex-wrap:wrap;gap:1px 5px;font-size:10px;line-height:1.4;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.provenance-time span{white-space:nowrap}
+.provenance-panel .provenance-close-note{margin:10px 0 0;padding-left:8px;border-left:2px solid var(--line);font-size:11px;line-height:1.5;color:var(--ink-3)}
+.provenance-details{border-top:1px solid var(--line);background:var(--surface)}
+.provenance-details > summary{display:flex;justify-content:space-between;gap:12px;align-items:center;list-style:none;cursor:pointer;min-height:48px;padding:13px 20px;color:var(--ink-2);font-size:12px;font-weight:600}
+.provenance-details > summary::-webkit-details-marker{display:none}
+.provenance-details > summary > span{font-size:20px;font-weight:400;line-height:1;transition:transform .15s ease}
+.provenance-details[open] > summary > span{transform:rotate(45deg)}
+.provenance-details > summary:focus-visible{outline:2px solid var(--focus);outline-offset:-4px;border-radius:6px}
+.provenance-audit{padding:0 20px 18px;color:var(--ink-2);font-size:11px;line-height:1.6;overflow-wrap:anywhere}
+.provenance-audit > p{margin:0 0 16px}
+.provenance-audit-market + .provenance-audit-market{border-top:1px solid var(--line);padding-top:16px;margin-top:16px}
+.provenance-audit-market h4{color:var(--ink);margin-bottom:8px}
+.provenance-audit dl{margin:0}.provenance-audit dl > div{display:grid;grid-template-columns:74px minmax(0,1fr);gap:12px;margin-top:7px}
+.provenance-audit dt{color:var(--ink-3)}.provenance-audit dd{margin:0}.provenance-audit code,.provenance-id{font:10px/1.6 var(--mono,monospace);color:var(--ink-3);overflow-wrap:anywhere}
+.provenance-empty{padding:0 20px 20px;font-size:12px;line-height:1.6;color:var(--ink-2)}.provenance-empty b{color:var(--ink)}.provenance-empty p{margin:6px 0 0}
+@media(max-width:560px){
+ .provenance-panel .provenance-head{padding:16px 14px 0;gap:8px;align-items:flex-start;flex-wrap:wrap}
+ .provenance-panel h3{font-size:19px}.provenance-panel .provenance-intro{margin:10px 14px 16px;font-size:11px}
+ .provenance-market{padding:14px}.provenance-quotes{gap:8px}.provenance-current{padding:9px 7px}
+ .provenance-amount{flex-direction:column;gap:4px;align-items:flex-start;min-height:28px}.provenance-value{font-size:22px}
+ .provenance-status{font-size:9px}.provenance-current-meta{font-size:10px}.provenance-current-meta time{margin-left:0}
+ .provenance-details > summary{padding:13px 14px}.provenance-audit{padding:0 14px 16px}.provenance-empty{padding:0 14px 16px}
+}

@@ -59,7 +59,16 @@ function paintGame() {
   if (S.sheet?.kind !== 'game') return;
   lastPaint = Date.now();
   const body = $('#dlgBody');
+  const evidence = body.querySelector('.provenance-details');
+  const expanded = !!evidence?.open;
+  const summaryFocused = !!evidence && evidence.querySelector('summary') === document.activeElement;
   body.innerHTML = gameSheet();
+  // Live repainting must not collapse evidence or steal keyboard focus from its disclosure.
+  const nextEvidence = body.querySelector('.provenance-details');
+  if (nextEvidence) {
+    nextEvidence.open = expanded;
+    if (summaryFocused) nextEvidence.querySelector('summary')?.focus({ preventScroll: true });
+  }
   wireChart();
 }
 
