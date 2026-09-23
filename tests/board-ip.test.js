@@ -77,7 +77,13 @@ test('Admin page has valid inline JavaScript and truthful current/historical add
   const x = setup(t), html = x.get(ADMIN).body;
   const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   assert.doesNotThrow(() => new vm.Script(script));
-  assert.match(html, /This connection/); assert.match(html, /Observed IP \(latest\)/);
+  assert.match(html, /aria-label="Your observed connection"/);
+  assert.match(script, /fx\('Observed IP',d\.ipLast\)/);
   assert.match(html, /Source not recorded/); assert.match(html, /Local connection/);
-  assert.match(html, /Private Relay/); assert.match(html, /Browser time zone/); assert.doesNotMatch(script.match(/function row\(d\)\{[\s\S]*?\/\/ --/)[0], /d\.ctx/); assert.match(html, /IP hash history|Observed IP history/);
+  assert.match(html, /Private Relay/); assert.match(html, /Browser time zone/);
+  assert.match(html, /Browser time zone is not a city/);
+  const rowStart = script.indexOf('function row(d){'), rowEnd = script.indexOf('\nfunction ', rowStart + 1);
+  assert.ok(rowStart >= 0 && rowEnd > rowStart, 'device summary renderer is present');
+  assert.doesNotMatch(script.slice(rowStart, rowEnd), /d\.ctx/, 'a summary must not present browser locale as IP location');
+  assert.match(html, /Observed IP history/);
 });

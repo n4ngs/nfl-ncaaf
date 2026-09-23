@@ -203,7 +203,7 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 // Read once at boot; an ETag lets phones revalidate cheaply instead of holding a stale copy.
 const fs = require('node:fs');
 const DESIGN = {};
-for (const f of ['broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js', 'support.css', 'support.js']) {
+for (const f of ['broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js', 'support.css', 'support.js', 'activity.js']) {
   const body = fs.readFileSync(path.join(__dirname, 'design', f));
   DESIGN[f] = { body, etag: `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"` };
 }
@@ -291,7 +291,7 @@ const server = http.createServer((req, res) => {
   // terminal-owned endpoints -------------------------------------------------
   if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify({ ok: true, app: 'nfl.ncaaf', oddsFeed: owlsFeed.status(), feeds: { sharp: sharpFeed.status(), owls: owlsFeed.status() } })); }
   if (pathname === '/icon.svg' || pathname === '/favicon.ico') { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' }); return res.end(LOGO); }
-  const dm = /^\/_board\/((?:broadcast|portfolio|feeds|handoff|support)\.(?:css|js)|portfolio-view\.js|refined\.css)$/.exec(pathname);
+  const dm = /^\/_board\/((?:broadcast|portfolio|feeds|handoff|support)\.(?:css|js)|(?:portfolio-view|activity)\.js|refined\.css)$/.exec(pathname);
   if (dm) return serveDesign(req, res, dm[1], dm[1].endsWith('.css') ? 'css' : 'js');
   if (pathname === '/manifest.webmanifest') { res.writeHead(200, { 'content-type': 'application/manifest+json; charset=utf-8' }); return res.end(MANIFEST); }
 
@@ -435,17 +435,21 @@ const server = http.createServer((req, res) => {
     if (body) pr.end(body); else req.pipe(pr);
   };
 
-  // The board's own screen/tap log (js/tel.js) passes through here: read it for the Admin Center, then hand
-  // it on unchanged. MLB's engine has no endpoint for it, so the terminal answers that one itself.
+  // First-party activity from the shared collector is captured for the owner-only Admin Center.
+  // Football engines retain their own bounded telemetry; MLB and NHL are answered here.
   if (enginePath === '/api/telemetry' && req.method === 'POST' && r) {
+    if (!isSameOrigin(req)) { res.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Request origin not allowed"}'); }
     const parts = []; let n = 0;
     req.on('data', (c) => { n += c.length; if (n <= 65536) parts.push(c); });
     req.on('end', () => {
+      if (n > 65536) { res.writeHead(413, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Telemetry batch too large"}'); }
       const body = Buffer.concat(parts);
-      Board.client(who, r, sp, body.toString('utf8'));
-      if (sp === 'mlb') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{"ok":true}'); }
-      headers['content-length'] = String(body.length);
-      send(body);
+      const admitted = Board.client(who, r, sp, body.toString('utf8'));
+      if (sp === 'mlb' || sp === 'nhl') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"ok":true}'); }
+      const sanitized = Buffer.from(JSON.stringify({ events: Array.isArray(admitted) ? admitted : [] }));
+      headers['content-type'] = 'application/json';
+      headers['content-length'] = String(sanitized.length);
+      send(sanitized);
     });
     return;
   }

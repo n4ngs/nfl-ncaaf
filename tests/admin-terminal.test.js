@@ -32,7 +32,7 @@ function enginePage(sport) {
 
 function terminal(env = {}) {
   let handler, boardConfig;
-  const forwarded = [], boardCalls = [], entrances = [];
+  const forwarded = [], forwardedBodies = [], boardCalls = [], entrances = [];
   const board = {
     identify: () => ({ dev: '0123456789abcdef01234567', ip: '198.51.100.10' }),
     gate: () => null,
@@ -56,9 +56,11 @@ function terminal(env = {}) {
     },
     request(options, callback) {
       forwarded.push(options);
+      const outgoing = [];
       return new Writable({
-        write(_chunk, _encoding, done) { done(); },
+        write(chunk, _encoding, done) { outgoing.push(Buffer.from(chunk)); done(); },
         final(done) {
+          forwardedBodies.push(Buffer.concat(outgoing).toString('utf8'));
           const response = new PassThrough();
           const isPage = /^\/(?:index\.html)?(?:\?|$)/.test(options.path);
           response.statusCode = 200;
@@ -117,7 +119,7 @@ function terminal(env = {}) {
     handler(req, res); req.end(body); await done;
     return { status: res.statusCode, headers: responseHeaders, body: Buffer.concat(chunks).toString('utf8') };
   }
-  return { request, forwarded, boardCalls, entrances, board };
+  return { request, forwarded, forwardedBodies, boardCalls, entrances, board };
 }
 
 function noOwnerCookies(response) {
@@ -329,5 +331,67 @@ test('missing private-path configuration disables the dashboard and its public-p
     assert.equal(page.status, 200);
     assert.ok(!page.body.includes(ADMIN_PATH));
     assert.doesNotMatch(page.body, /<a class="xadm"/);
+  }
+});
+
+
+test('all sport telemetry endpoints reject cross-origin and oversized batches before capture; NHL is terminal-owned', async () => {
+  const app = terminal(), calls = []; app.board.client = (...args) => calls.push(args);
+  for (const sport of ['nfl','ncaaf','mlb','nhl']) {
+    const url = `/${sport}/api/telemetry`, body = JSON.stringify({events:[{kind:'page_view',route:'board'}]});
+    const before = calls.length, forwarded = app.forwarded.length;
+    for (const headers of [{}, {origin:'https://evil.example'}, {origin:ORIGIN,'sec-fetch-site':'cross-site'}]) {
+      assert.equal((await app.request(url,{method:'POST',cookie:guestCookie,headers,body})).status,403);
+    }
+    assert.equal(calls.length,before);assert.equal(app.forwarded.length,forwarded);
+    assert.equal((await app.request(url,{method:'POST',cookie:guestCookie,headers:{origin:ORIGIN},body:'x'.repeat(65537)})).status,413);
+    assert.equal(calls.length,before);
+    assert.equal((await app.request(url,{method:'POST',cookie:guestCookie,headers:{origin:ORIGIN},body})).status,200);
+    assert.equal(calls.length,before+1);assert.equal(calls.at(-1)[2],sport);
+    assert.equal(app.forwarded.length,forwarded+(sport==='nfl'||sport==='ncaaf'?1:0));
+  }
+  const asset=await app.request('/_board/activity.js');assert.equal(asset.status,200);assert.match(asset.body,/activityVersion/);
+  assert.equal((await app.request('/_board/activity.css')).status,404);
+});
+
+
+function legacyTelemetry(sport) {
+  const persisted = [], filename = path.join(root,sport,'lib','telemetry.js'), module = {exports:{}};
+  const fakeFs = { mkdirSync(){},existsSync(){return false},readdirSync(){return []},
+    readFileSync(){throw Error('No fixture file')},createWriteStream(){return {write(line){persisted.push(JSON.parse(line))},on(){},end(){}}} };
+  vm.runInNewContext(fs.readFileSync(filename,'utf8'),{module,exports:module.exports,process:{env:{}},setInterval:()=>({unref(){}}),
+    require(name){if(name==='fs')return fakeFs;if(name==='./util')return {DATA:'/test-data'};return requireFromTerminal(name);}}, {filename});
+  return {tel:module.exports,persisted};
+}
+
+test('hostile telemetry cannot persist through either legacy football ingestion path', async t => {
+  const os = require('node:os'), createBoard = require('../board');
+  for (const sport of ['nfl','ncaaf']) {
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'forwarded-telemetry-'));
+    const capture=createBoard({dataDir:dir,sports:{[sport]:{dir:sport,ck:sport,label:sport}},adminPath:ADMIN_PATH});
+    t.after(()=>{capture.close();fs.rmSync(dir,{recursive:true,force:true})});
+    const app=terminal();app.board.client=(...args)=>capture.client(...args);
+    const secret='SENSITIVE-should-never-persist',vid='v_valid123456';
+    const body=JSON.stringify({events:[
+      {kind:'page_view',route:'board',vid,data:{title:secret,password:secret}},
+      {kind:'visit_open',route:'board',vid,data:{ref:'https://example.invalid/?'+secret,ctx:{tz:'America/Los_Angeles',sw:1200,model:secret}}},
+      {kind:'click',route:'board',vid,data:{label:'OPEN_GAME',href:secret,id:secret}},
+      {kind:'app_action',route:'board',vid,data:{action:'APP_FOREGROUND',form:secret}},
+      {kind:'client_error',route:'board',vid,data:{msg:secret,stack:secret,url:secret}},
+      {kind:'page_view',route:ADMIN_PATH+'?'+secret,vid:secret},
+      {kind:'perf',route:'board',data:{raw:secret}}
+    ]});
+    assert.equal((await app.request('/'+sport+'/api/telemetry',{method:'POST',cookie:guestCookie,headers:{origin:ORIGIN},body})).status,200);
+    const wire=app.forwardedBodies.at(-1),events=JSON.parse(wire).events;assert.equal(events.length,5);
+    assert.doesNotMatch(wire,new RegExp(secret));assert.doesNotMatch(wire,new RegExp(ADMIN_PATH));
+    assert.equal(app.forwarded.at(-1).headers['content-length'],String(Buffer.byteLength(wire)));
+    const legacy=legacyTelemetry(sport);assert.equal(legacy.tel.ingest(events,{uid:'fixture-guest',role:'guest',ip:'127.0.0.1',uaStr:'Mozilla/5.0'}),5);
+    assert.ok(legacy.persisted.some(e=>e.kind==='page_view'));assert.ok(legacy.persisted.some(e=>e.kind==='client_error'));
+    assert.doesNotMatch(JSON.stringify(legacy.persisted),new RegExp(secret));
+    assert.equal(legacy.persisted.find(e=>e.kind==='visit_open').data.ctx.tz,'America/Los_Angeles');
+    // The second sink must not bypass the central per-device capture budget.
+    const flood=JSON.stringify({events:Array.from({length:50},()=>({kind:'page_view',route:'board',vid}))});
+    for(let i=0;i<4;i++)await app.request('/'+sport+'/api/telemetry',{method:'POST',cookie:guestCookie,headers:{origin:ORIGIN},body:flood});
+    assert.deepEqual(JSON.parse(app.forwardedBodies.at(-1)),{events:[]});
   }
 });

@@ -26,11 +26,11 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { resolveClientIp } = require('./shared/client-ip');
 const { isSameOrigin } = require('./shared/admin-access');
+const Activity = require('./shared/board-activity');
 
 const RING_MAX = 80000;            // events held in memory for the views; the files keep everything
 const WARM_DAYS = 21;              // how far back a boot re-reads into memory
 const RETAIN_DAYS = 120;           // day-files older than this are removed
-const SESSION_GAP = 30 * 60e3;     // a quiet gap this long starts a new session
 const LIVE_MS = 5 * 60e3;          // "here now" if anything happened this recently or a live feed is open
 const DEV_RE = /^[a-f0-9]{24}$/;
 const ENGINE_UID_RE = /^[a-f0-9]{32}$/;
@@ -57,6 +57,9 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   const ring = [];                   // newest last
   const byDev = new Map();           // dev -> events (same objects as ring), oldest first
   const engineToDev = new Map();     // `${sport}:${engineUid}` -> dev
+  const activityCache = new Map();
+  const telemetryBudget = new Map();
+  let globalTelemetry = { start: 0, n: 0 };
   const streams = new Map();         // dev -> open live-feed connections
   for (const [id, d] of Object.entries(state.devices)) for (const sp of SPORT_KEYS) for (const u of d.links?.[sp] || []) engineToDev.set(`${sp}:${u}`, id);
 
@@ -69,15 +72,17 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     try { stream.write(JSON.stringify(ev) + '\n'); } catch { /* the board never breaks over its own log */ }
   }
   function keep(ev) {
+    activityCache.delete(ev.dev);
     ring.push(ev);
     let l = byDev.get(ev.dev); if (!l) byDev.set(ev.dev, (l = [])); l.push(ev);
     while (ring.length > RING_MAX) {
       const old = ring.shift();
+      activityCache.delete(old.dev);
       const ol = byDev.get(old.dev);
       if (ol && ol[0] === old) ol.shift(); else if (ol) { const i = ol.indexOf(old); if (i >= 0) ol.splice(i, 1); }
     }
   }
-  function record(ev) { if (!ev.dev) return; ev.id = crypto.randomBytes(5).toString('hex'); out(ev); keep(ev); }
+  function record(ev) { if (!ev.dev) return; ev.receivedAt = Number.isFinite(ev.receivedAt) ? ev.receivedAt : Date.now(); ev.id = crypto.randomBytes(5).toString('hex'); out(ev); keep(ev); }
 
   // Boot: read recent day-files back into memory, skipping anything the owner cleared.
   (function warm() {
@@ -171,7 +176,8 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
 
   // ------------------------------------------------------------------ capture (called by the terminal)
   function request(who, role, sport, method, p, status, ms) {
-    if (STATIC_RE.test(p) || p === '/api/telemetry' || p === '/api/health') return;
+    p = typeof p === 'string' ? p.split(/[?#]/)[0] : '';
+    if (!p || (adminPath && p.startsWith(adminPath)) || STATIC_RE.test(p) || p === '/api/telemetry' || p === '/api/health') return;
     if (!touch(who, role, sport)) return;
     record({ t: Date.now(), dev: who.dev, role: role || 'none', ip: who.ip, sp: sport, k: 'req', m: method, p: p.slice(0, 160), s: status, ms });
   }
@@ -179,33 +185,35 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     if (!touch(who, role, null)) return;
     record({ t: Date.now(), dev: who.dev, role: role || 'none', ip: who.ip, sp: '', k: 'enter', how });
   }
-  const clip = (v, n = 120) => String(v == null ? '' : v).slice(0, n);
   function client(who, role, sport, body) {
+    if (!Object.hasOwn(sports, sport) || typeof body !== 'string' || Buffer.byteLength(body) > 65536) return;
     let batch;
     try { batch = JSON.parse(body).events; } catch { return; }
     if (!Array.isArray(batch)) return;
+    const now = Date.now();
+    let budget = telemetryBudget.get(who.dev);
+    if (!budget || now - budget.start >= 60000) {
+      budget = { start: now, n: 0 }; telemetryBudget.set(who.dev, budget);
+      if (telemetryBudget.size > 10000) telemetryBudget.delete(telemetryBudget.keys().next().value);
+    }
+    if (now - globalTelemetry.start >= 60000) globalTelemetry = { start: now, n: 0 };
+    const allowance = Math.max(0, Math.min(50, 120 - budget.n, 6000 - globalTelemetry.n));
+    if (!allowance) return;
+    const items = batch.slice(0, allowance);
+    const cost = Math.max(1, items.length); // Empty check-ins must consume the same bounded request budget.
+    budget.n += cost; globalTelemetry.n += cost;
     const d = touch(who, role, sport);
     if (!d) return;
-    const now = Date.now();
-    for (const it of batch.slice(0, 50)) {
-      if (!it || typeof it.kind !== 'string') continue;
-      const t = Number.isFinite(it.t) && Math.abs(it.t - now) < 10 * 60e3 ? it.t : now;
-      const data = it.data && typeof it.data === 'object' ? it.data : {};
-      const base = { t, dev: who.dev, role: role || 'none', ip: who.ip, sp: sport, r: clip(it.route, 40) };
-      if (it.kind === 'page_view') record({ ...base, k: 'view' });
-      else if (it.kind === 'click') record({ ...base, k: 'click', l: clip(data.label, 80), el: clip(data.el, 12), href: clip(data.href, 80) });
-      else if (it.kind === 'app_action') record({ ...base, k: 'act', a: clip(data.action, 40) });
-      else if (it.kind === 'client_error') record({ ...base, k: 'err', msg: clip(data.msg, 200) });
-      else if (it.kind === 'visit_open') {
-        const c = data.ctx && typeof data.ctx === 'object' ? data.ctx : {};
-        const ctx = {};
-        for (const k of ['vw', 'vh', 'sw', 'sh', 'dpr', 'tzo', 'touch', 'rtt', 'down']) if (Number.isFinite(c[k])) ctx[k] = c[k];
-        for (const k of ['tz', 'locale', 'langs', 'net']) if (c[k]) ctx[k] = clip(c[k], 60);
-        ctx.standalone = !!c.standalone; ctx.saver = !!c.saver;
-        d.ctx = ctx; dirty = true;
-        record({ ...base, k: 'visit', ctx, ref: clip(data.ref, 60) });
-      }
+    const admitted = [];
+    for (const it of items) {
+      const event = Activity.sanitizeEvent(it, now);
+      if (!event) continue;
+      if (event.k === 'visit') { d.ctx = event.ctx; dirty = true; }
+      // A page report is untrusted. Only identity, role, sport and receipt time come from the server.
+      record({ ...event, dev: who.dev, role: role || 'none', ip: who.ip, sp: sport });
+      admitted.push(Activity.legacyEvent(event));
     }
+    return admitted;
   }
   const streamOpen = (dev) => streams.set(dev, (streams.get(dev) || 0) + 1);
   const streamClose = (dev) => { const n = (streams.get(dev) || 1) - 1; if (n > 0) streams.set(dev, n); else streams.delete(dev); };
@@ -240,13 +248,13 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
 
   const TAB = { live: 'Live', games: 'Games', bets: 'My bets', mine: 'Mine', following: 'Mine', tools: 'Tools', admin: 'Admin Center',
     security: 'Security Center', homers: 'Homers', edges: 'Edges', week: 'the slate', odds: 'Odds' };
-  const tabName = (r) => TAB[r] || (r ? r : 'the board');
+  const tabName = (r) => Object.hasOwn(TAB, r) ? TAB[r] : (r ? r : 'the board');
   function describeReq(m, p) {
     const is = (x) => p === x;
-    if (is('/') || is('/index.html')) return ['Opened the board', 1];
+    if (is('/') || is('/index.html')) return ['Loaded an app page', 1];
     if (is('/api/stream')) return ['Connected to live updates', 2];
-    if (is('/api/betmgm/go')) return ['Tapped a BetMGM price (to a filled-in slip)', 1];
-    if (is('/api/bets')) return m === 'POST' ? ['Placed a bet', 1] : ['Loaded their bets', 2];
+    if (is('/api/betmgm/go')) return ['Requested BetMGM handoff', 1];
+    if (is('/api/bets')) return m === 'POST' ? ['Logged a bet', 1] : ['Loaded their bets', 2];
     if (is('/api/bets.csv')) return ['Downloaded their bets (CSV)', 1];
     if (/^\/api\/bets\//.test(p)) return m === 'DELETE' ? ['Deleted a bet', 1] : ['Edited a bet', 1];
     if (/^\/api\/game\//.test(p)) return [`Opened a game (${p.split('/')[3] || ''})`, 1];
@@ -279,31 +287,27 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     if (e.k === 'view') return [`Viewed ${tabName(e.r)}`, 1];
     if (e.k === 'click') {
       const l = e.l || '';
+      if (Object.hasOwn(Activity.CLICK_LABELS, l)) return [Activity.CLICK_LABELS[l], 1];
       if (l.startsWith('tab:')) return [`Tapped the “${tabName(l.slice(4))}” tab`, 1];
       if (l === 'outbound') return [`Tapped a link out to ${e.href || 'another site'}`, 1];
       return [`Tapped “${l}”${e.r ? ` on ${tabName(e.r)}` : ''}`, 1];
     }
     if (e.k === 'act') return [ACT[e.a] || e.a, e.a === 'APP_BACKGROUND' || e.a === 'APP_FOREGROUND' || e.a === 'PAGE_EXIT' ? 1 : 2];
-    if (e.k === 'err') return [`App error: ${e.msg}`, 2];
+    if (e.k === 'err') return [typeof e.msg === 'string' && e.msg.trim() ? `App error: ${e.msg}` : 'Browser reported an application error', 2];
     if (e.k === 'visit') { const c = e.ctx || {}; return [`Opened on a ${c.sw || '?'}×${c.sh || '?'} screen${c.tz ? `, time zone ${c.tz}` : ''}${c.standalone ? ', from the home-screen icon' : ''}${e.ref ? `, from ${e.ref}` : ''}`, 1]; }
     if (e.k === 'enter') return [ENTER[e.how] || e.how, 1];
     return [e.k, 2];
   }
   const view = (e) => { const [text, lvl] = describe(e); return { ...e, text, lvl }; };
 
-  function sessionsOf(events) {
-    const out = [];
-    let cur = null;
-    for (const e of events) {
-      if (!cur || e.t - cur.end > SESSION_GAP) { cur = { start: e.t, end: e.t, n: 0, views: 0, clicks: 0, bets: 0, sports: new Set(), ips: new Set() }; out.push(cur); }
-      cur.end = Math.max(cur.end, e.t); cur.n++;
-      if (e.k === 'view') cur.views++;
-      if (e.k === 'click') cur.clicks++;
-      if (e.k === 'req' && e.m === 'POST' && e.p === '/api/bets') cur.bets++;
-      if (e.sp) cur.sports.add(e.sp);
-      if (e.ip) cur.ips.add(e.ip);
-    }
-    return out.map((s) => ({ ...s, dur: s.end - s.start, sports: [...s.sports], ips: [...s.ips] })).reverse();
+  function activityOf(id, events) {
+    const cached = activityCache.get(id), first = events[0], last = events[events.length - 1];
+    if (cached && cached.n === events.length && cached.first === first && cached.last === last) return cached;
+    const data = Activity.sessionData(events, id);
+    const history = Activity.browsingHistory(events, id, 500, data);
+    const value = { n: events.length, first, last, data, history };
+    activityCache.set(id, value);
+    return value;
   }
 
   // Engine files: bets and the names guests gave themselves. Cached by mtime; the engines write atomically.
@@ -359,7 +363,10 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     // "Here now" means a board is actually open (live feed connected) or they did something real in the last
     // few minutes while signed in. Seeing the sign-in screen is not being here.
     for (let i = ev.length - 1; i >= 0; i--) { const e = ev[i]; if (e.role !== 'none' && (e.k === 'view' || e.k === 'click' || (e.k === 'req' && e.p === '/'))) { lastReal = e.t; break; } }
-    const ss = sessionsOf(ev);
+    const activity = activityOf(id, ev), ss = activity.data.sessions;
+    const lastView = activity.history[0] || null;
+    const interaction = [...activity.data.ordered].reverse().find(e => e.k === 'view' || e.k === 'click' || (e.k === 'act' && e.a === 'APP_FOREGROUND'));
+    const lastInteractionAt = interaction ? Activity.eventTime(interaction) : null;
     const bets = betsOf(d);
     const done = bets.filter((b) => b.status === 'won' || b.status === 'lost' || b.status === 'push');
     const name = engineName(d);
@@ -372,7 +379,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
       feedOnly: !views && !clicks && ev.some((e) => e.k === 'req' && e.p === '/api/stream'),
       blocked: !!state.blocked[id], signoutPending: !!state.signout[id],
       sessions: ss.length, sessionsToday: ss.filter((s) => s.end >= today.getTime()).length, timeOn: ss.reduce((a, s) => a + s.dur, 0),
-      views, clicks, tapsToday: today_n, events: ev.length,
+      views, pageViews: views, clicks, tapsToday: today_n, events: ev.length, lastView, lastInteractionAt,
       sports: Object.entries(d.sports || {}).sort((a, b) => b[1] - a[1]).map(([k]) => k), lastDo,
       bets: { n: bets.length, open: bets.filter((b) => b.status === 'open').length, won: done.filter((b) => b.status === 'won').length,
         lost: done.filter((b) => b.status === 'lost').length, net: done.reduce((a, b) => a + (b.net || 0), 0), staked: bets.reduce((a, b) => a + (b.stake || 0), 0) },
@@ -382,21 +389,30 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   function boardJSON() {
     const devices = Object.keys(state.devices).map(summary).sort((a, b) => b.last - a.last);
     const roleMap = Object.fromEntries(devices.map((d) => [d.id, d.role]));
-    const feed = [];
-    for (let i = ring.length - 1; i >= 0 && feed.length < 250; i--) { const v = view(ring[i]); if (v.lvl === 1 && state.devices[v.dev]) feed.push({ ...v, drole: roleMap[v.dev] }); }
-    return { now: Date.now(), owner: ownerName, devices, feed };
+    const feed = [], activity = [];
+    for (let i = ring.length - 1; i >= 0 && (feed.length < 250 || activity.length < 500); i--) {
+      const e = ring[i];
+      if (!state.devices[e.dev]) continue;
+      const v = { ...view(e), drole: roleMap[e.dev] };
+      if (activity.length < 500) activity.push(v);
+      if (v.lvl === 1 && feed.length < 250) feed.push(v);
+    }
+    return { now: Date.now(), owner: ownerName, devices, feed, activity, activityLimit: 500 };
   }
   function deviceJSON(id) {
     const d = state.devices[id];
     if (!d) return null;
     const ev = byDev.get(id) || [];
+    const activity = activityOf(id, ev);
     return {
       ...summary(id),
       links: d.links || {},
       uaHistory: Object.entries(d.uas || {}).map(([ua, h]) => ({ ua, ...h })).sort((a, b) => b.last - a.last),
       ipHistory: Object.entries(d.ips || {}).map(([ip, h]) => ({ ip, ...h, lookup: canLookup(ip) })).sort((a, b) => b.last - a.last),
-      sessionList: sessionsOf(ev).slice(0, 200),
-      timeline: ev.slice(-3000).map(view).reverse(),
+      sessionList: activity.data.sessions.slice(0, 200),
+      browsingHistory: activity.history,
+      activityCoverage: { scope: 'in-app-only', identity: 'browser-cookie', deviceDetails: 'browser-reported', crossSiteHistory: false, retentionDays: RETAIN_DAYS, memoryWarmDays: WARM_DAYS, maxMemoryEvents: RING_MAX, historyLimit: 500, availableSince: ev.length ? Activity.eventTime(activity.data.ordered[0]) : null, hasLegacyEvents: ev.some(e => !Number.isFinite(e.receivedAt)), durationKind: 'observed_span' },
+      timeline: activity.data.ordered.slice(-3000).map(e => ({ ...view(e), sessionId: activity.data.membership.get(e), visitId: Activity.visitId(e.visitId || e.vid) })).reverse(),
       betList: betsOf(d),
     };
   }
@@ -480,7 +496,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     return rows.sort((a, b) => a.t - b.t);
   }
   const CSV_COLS = ['time_iso', 'device', 'who', 'role', 'sport', 'kind', 'what', 'ip', 'os', 'browser', 'method', 'path', 'status', 'ms', 'label', 'route', 'user_agent'];
-  const csvCell = (v) => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const csvCell = (v) => { let s = String(v == null ? '' : v); if (typeof v === 'string' && /^[\s\u0000-\u001f]*[=+@-]/.test(s)) s = "'" + s; return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   function exportCSV(dev) {
     const names = {};
     const lines = [CSV_COLS.join(',')];
@@ -544,6 +560,8 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     delete state.devices[id];
     const gone = new Set(byDev.get(id) || []);
     byDev.delete(id);
+    activityCache.delete(id);
+    telemetryBudget.delete(id);
     if (gone.size) for (let i = ring.length - 1; i >= 0; i--) if (gone.has(ring[i])) ring.splice(i, 1);
     dirty = true; save();
     return true;

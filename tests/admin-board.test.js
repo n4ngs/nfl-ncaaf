@@ -130,3 +130,30 @@ test('Rendered private admin page uses only the configured base and suppresses e
   assert.match(html, /rel="noopener noreferrer"/);
   assert.doesNotThrow(() => new vm.Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]));
 });
+
+
+test('owner, brand and sport display labels cannot escape generated HTML or its inline script', () => {
+  const render = require('../board-page');
+  const ownerName = '</script><script>globalThis.labelAttack=true</script><!--\u2028\u2029__SCRIPT__';
+  const brand = '</title><img src=x onerror="globalThis.brandAttack=true">&\"\'';
+  const sportKey = '\"><svg onload="globalThis.keyAttack=true">';
+  const sportLabel = '</option></select><img src=x onerror="globalThis.sportAttack=true"></script>';
+  const html = render({ brand, ownerName, sports: [[sportKey, sportLabel]], logo: '', adminPath: ADMIN });
+  // A browser must encounter exactly the real script, with no injected executable HTML elements.
+  assert.equal((html.match(/<script(?:\s|>)/gi) || []).length, 1);
+  assert.equal((html.match(/<\/script\s*>/gi) || []).length, 1);
+  assert.doesNotMatch(html, /<(?:img|svg)\b/i);
+  assert.equal((html.match(/<title>/g) || []).length, 1);
+  assert.equal((html.match(/<\/title>/g) || []).length, 1);
+  assert.match(html, /&lt;\/title&gt;&lt;img src=x onerror=&quot;globalThis\.brandAttack=true&quot;&gt;/);
+  assert.match(html, /option value="&quot;&gt;&lt;svg onload=&quot;globalThis\.keyAttack=true&quot;&gt;"/);
+  const inline = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  assert.doesNotThrow(() => new vm.Script(inline));
+  assert.doesNotMatch(inline, /[\u2028\u2029]/);
+  // Interpret the generated declaration, rather than merely checking for an escaping substring.
+  const declaration = inline.match(/^var OWNER=.*;$/m)[0];
+  const context = {}; vm.runInNewContext(declaration + ';globalThis.displayValues={OWNER,SPORT};', context);
+  assert.equal(context.labelAttack, undefined);
+  assert.equal(context.displayValues.OWNER, ownerName);
+  assert.equal(context.displayValues.SPORT[sportKey], sportLabel);
+});
