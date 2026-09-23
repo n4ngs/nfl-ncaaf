@@ -92,6 +92,7 @@ const pushAlerts = new NotificationService({ dataDir: DATA_DIR, origin: ACCOUNT_
 opportunities.on('update', snapshot => { pushAlerts.publish(snapshot.rows).catch(() => {}); });
 const Board = require('./board')({ dataDir: DATA_DIR, sports: SPORTS, ownerName: OWNER_NAME, brand: BRAND, logo: LOGO, adminPath: GATED ? ADMIN_PATH : '', onRevokeDevice: id => Accounts.revokeDevice(id) });
 // Owner-only model proof page (<ADMIN_PATH>/proof): holdout proof + live closing-line record for every sport.
+const Research = require('./research')({ adminPath: GATED ? ADMIN_PATH : '', sports: SPORTS, logo: LOGO });
 const Proof = require('./proof')({ adminPath: GATED ? ADMIN_PATH : '', sports: SPORTS, logo: LOGO, ownerCookie: `ps_code=${OWNER_HASH}; hl_code=${OWNER_HASH}; bbl_access=${BBL_OWNER}` });
 const MANIFEST = JSON.stringify({
   name: BRAND, short_name: BRAND, start_url: '/', scope: '/', display: 'standalone',
@@ -391,6 +392,7 @@ const server = http.createServer(async (req, res) => {
   if (privileged && (!GATED || r !== 'owner')) return notFound();
   if (privileged && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !isSameOrigin(req)) { res.writeHead(403, PRIVATE_HEADERS); return res.end('Request origin not allowed'); }
   if (Proof.handle(req, res, pathname, GATED ? r : null)) return;
+  if (Research.handle(req, res, pathname, qs, GATED ? r : null)) return;
   if (Board.handle(req, res, pathname, qs, GATED ? r : null)) return;
 
   // Open boards: a browser with no sign-in becomes a guest on the spot — cookies set on this response and
