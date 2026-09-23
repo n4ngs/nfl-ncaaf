@@ -28,6 +28,10 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
   }) });
   const record = Record.create({ file: path.join(dir, 'signals.json'), now, tiers: ['WEAK', 'THIN', 'SOLID'] });
   let state = null, upcoming = new Map(), builtAt = null, building = false, lastError = null, info = null, hist = null;
+  // forGame runs inside every board build and every push (dozens of times a minute across 70 games): everything that
+  // only changes when the history is rebuilt is computed once per game per build, and the move read is cached per
+  // (opener, current line) for a minute.
+  const leadCache = new Map(), moveCache = new Map(), featCache = new Map();
   const SD = MODEL ? MODEL.sd_margin : 15.8;
   const NV = new Set(nevada);
 
@@ -36,7 +40,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
     try {
       const season = seasonOf(new Date(now()));
       const h = await data.history(season, { maxCloses: 400 });
-      state = E.build(h, MODEL.config); hist = h;
+      state = E.build(h, MODEL.config); hist = h; leadCache.clear(); moveCache.clear(); featCache.clear();
       builtAt = new Date(now()).toISOString(); lastError = null;
       // A slow or failed scoreboard call must not throw away a good history build: keep the previous schedule.
       try { const up = await data.upcoming(season); upcoming = new Map(up.map(r => [String(r.gid), r])); }
@@ -65,9 +69,13 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
       if (first && Number.isFinite(first[1])) openers[b] = { spread: first[1], firstSeenAt: first[0] };
     }
     const cb = Data.crossBook(openers, { asOf: now() });
-    const f = state.featuresFor(row, { late: {} });
-    const x = E.withContext(f, row, { seasonType: row.seasonType, week: row.week, homeP5: row.homeP5, awayP5: row.awayP5 }, MODEL);
-    const margin = E.predict(x, MODEL);
+    let fc = featCache.get(row.gid);
+    if (!fc) {
+      const f = state.featuresFor(row, { late: {} });
+      const x0 = E.withContext(f, row, { seasonType: row.seasonType, week: row.week, homeP5: row.homeP5, awayP5: row.awayP5 }, MODEL);
+      fc = { x: x0, margin: E.predict(x0, MODEL) }; featCache.set(row.gid, fc);
+    }
+    const x = fc.x, margin = fc.margin;
     const move = explain(row, x, margin, openOf(published, cb), books);
     if (!cb || cb.n < 3) return { status: 'OK', note: 'Waiting for at least three books to open.', move };
     const reads = [];
@@ -101,12 +109,20 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
     return null;
   }
   function explain(row, x, margin, op, books) {
+    if (!op) return null;
+    const nowCons = consensusNow(books);
+    const key = `${row.gid}|${op.line}|${nowCons}|${op.source}|${op.n}`, hit = moveCache.get(row.gid);
+    if (hit && hit.key === key && now() - hit.at < 60e3) return hit.v;
+    const v = explainNow(row, x, margin, op, nowCons);
+    moveCache.set(row.gid, { key, at: now(), v });
+    return v;
+  }
+  function explainNow(row, x, margin, op, nowCons) {
     try {
-      if (!op || !MODEL.stage2 || !MODEL.stage2.E) return null;
-      const nowCons = consensusNow(books);
+      if (!MODEL.stage2 || !MODEL.stage2.E) return null;
       const e = E.explainMove(x, margin, { open: op.line, now: nowCons }, MODEL);
       if (!e) return null;
-      const lead = (team) => (hist ? Data.leads(hist.games, team, row.season) : { rb: null, wr: null });
+      const lead = (team) => { const k = team + ':' + row.season; if (!leadCache.has(k)) leadCache.set(k, hist ? Data.leads(hist.games, team, row.season) : { rb: null, wr: null }); return leadCache.get(k); };
       const whatIf = [];
       for (const [side, team] of [['home', row.home_id], ['away', row.away_id]]) {
         const L = lead(team);
