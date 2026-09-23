@@ -203,7 +203,7 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 // Read once at boot; an ETag lets phones revalidate cheaply instead of holding a stale copy.
 const fs = require('node:fs');
 const DESIGN = {};
-for (const f of ['broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js']) {
+for (const f of ['broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js', 'support.css', 'support.js']) {
   const body = fs.readFileSync(path.join(__dirname, 'design', f));
   DESIGN[f] = { body, etag: `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"` };
 }
@@ -291,7 +291,7 @@ const server = http.createServer((req, res) => {
   // terminal-owned endpoints -------------------------------------------------
   if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify({ ok: true, app: 'nfl.ncaaf', oddsFeed: owlsFeed.status(), feeds: { sharp: sharpFeed.status(), owls: owlsFeed.status() } })); }
   if (pathname === '/icon.svg' || pathname === '/favicon.ico') { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' }); return res.end(LOGO); }
-  const dm = /^\/_board\/((?:broadcast|portfolio|feeds|handoff)\.(?:css|js)|portfolio-view\.js|refined\.css)$/.exec(pathname);
+  const dm = /^\/_board\/((?:broadcast|portfolio|feeds|handoff|support)\.(?:css|js)|portfolio-view\.js|refined\.css)$/.exec(pathname);
   if (dm) return serveDesign(req, res, dm[1], dm[1].endsWith('.css') ? 'css' : 'js');
   if (pathname === '/manifest.webmanifest') { res.writeHead(200, { 'content-type': 'application/manifest+json; charset=utf-8' }); return res.end(MANIFEST); }
 

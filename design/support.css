@@ -1,0 +1,36 @@
+/* Scoped creator support: no overlays until requested and no effect on odds updates. */
+.creator-rail,.creator-card,#creator-support-dialog{font-family:inherit;box-sizing:border-box;color:var(--ink,#142030)}
+.creator-rail{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line,#d8dde5);font-size:11px;line-height:1.5;color:var(--ink-3,#5b6678)}
+.creator-rail>span b{font-weight:550;color:var(--ink-2,#455269)}
+.creator-rail button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 12px;border:1px solid var(--line,#d8dde5);border-radius:999px;background:var(--surface,#fff);color:var(--ink,#142030);font-family:inherit;font-size:11px;font-weight:600;line-height:1.4;white-space:nowrap;cursor:pointer;flex-shrink:0}
+.creator-rail button svg{color:var(--brand-text,#875400)}
+.creator-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:28px;margin:32px 0 12px;padding:26px 28px;border:1px solid var(--line,#d8dde5);border-left:3px solid #bc974e;border-radius:15px;background:var(--surface,#fff)}
+.creator-eyebrow{margin:0 0 10px;font-size:9px;font-weight:650;letter-spacing:.13em;line-height:1.5;color:var(--ink-3,#5b6678)}
+.creator-card h2{margin:0 0 10px;font-size:23px;font-weight:650;letter-spacing:-.04em;line-height:1.15}
+.creator-card-copy>p:not(.creator-eyebrow){margin:0 0 14px;max-width:56ch;font-size:12px;line-height:1.7;color:var(--ink-2,#455269)}
+.creator-signature{font-size:12px;font-weight:650}.creator-signature>span{font-size:10px;font-weight:450;color:var(--ink-3,#5b6678)}
+.creator-card-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:228px}
+.creator-pay,.creator-qr-button{display:inline-flex;align-items:center;justify-content:center;gap:16px;min-height:44px;padding:10px 14px;border:1px solid var(--line,#d8dde5);border-radius:9px;text-decoration:none;font-family:inherit;font-size:12px;font-weight:650;line-height:1.4;cursor:pointer}
+.creator-pay-venmo{background:#1165b1;color:#fff;border-color:#1165b1}.creator-pay-cash{background:#176243;color:#fff;border-color:#176243}
+.creator-qr-button{grid-column:1/-1;background:transparent;color:var(--ink-2,#455269);border-color:transparent;font-weight:500;font-size:11px}
+.creator-pay:hover{filter:brightness(1.08)}.creator-rail button:hover,.creator-qr-button:hover{border-color:#bc974e}
+.creator-rail button:focus-visible,.creator-card a:focus-visible,.creator-card button:focus-visible,#creator-support-dialog a:focus-visible,#creator-support-dialog button:focus-visible{outline:3px solid #bc974e;outline-offset:3px}
+#creator-support-dialog{position:fixed;inset:0;margin:auto;width:min(560px,calc(100vw - 32px));max-width:560px;max-height:calc(100dvh - 32px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));padding:0;border:1px solid var(--line,#d8dde5);border-radius:22px;background:var(--surface,#fff);box-shadow:0 30px 100px #07132155;overflow:auto;overscroll-behavior:contain}
+#creator-support-dialog::backdrop{background:#06101f99;backdrop-filter:blur(5px)}
+#creator-support-dialog .creator-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 20px 0 28px}
+#creator-support-dialog .creator-dialog-head .creator-eyebrow{margin:0;color:var(--brand-text,#875400)}
+#creator-support-dialog .creator-close{display:grid;place-items:center;width:44px;height:44px;flex:none;border:1px solid var(--line,#d8dde5);border-radius:50%;background:transparent;color:var(--ink,#142030);font-size:25px;line-height:1;cursor:pointer}
+#creator-support-dialog .creator-dialog-copy{padding:12px 28px 23px}
+#creator-support-dialog h2{margin:0 0 14px;font-size:34px;line-height:1.07;font-weight:650;letter-spacing:-.05em}
+#creator-support-dialog h2 span{color:var(--ink-3,#5b6678)}
+#creator-support-dialog .creator-dialog-copy p{margin:0;font-size:13px;line-height:1.7;color:var(--ink-2,#455269)}
+#creator-support-dialog .creator-codes{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 28px}
+#creator-support-dialog .creator-code{display:flex;flex-direction:column;align-items:center;gap:12px;min-width:0;padding:14px 12px 15px;border:1px solid var(--line,#d8dde5);border-radius:13px;background:var(--surface-2,#f3f5f8);color:var(--ink,#142030);text-decoration:none}
+#creator-support-dialog .creator-code:hover{border-color:#bc974e}
+#creator-support-dialog .creator-code-label{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;font-size:13px}
+#creator-support-dialog .creator-code-label strong{font-weight:650}
+#creator-support-dialog .creator-code img{display:block;width:168px;max-width:100%;height:auto;aspect-ratio:1;background:white;border-radius:7px}
+#creator-support-dialog .creator-handle{font-size:10px;line-height:1.5;text-align:center;overflow-wrap:anywhere;color:var(--ink-2,#455269)}
+#creator-support-dialog .creator-dialog-foot{margin:0;padding:20px 28px 25px;font-size:10px;line-height:1.6;color:var(--ink-3,#5b6678);text-align:center}
+@media(max-width:600px){.creator-rail{font-size:10px;gap:8px;padding:8px 0}.creator-rail>span{max-width:145px}.creator-rail>span b{display:block}.creator-rail button{font-size:10px;padding:8px 10px;gap:6px}.creator-rail button svg{width:15px}.creator-card{grid-template-columns:1fr;gap:20px;padding:21px 20px;margin-top:24px}.creator-card h2{font-size:22px}.creator-card-actions{min-width:0}.creator-card-copy>p:not(.creator-eyebrow){font-size:12px}#creator-support-dialog{width:calc(100vw - 24px);border-radius:18px}#creator-support-dialog .creator-dialog-head{padding:12px 14px 0 20px}#creator-support-dialog .creator-dialog-copy{padding:13px 20px 22px}#creator-support-dialog h2{font-size:30px}#creator-support-dialog .creator-codes{padding:0 16px;gap:10px}#creator-support-dialog .creator-code{padding:12px 8px}#creator-support-dialog .creator-handle{font-size:9px}#creator-support-dialog .creator-dialog-foot{padding:18px 20px 23px}}
+@media(max-width:340px){.creator-rail>span{max-width:105px}.creator-rail button{padding:8px}.creator-rail button>span:last-child{display:none}#creator-support-dialog h2{font-size:27px}}
