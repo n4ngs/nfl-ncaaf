@@ -82,13 +82,16 @@ function compactBox(b) {
 function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {} }) {
   fs.mkdirSync(path.join(dir, 'box'), { recursive: true });
   const status = { seasons: {}, boxes: 0, missingBoxes: 0, lastRefresh: null, lastError: null };
+  const tried = new Map();   // season -> last download attempt (one try per hour per season)
   const shotsFile = y => path.join(dir, `shots_${y}.json.gz`);
   const readGz = f => JSON.parse(zlib.gunzipSync(fs.readFileSync(f)).toString('utf8'));
   const writeGz = (f, v) => { const tmp = f + '.tmp'; fs.writeFileSync(tmp, zlib.gzipSync(JSON.stringify(v))); fs.renameSync(tmp, f); };
 
   async function shots(year, current) {
     const f = shotsFile(year), fresh = fs.existsSync(f) && (!current || now() - fs.statSync(f).mtimeMs < 20 * 3600e3);
-    if (!fresh) {
+    const lastTry = tried.get(year) || 0;
+    if (!fresh && now() - lastTry > 3600e3) {
+      tried.set(year, now());
       // MoneyPuck first. Older seasons leave that path, so fall back to a public mirror of the same files
       // (its 2025-26 file was verified byte-identical to moneypuck.com).
       for (const url of [`https://moneypuck.com/moneypuck/playerData/shots/shots_${year}.zip`, `https://peter-tanner.com/moneypuck/downloads/shots_${year}.zip`]) {
