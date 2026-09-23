@@ -120,7 +120,7 @@ function provenanceBook(key) {
   return known[key] || (key ? bookName(key) : 'Sportsbook unavailable');
 }
 function provenanceSource(key) {
-  return { sharp: 'Sharp API', owls: 'Owls Insight', vsin: 'VSiN', an: 'Action Network', an1: 'Action Network', pin: 'Pinnacle', espn: 'ESPN', manual: 'Manual entry' }[key] || key || 'Source unavailable';
+  return { sharp: 'WebSocket API', owls: 'Additional Coverage', vsin: 'VSiN', an: 'Action Network', an1: 'Action Network', pin: 'Pinnacle', espn: 'ESPN', manual: 'Manual entry' }[key] || key || 'Source unavailable';
 }
 function provenanceTime(value) {
   const n = typeof value === 'number' ? value : Date.parse(value);

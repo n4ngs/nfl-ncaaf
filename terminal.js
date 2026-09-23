@@ -60,6 +60,7 @@ const OPEN_BOARDS = process.env.OPEN_BOARDS !== '0';
 const PEER_SECRET = process.env.TELEMETRY_PEER_SECRET || crypto.randomBytes(32).toString('hex');
 
 const SPORTS = {
+  nhl: { dir:'nhl', base:'/nhl', label:'NHL', port:5064, appId:'nhl-board', sibling:'nfl', ck:'nh' },
   nfl:   { dir: 'nfl',   base: '/nfl',   label: 'NFL',   port: 5061, appId: 'pick-six',        sibling: 'ncaaf', ck: 'ps' },
   ncaaf: { dir: 'ncaaf', base: '/ncaaf', label: 'NCAAF', port: 5062, appId: 'hook-and-ladder', sibling: 'nfl',   ck: 'hl' },
   mlb:   { dir: 'mlb',   base: '/mlb',   label: 'MLB',   port: 5063, appId: 'bing-bong-live',  sibling: 'nfl',   ck: 'bbl' },
@@ -185,13 +186,13 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 <body><div class="card">
 <div class="top"><span class="logo">${LOGO}</span><span class="wm">THE<b>.</b>BOARD</span></div>
 <h1>${admin ? 'Admin sign-in' : OWNER_NAME ? OWNER_NAME + "'s board" : 'Enter your code'}</h1>
-<p>${admin ? 'Use your owner code to open Admin.' : 'NFL, college football and MLB on one board. Enter your code, or paste the link you were sent.'}</p>
+<p>${admin ? 'Use your owner code to open Admin.' : 'NFL, college football, MLB and NHL on one board. Enter your code, or paste the link you were sent.'}</p>
 <form method="post" action="${admin ? ADMIN_LOGIN : '/login'}" autocomplete="off">
 <input name="code" type="password" inputmode="text" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Code or link" placeholder="Code or link" autofocus required>
 <button>${admin ? 'Sign in' : 'Open the board'}</button>
 <div class="e">${wrong ? (admin ? "That code didn't work." : "That didn't work. Try opening the link you were sent in this browser.") : ''}</div>
 </form>
-<div class="f">${admin ? '<a href="/" style="color:inherit">Just here for the boards? Go to the board &rsaquo;</a>' : 'One board · NFL · NCAAF · MLB'}</div>
+<div class="f">${admin ? '<a href="/" style="color:inherit">Just here for the boards? Go to the board &rsaquo;</a>' : 'One board · NFL · NCAAF · MLB · NHL'}</div>
 </div></body></html>`;
   // Forms need a real Origin for CSRF checks; send only the origin, never the private path.
   res.writeHead(code, { 'content-type': 'text/html; charset=utf-8', ...PRIVATE_HEADERS, 'referrer-policy': 'strict-origin' });
@@ -270,9 +271,9 @@ function bad(ip) { const a = fails.get(ip) || []; a.push(Date.now()); fails.set(
 const isHttps = (req) => (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
 
 // Assets that must load even before sign-in (PWA install + uptime checks).
-const OPEN = /^\/(nfl|ncaaf|mlb)\/(api\/health|manifest\.webmanifest|sw\.js|favicon\.ico|icons\/[\w.\-/]+)$/;
+const OPEN = /^\/(nfl|ncaaf|mlb|nhl)\/(api\/health|manifest\.webmanifest|sw\.js|favicon\.ico|icons\/[\w.\-/]+)$/;
 
-function lastSport(req) { const m = /(?:^|;\s*)sport=(nfl|ncaaf|mlb)/.exec(req.headers.cookie || ''); return m ? m[1] : 'nfl'; }
+function lastSport(req) { const m = /(?:^|;\s*)sport=(nfl|ncaaf|mlb|nhl)/.exec(req.headers.cookie || ''); return m ? m[1] : 'nfl'; }
 
 const server = http.createServer((req, res) => {
   let url;
@@ -283,14 +284,14 @@ const server = http.createServer((req, res) => {
   const privateRoute = !!ADMIN_PATH && (pathname === ADMIN_PATH || pathname.startsWith(ADMIN_PATH + '/'));
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return notFound();
   if (pathname === '/login' && OPEN_BOARDS) return notFound();
-  if (/^\/(nfl|ncaaf|mlb)\/(login|access)(\/|$)/.test(pathname)) return notFound();
+  if (/^\/(nfl|ncaaf|mlb|nhl)\/(login|access)(\/|$)/.test(pathname)) return notFound();
   if (pathname.startsWith('/mlb/') && url.searchParams.has('code')) return notFound();
   if (privateRoute && !GATED) return notFound();
 
   // terminal-owned endpoints -------------------------------------------------
   if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify({ ok: true, app: 'nfl.ncaaf', oddsFeed: owlsFeed.status(), feeds: { sharp: sharpFeed.status(), owls: owlsFeed.status() } })); }
   if (pathname === '/icon.svg' || pathname === '/favicon.ico') { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' }); return res.end(LOGO); }
-  const dm = /^\/_board\/((?:broadcast|portfolio|feeds)\.(?:css|js)|portfolio-view\.js|refined\.css)$/.exec(pathname);
+  const dm = /^\/_board\/((?:broadcast|portfolio|feeds|handoff)\.(?:css|js)|portfolio-view\.js|refined\.css)$/.exec(pathname);
   if (dm) return serveDesign(req, res, dm[1], dm[1].endsWith('.css') ? 'css' : 'js');
   if (pathname === '/manifest.webmanifest') { res.writeHead(200, { 'content-type': 'application/manifest+json; charset=utf-8' }); return res.end(MANIFEST); }
 
@@ -303,7 +304,7 @@ const server = http.createServer((req, res) => {
   if (verdict) {
     if (privateRoute) Object.entries(PRIVATE_HEADERS).forEach(([name, value]) => res.setHeader(name, value));
     clearAuth(res, isHttps(req));
-    if (/^\/(nfl|ncaaf|mlb)\/api\//.test(pathname) || (privateRoute && pathname.startsWith(ADMIN_PATH + '/api/'))) { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Sign in"}'); }
+    if (/^\/(nfl|ncaaf|mlb|nhl)\/api\//.test(pathname) || (privateRoute && pathname.startsWith(ADMIN_PATH + '/api/'))) { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Sign in"}'); }
     if (verdict === 'signout' && pathname !== '/') { res.writeHead(303, { location: '/', 'cache-control': 'no-store' }); return res.end(); }
     return page(res, 200, {});
   }
@@ -347,16 +348,16 @@ const server = http.createServer((req, res) => {
   }
 
   let r = role(req);
-  const privileged = /^\/(nfl|ncaaf|mlb)\/api\/(security|group|invites)(\/|$)/.test(pathname);
+  const privileged = /^\/(nfl|ncaaf|mlb|nhl)\/api\/(security|group|invites)(\/|$)/.test(pathname);
   // Peers communicate directly over localhost, never through the public ingress.
-  if (/^\/(nfl|ncaaf|mlb)\/api\/security\/peer(\/|$)/.test(pathname)) return notFound();
+  if (/^\/(nfl|ncaaf|mlb|nhl)\/api\/security\/peer(\/|$)/.test(pathname)) return notFound();
   if (privileged && (!GATED || r !== 'owner')) return notFound();
   if (privileged && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !isSameOrigin(req)) { res.writeHead(403, PRIVATE_HEADERS); return res.end('Request origin not allowed'); }
   if (Board.handle(req, res, pathname, qs, GATED ? r : null)) return;
 
   // Open boards: a browser with no sign-in becomes a guest on the spot — cookies set on this response and
   // added to this request, so the engine sees a guest now, not after a reload. Admin is never granted here.
-  if (GATED && !r && OPEN_BOARDS && GUEST_HASH && (pathname === '/' || /^\/(nfl|ncaaf|mlb)(\/|$)/.test(pathname))) {
+  if (GATED && !r && OPEN_BOARDS && GUEST_HASH && (pathname === '/' || /^\/(nfl|ncaaf|mlb|nhl)(\/|$)/.test(pathname))) {
     setAuth(res, 'guest', isHttps(req));
     req.headers.cookie = `${req.headers.cookie ? req.headers.cookie + '; ' : ''}ps_guest=${GUEST_HASH}; hl_guest=${GUEST_HASH}; bbl_guest=${BBL_GUEST}`;
     r = 'guest';
@@ -373,10 +374,10 @@ const server = http.createServer((req, res) => {
     return res.end();
   }
 
-  const bm = /^\/(nfl|ncaaf|mlb)\/_b\/([a-f0-9]{12})\.(css|js)$/.exec(pathname);
+  const bm = /^\/(nfl|ncaaf|mlb|nhl)\/_b\/([a-f0-9]{12})\.(css|js)$/.exec(pathname);
   if (bm && BUNDLE[bm[1]] && BUNDLE[bm[1]][bm[3]].name === `_b/${bm[2]}.${bm[3]}`) return sendBundle(req, res, BUNDLE[bm[1]][bm[3]]);
 
-  const m = /^\/(nfl|ncaaf|mlb)(\/.*)?$/.exec(pathname);
+  const m = /^\/(nfl|ncaaf|mlb|nhl)(\/.*)?$/.exec(pathname);
   if (!m) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('Not found'); }
   const s = SPORTS[m[1]];
   if (m[2] === undefined) { res.writeHead(301, { location: `${s.base}/` }); return res.end(); }
@@ -391,8 +392,9 @@ const server = http.createServer((req, res) => {
   const sp = m[1];
   const enginePath = m[2] || '/';
   if(enginePath === '/api/bet-links') return betLinks.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(503,{'content-type':'application/json'});res.end('{"error":"Link lookup unavailable"}');});
+  if(url.searchParams.has('refresh') && r!=='owner'){res.writeHead(403,{'content-type':'application/json','cache-control':'no-store'});return res.end('{\"error\":\"Only admin can refresh odds.\"}');}
   const forwardPath = enginePath + qs;
-  const headers = { ...forwardClientIpHeaders(req, PEER_SECRET), host: `127.0.0.1:${s.port}` };
+  const headers = { ...forwardClientIpHeaders(req, PEER_SECRET), host: req.headers.host };
   const t0 = Date.now();
   const isStream = enginePath === '/api/stream';
   // The owner's copy of a board page gets an Admin Center link in the sport bar; ask for it uncompressed so

@@ -1,7 +1,7 @@
 'use strict';
 
 // One upstream connection belongs to the terminal. Sport engines receive only data over IPC.
-const SPORTS = ['nfl', 'ncaaf', 'mlb'];
+const SPORTS = ['nfl', 'ncaaf', 'mlb', 'nhl'];
 const ORIGIN = 'https://api.owlsinsight.com';
 const CHANNELS = ['odds', 'pinnacle-realtime', 'ps3838-realtime'];
 const jsonClone = (value) => JSON.parse(JSON.stringify(value));
@@ -14,7 +14,7 @@ function createOwlsFeed(options = {}) {
   const ioFactory = options.ioFactory || ((...args) => require('socket.io-client').io(...args));
   const every = options.setTimeout || setTimeout;
   const cancel = options.clearTimeout || clearTimeout;
-  const pollMs = options.pollMs || 45000;
+  const pollMs = options.pollMs || 60000;
   const reconcileMs = options.reconcileMs || 300000;
   const stores = Object.fromEntries(SPORTS.map(s => [s, Object.fromEntries(CHANNELS.map(c => [c, new Map()]))]));
   const versions = Object.fromEntries(SPORTS.map(s => [s, Object.fromEntries(CHANNELS.map(c => [c, 0]))]));
@@ -180,7 +180,7 @@ function createOwlsFeed(options = {}) {
       for (const channel of CHANNELS) {
         if (requestDisabled.has(channel) || nextAt[channel] > now() || blockedUntil > now()) continue;
         await Promise.all(SPORTS.map(sport => request(sport, channel)));
-        const interval = streamHealthy() ? reconcileMs : channel === 'odds' ? pollMs : channel === 'pinnacle-realtime' ? 120000 : 300000;
+        const interval = streamHealthy() ? reconcileMs : channel === 'odds' ? pollMs : channel === 'pinnacle-realtime' ? 180000 : 600000;
         nextAt[channel] = now() + interval;
       }
     } finally {

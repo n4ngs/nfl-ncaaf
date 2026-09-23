@@ -31,7 +31,7 @@ const fresh={...q,bet_link:ref,source_observed_at:'2026-09-22T19:59:50Z',freshne
 const context={sport:'nfl',gid:'1',book:'dk',market:'s',side:'home',label:'DraftKings home −3.5 −110'};
 test('price renderer makes a direct mobile anchor without changing source verification or adding a wager',()=>{
  const u=ui();const html=u.ctx.BoardHandoff.cell(fresh,context,'<button type="button" class="px" data-bet="1|s|home|dk">−3.5<small>−110</small></button>');
- assert.match(html,/^<a /);assert.match(html,/target="_self"/);assert.match(html,/deeplink\/12345\?state=nv/);assert.match(html,/<\/a>$/);assert.equal(u.saved.size,0);assert.equal(u.calls(),0);
+ assert.match(html,/^<a /);assert.match(html,/target="_blank"/);assert.match(html,/deeplink\/12345\?state=nv/);assert.match(html,/<\/a>$/);assert.equal(u.saved.size,0);assert.equal(u.calls(),0);
  const repeat=u.ctx.BoardHandoff.cell({...fresh},context,'<button>−3.5</button>');assert.equal(html.match(/data-bet-handoff="(\d+)"/)[1],repeat.match(/data-bet-handoff="(\d+)"/)[1]);
 });
 test('stale/suspended and wrong-book prices remain non-navigable; recent feed quotes can open without EV eligibility',()=>{
@@ -46,3 +46,6 @@ test('click rechecks current quote and never records a wager',()=>{
 });
 
 test('expired selection links fall back only to the same book event and remain labeled event',async()=>{const fallback='https://sportsbook.draftkings.com/event/1';const linked=attachLink(q,[{...q,bet_link:ref},{...q,bet_link:{provider:'owls',book:'dk',url:fallback}}]);assert.equal(linked.bet_link.fallback,fallback);const resolver=createLinkResolver({fetchImpl:async()=>({status:404,headers:new Headers()})});assert.deepEqual(await resolver.resolve(linked.bet_link,'nv'),{url:fallback,type:'event',book:'dk'});});
+
+test('Nevada BetMGM app URL follows its published iOS sportsapp path and preserves single selection',async()=>{const r=createLinkResolver({fetchImpl:async()=>({status:302,headers:new Headers({location:'https://sports.nv.betmgm.com/en/sports/events/123?options=123-4-5&type=Single','x-deep-link-type':'outcome'})})});const d=await r.resolve({...ref,book:'mgm'},'nv');assert.equal(d.appUrl,'https://sports.nv.betmgm.com/en/sportsapp/events/123?options=123-4-5&type=Single');assert.equal(d.state,'nv');assert.match(d.url,/\/en\/sports\/events/);});
+test('additional coverage links honor Nevada for BetMGM and Caesars instead of leaking NJ destinations',async()=>{const r=createLinkResolver({fetchImpl:async()=>{throw Error('Unexpected network');}});const mgm=await r.resolve({provider:'owls',book:'mgm',url:'https://sports.nj.betmgm.com/en/sports/events/123'},'nv');assert.match(mgm.url,/sports.nv.betmgm/);assert.match(mgm.appUrl,/sportsapp/);const czr=await r.resolve({provider:'owls',book:'czr',url:'https://sportsbook.caesars.com/us/nj/bet/event/123'},'nv');assert.equal(czr.appUrl,'https://sportsbook.caesars.com/us/nv/bet/event/123');assert.equal(czr.type,'event');});

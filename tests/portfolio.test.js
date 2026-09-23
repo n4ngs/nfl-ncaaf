@@ -30,14 +30,14 @@ test('owner-scoped reads use sport paths and cookies; active sport reuses its su
   const result = await loader.load({ sport: 'nfl', currentBets: [ticket()], fetchImpl: async (url, options) => {
     calls.push({ url, options }); return response([ticket()]);
   } });
-  assert.deepEqual(calls.map((call) => call.url).sort(), ['/mlb/api/bets', '/ncaaf/api/bets']);
+  assert.deepEqual(calls.map((call) => call.url).sort(), ['/mlb/api/bets', '/ncaaf/api/bets', '/nhl/api/bets']);
   for (const { options } of calls) {
     assert.equal(options.method, 'GET'); assert.equal(options.credentials, 'same-origin');
     assert.equal(options.cache, 'no-store'); assert.equal(options.redirect, 'error');
     assert.equal(Object.hasOwn(options, 'body'), false); assert.equal(Object.hasOwn(options.headers, 'cookie'), false);
   }
-  assert.equal(result.tickets.length, 3);
-  assert.deepEqual(new Set(result.tickets.map((t) => t.id)), new Set(['nfl:one', 'ncaaf:one', 'mlb:one']));
+  assert.equal(result.tickets.length, 4);
+  assert.deepEqual(new Set(result.tickets.map((t) => t.id)), new Set(['nfl:one', 'ncaaf:one', 'mlb:one', 'nhl:one']));
   assert.ok(result.sources.every((source) => source.status === 'ok'));
   assert.equal(result.updatedAt, NOW);
 });
@@ -118,7 +118,7 @@ test('partial failures differ from a successfully empty sport and never reuse st
   const loader = Portfolio.createLoader({ now: () => NOW });
   const out = await loader.load({ sport: 'nfl', currentBets: [ticket()], fetchImpl: async (url) => url.includes('mlb') ? response([], 403) : response([]) });
   assert.equal(out.tickets.length, 1);
-  assert.deepEqual(out.sources.map((s) => [s.sport, s.status]), [['nfl', 'ok'], ['ncaaf', 'ok'], ['mlb', 'error']]);
+  assert.deepEqual(out.sources.map((s) => [s.sport, s.status]), [['nfl', 'ok'], ['ncaaf', 'ok'], ['mlb', 'error'], ['nhl', 'ok']]);
   assert.match(out.sources[2].error, /sign in/); assert.equal(out.sources[2].updatedAt, null);
 });
 
@@ -208,7 +208,7 @@ test('different fetch implementations and base paths do not share private cache 
 test('supplied peer stream lists skip fetch, including empty lists, and current list wins', async () => {
   let calls = 0;
   const result = await Portfolio.load({ sport: 'nfl', currentBets: [ticket({ id: 'current' })],
-    betsBySport: { nfl: [ticket({ id: 'old' })], ncaaf: [], mlb: [ticket({ id: 'baseball' })] },
+    betsBySport: { nfl: [ticket({ id: 'old' })], ncaaf: [], nhl: [], mlb: [ticket({ id: 'baseball' })] },
     fetchImpl: async () => { calls++; throw new Error('Should not fetch known lists'); } });
   assert.equal(calls, 0);
   assert.deepEqual(new Set(result.tickets.map((t) => t.id)), new Set(['nfl:current', 'mlb:baseball']));
@@ -283,7 +283,7 @@ test('invalid peer updates fail closed without replacing a valid bet list with e
 
 test('peer subscriptions cap connections and validate all destinations before opening any', () => {
   const f = streamFixture();
-  assert.throws(() => f.subscribe({ sports: ['nfl', 'ncaaf', 'mlb'] }), /at most two/);
+  assert.throws(() => f.subscribe({ sports: ['nfl', 'ncaaf', 'mlb', 'nhl'] }), /at most three/);
   assert.throws(() => f.subscribe({ basePaths: { mlb: '//elsewhere.test' } }), /same-origin/);
   assert.equal(f.streams.length, 0);
   const stop = f.subscribe({ sports: ['mlb'], basePaths: { mlb: '' } });

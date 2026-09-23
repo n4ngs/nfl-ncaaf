@@ -18,9 +18,9 @@ var BoardHandoff = (() => {
   const delivered=Date.parse(q.provider_received_at),delay=clock()-delivered;
   return (q.source||q.src)==='sharp'&&q.source_observed_at==null&&delay>=0&&delay<=(q.is_live?30000:120000)&&q.reason_code==='MISSING_SOURCE_TIMESTAMP';
  }
- function result(ref){if(ref.provider==='owls')return {url:ref.url,type:'event',book:ref.book};const item=cache.get(keyOf(ref));return item&&item.until>Date.now()?item.value:undefined;}
+ function result(ref){const item=cache.get(keyOf(ref));return item&&item.until>Date.now()?item.value:undefined;}
  function fallback(ref){return ref.provider==='sharp'?'https://api.sharpapi.io/api/v1/deeplink/'+encodeURIComponent(ref.id)+'?state='+state+(ref.fallback?'&fallback='+encodeURIComponent(ref.fallback):''):ref.url;}
- function destination(ref){return result(ref)?.url||fallback(ref);}
+ function destination(ref){const v=result(ref);return (mobile()?v?.appUrl:null)||v?.url||fallback(ref);}
  function caption(value){return value?.type==='outcome'?'Open single bet':value?.type==='event'?'Open game at sportsbook':value?.type==='homepage'?'Open sportsbook':'Open sportsbook · check selection';}
  function enqueue(ref){if(result(ref)!==undefined)return;queue.set(keyOf(ref),ref);if(!timer)timer=setTimeout(flush,40);}
  async function flush(){timer=null;if(busy||document.hidden||!queue.size)return;busy=true;const refs=[...queue.values()].slice(0,24),region=state;for(const ref of refs)queue.delete(keyOf(ref));
@@ -39,11 +39,12 @@ var BoardHandoff = (() => {
  function cell(q,context,html){if(!eligible(q)||context.book!==q.bet_link.book)return html;
   const identity=[context.sport,context.gid,context.market,context.side,context.book,q.line_value,q.american_odds,q.is_live].join('|'),id=identities.get(identity)||String(++serial),ref=q.bet_link;identities.set(identity,id);quotes.set(id,{q,context,identity});while(quotes.size>12000){const old=quotes.keys().next().value;identities.delete(quotes.get(old).identity);quotes.delete(old);}
   if(!watchTimer)watchTimer=setTimeout(()=>{watchTimer=null;watch();},100);
-  const value=result(ref),extra=' aria-label="'+esc(context.label+' · '+caption(value))+'" data-bet-handoff="'+id+'" data-link-type="'+(value?.type||'lookup')+'" href="'+esc(destination(ref))+'" target="'+(mobile()?'_self':'_blank')+'" rel="noopener noreferrer" title="'+esc(context.label+' · '+caption(value))+'"';
+  const value=result(ref),extra=' aria-label="'+esc(context.label+' · '+caption(value))+'" data-bet-handoff="'+id+'" data-link-type="'+(value?.type||'lookup')+'" href="'+esc(destination(ref))+'" target="'+'_blank'+'" rel="noopener noreferrer" title="'+esc(context.label+' · '+caption(value))+'"';
   return html.replace(/^<(button|span|a)\b/, '<a').replace(/\s(?:type|href|target|rel|title|aria-label)="[^"]*"/g,'').replace(/>$/, '>').replace(/<\/(button|span|a)>$/, '</a>').replace(/^<a\b/, '<a'+extra);
  }
  function message(text){if(typeof toastText==='function')toastText(text);else if(typeof betsToast==='function')betsToast(text);}
  function current(item){const c=item.context;try{
+  if(c.sport==='nhl')return window.NHLBoard?.quote(c);
   if(c.sport==='mlb'){const g=S.games.get(Number(c.gid)),O=oddsGame(c.gid);if(!g||!O||!S.isToday)return null;const live=g.state==='Live';if(live!==item.q.is_live||!live&&!oddsIsPre(g))return null;return(live?O.live:c.market.startsWith('f5')?O.f5:O.books)?.[c.book]?.quote_meta?.[c.market.replace(/^f5/,'')]?.[c.side];}
   const g=gameById(c.gid);if(!g||isFinal(g)||isLive(g)!==item.q.is_live)return null;const L=(c.market.startsWith('h1')?g.h1:isLive(g)?g.live:g.books)?.[c.book];return quoteEvidence(L,c.market,c.side);
  }catch{return null;}}
@@ -52,15 +53,17 @@ var BoardHandoff = (() => {
   el.innerHTML='<div><small>TICKET DRAFT · NOT PLACED</small><strong>'+esc(draft.label)+'</strong></div><button type="button" data-handoff-review>Review ticket</button><button type="button" class="handoff-dismiss" aria-label="Dismiss ticket draft" data-handoff-dismiss>×</button>';
  }
  function review(){const d=read('board.ticket-draft');if(!d)return;const sport=location.pathname.split('/')[1];if(sport!==d.sport){location.href='/'+d.sport+'/#bets';return;}
+  if(d.sport==='nhl'&&window.NHLBoard){window.NHLBoard.ticket(d);return;}
   if(d.sport==='mlb'&&typeof betsOpenSlip==='function'){betsOpenSlip({});BETS.slip.pick=false;BETS.slip.legs=[{pk:Number(d.gid),mkt:d.market,side:d.side,book:d.book,line:d.line,odds:d.odds}];BETS.slip.book=d.book;betsPaintSlip();}
   else if(typeof openSlip==='function'){openSlip({});const sl=S.sheet?.slip;if(sl){sl.pick=false;sl.legs=[{...legFrom(gameById(d.gid),d.market,d.side,d.book),line:d.line,odds:d.odds,entry_snapshot_id:null}];sl.book=d.book;sl.odds=d.odds;sl.placed=null;paintSlip();}}
   message('Check the actual ticket price, stake and wager time before saving.');
  }
- function mountSettings(panel){if(!panel||panel.querySelector('.handoff-settings'))return;const el=document.createElement('div');el.className='handoff-settings';el.innerHTML='<label>Sportsbook region<select aria-label="Sportsbook state">'+states.map(x=>'<option value="'+x+'"'+(x===state?' selected':'')+'>'+x.toUpperCase()+'</option>').join('')+'</select></label><p>Selection links prefill where supported. Your phone opens the installed app when its link settings allow it.</p>';panel.appendChild(el);
+ function mountSettings(panel){if(!panel||panel.querySelector('.handoff-settings'))return;const el=document.createElement('div');el.className='handoff-settings';el.innerHTML='<label>Sportsbook region<select aria-label="Sportsbook state">'+states.map(x=>'<option value="'+x+'"'+(x===state?' selected':'')+'>'+x.toUpperCase()+'</option>').join('')+'</select></label><p>Selection links prefill where supported. BetMGM and Caesars use app-compatible links where available. Your phone decides whether to open the installed app or a browser.</p>';panel.appendChild(el);
  el.querySelector('select').addEventListener('change',e=>{state=e.target.value;save('board.betting-state',state);queue.clear();for(const a of document.querySelectorAll('[data-bet-handoff]')){const item=quotes.get(a.dataset.betHandoff);if(item){a.href=destination(item.q.bet_link);enqueue(item.q.bet_link);}}});}
  document.addEventListener('click',e=>{const a=e.target.closest?.('[data-bet-handoff]');if(a){const item=quotes.get(a.dataset.betHandoff),q=item&&current(item);if(!q||!eligible(q)||q.american_odds!==item.q.american_odds||q.line_value!==item.q.line_value){e.preventDefault();e.stopImmediatePropagation();message('This price changed or is unavailable. Select its current price.');return;}
-  const value=result(q.bet_link);if(value===null){e.preventDefault();e.stopImmediatePropagation();message('This sportsbook has no link for this selection right now.');return;}
-  a.href=destination(q.bet_link);a.target=mobile()?'_self':'_blank';save('board.ticket-draft',{...item.context,line:q.line_value,odds:q.american_odds,created:Date.now()});draftPanel();e.stopImmediatePropagation();return;}
+  const value=result(q.bet_link);if(value===undefined && q.bet_link.provider==='owls'){e.preventDefault();e.stopImmediatePropagation();enqueue(q.bet_link);message('Preparing the sportsbook link for '+state.toUpperCase()+'. Tap again in a moment.');return;}
+  if(value===null){e.preventDefault();e.stopImmediatePropagation();message('This sportsbook has no link for this selection right now.');return;}
+  a.href=destination(q.bet_link);a.target='_blank';save('board.ticket-draft',{...item.context,line:q.line_value,odds:q.american_odds,created:Date.now()});draftPanel();e.stopImmediatePropagation();return;}
   if(e.target.closest?.('[data-handoff-review]')){e.preventDefault();e.stopImmediatePropagation();review();}
   if(e.target.closest?.('[data-handoff-dismiss]')){save('board.ticket-draft',null);draftPanel();}
  },true);

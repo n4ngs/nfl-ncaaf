@@ -1192,7 +1192,7 @@ function addCookie(res, str) {
 // BASE_PATH: mounted at /mlb behind the terminal. The router strips the prefix, so ROUTING is
 // unchanged; only OUTPUT urls carry it. Empty = standalone, exactly as before.
 const BASE = process.env.BASE_PATH || '';
-const SPORTS_NAV = [['/nfl','NFL'],['/ncaaf','NCAAF'],['/mlb','MLB']];
+const SPORTS_NAV = [['/nfl','NFL'],['/ncaaf','NCAAF'],['/mlb','MLB'],['/nhl','NHL']];
 const SPORTBAR = !BASE ? '' : ('<div id="xsport"><span class="brand"><svg class="xm" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="var(--ink)"/><path d="M21 21 L33 32 L21 43" fill="none" stroke="var(--accent)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="34" y="38.5" width="15" height="5" rx="2.5" fill="var(--surface)"/></svg><span class="wm">THE<b>.</b>BOARD</span></span><nav class="xseg" aria-label="Sport">'
   + SPORTS_NAV.map(function(x){return '<a href="'+x[0]+'/"'+(x[0]===BASE?' class="on" aria-current="page"':'')+'>'+x[1]+'</a>';}).join('')
   + '</nav></div><style>'
@@ -1318,6 +1318,8 @@ async function oddsRoutes(req, res, url, uid) {
   if (p === '/api/odds' && M === 'GET') {
     const date = url.searchParams.get('date') || today?.date || baseballToday();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) { sendJSON(res, 400, { error: 'Use ?date=YYYY-MM-DD' }); return true; }
+    if(url.searchParams.has('refresh') && roleOf(req)!=='owner'){sendJSON(res,403,{error:'Only admin can refresh odds.'});return true;}
+    if(url.searchParams.has('refresh') && !require('../shared/admin-access').isSameOrigin(req)){sendJSON(res,403,{error:'Request origin not allowed'});return true;}
     const refresh = url.searchParams.get('refresh') === '1' ? Odds.requestRefresh(date) : null;
     sendJSON(res, 200, { ...Odds.forDate(date), ...(refresh ? { refresh } : {}) });
     return true;

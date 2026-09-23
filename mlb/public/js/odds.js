@@ -185,7 +185,7 @@ function oddsPairFresh(L, mkt) {
 const oddsStale = (L) => !['ml', 'rl', 't'].some((m) => (m === 't' ? ['over', 'under'] : ['home', 'away']).some((sd) => oddsQuote(L, m, sd)?.actionable));
 const oddsStateLabel = (p) => p?.feedOnly ? 'Feed quote' : ({ FRESH: 'Fresh', AGING: 'Aging', STALE: 'Stale', UNVERIFIED: 'Unverified', SUSPENDED: 'Suspended', CONFLICTED: 'Conflict' }[p?.freshness] || 'Unavailable');
 function oddsQuoteNote(p) {
-  if(p?.feedOnly) return `Sharp feed quote · delivered ${oddsAgo(oddsStamp(p.provider_received_at))} · sportsbook observation time unavailable`;
+  if(p?.feedOnly) return `WebSocket feed quote · delivered ${oddsAgo(oddsStamp(p.provider_received_at))} · sportsbook observation time unavailable`;
   return p ? `${oddsStateLabel(p)} · ${p.source || 'Source unavailable'} · ${p.seen ? 'source ' + oddsAgo(p.seen) : 'source time unavailable'}` : 'No quote supplied';
 }
 // The bettable books with a price, in the display order.
@@ -374,7 +374,7 @@ function oddsViewHTML() {
   const refresh = ODDS.status.get(S.date)?.refresh, busy = f?.busy || refresh?.in_progress;
   const dayPending = !!S.loading || !S.date; // No selected day exists before the initial snapshot.
   const cooldown = Number.isFinite(refresh?.next_allowed_at) && refresh.next_allowed_at > serverNow();
-  const head = `<div class="odds-workspace-head"><div><p class="odds-kicker">MLB · Prices & movement</p><h1>MLB market board</h1></div><button type="button" class="odds-refresh" data-odds-refresh data-fk="refresh" ${busy || dayPending ? 'disabled aria-busy="true"' : cooldown ? 'disabled' : ''}>${busy ? 'Refreshing…' : cooldown ? `Refresh in ${Math.ceil((refresh.next_allowed_at - serverNow()) / 1000)}s` : 'Refresh odds'}</button></div>`;
+  const head = `<div class="odds-workspace-head"><div><p class="odds-kicker">MLB · Prices & movement</p><h1>MLB market board</h1></div>${S.me?.role === 'owner' ? `<button type="button" class="odds-refresh" data-odds-refresh data-fk="refresh" ${busy || dayPending ? 'disabled aria-busy="true"' : cooldown ? 'disabled' : ''}>${busy ? 'Refreshing…' : cooldown ? `Refresh in ${Math.ceil((refresh.next_allowed_at - serverNow()) / 1000)}s` : 'Refresh odds'}</button>` : '<span class="odds-auto-note">Updates automatically</span>'}</div>`;
   if (dayPending) return `${head}<div class="card empty" role="status"><b>Loading this day’s games…</b></div>`;
   if (!games.length) return `${head}<div class="card empty"><b>No games ${S.isToday ? 'today' : 'on this day'}</b>Choose another day above.</div>`;
   const shown = games.filter((g) => oddsPasses(g) && oddsMatches(g));
@@ -458,7 +458,7 @@ function oddsSourceStatus() {
   const status = ODDS.status.get(S.date);
   if (!status?.sources) return '';
   const open = document.getElementById('oddsSourceStatus')?.open;
-  const names = { sharp: 'Sharp API', owls: 'Owls Insight', an: 'Action', an1: 'Action v1', espn: 'ESPN', pin: 'Pinnacle', vsin: 'VSiN' };
+  const names = { sharp: 'WebSocket API', owls: 'Additional Coverage', an: 'Action', an1: 'Action v1', espn: 'ESPN', pin: 'Pinnacle', vsin: 'VSiN' };
   const rows = Object.entries(status.sources).map(([key, source]) => {
     const at = oddsStamp(source.source_observed_at), receipt = oddsStamp(source.received_at);
     const state = ['sharp','owls'].includes(key) ? (source.streamHealthy ? 'Streaming' : source.enabled ? (source.connection === 'polling' ? 'Polling' : 'Connecting') : 'Not connected') : { loading: 'Checking', ok: 'Responding', error: 'Unavailable', waiting: 'Waiting', idle: 'Idle' }[source.state] || 'Unavailable';

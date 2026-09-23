@@ -23,15 +23,15 @@ function harness(fetchImpl = async () => response({success:true,data:{}})) {
 test('one socket subscribes all sports, all books and exposes no credential in public status',async t=>{
   const h=harness();t.after(()=>h.feed.stop());h.feed.start();h.socket.emit('connect');await settle();
   assert.equal(h.socket.connects,1);assert.equal(h.socket.options.transports[0],'websocket');
-  assert.equal(h.calls.length,9);assert.equal(h.calls[0][1].headers.Authorization,'Bearer private-test-key');
+  assert.equal(h.calls.length,12);assert.equal(h.calls[0][1].headers.Authorization,'Bearer private-test-key');
   assert.equal(h.calls[0][1].redirect,'error');assert.equal(JSON.stringify(h.feed.status()).includes('private-test-key'),false);
   assert.equal(h.feed.status().connection,'streaming');
 });
 test('REST fallback bootstraps every sport and sharp channel with bounded cadence',async t=>{
   const h=harness();t.after(()=>h.feed.stop());h.feed.start();await settle();
-  assert.equal(h.calls.length,9);assert.ok([...h.timers.values()].some(x=>x.ms===45000));
-  h.tick(45000);[...h.timers.values()].find(x=>x.ms===45000).fn();await settle();
-  assert.equal(h.calls.length,12);assert.ok(h.calls.slice(9).every(([url])=>url.endsWith('/odds')));
+  assert.equal(h.calls.length,12);assert.ok([...h.timers.values()].some(x=>x.ms===60000));
+  h.tick(60000);[...h.timers.values()].find(x=>x.ms===60000).fn();await settle();
+  assert.equal(h.calls.length,16);assert.ok(h.calls.slice(12).every(([url])=>url.endsWith('/odds')));
 });
 test('Pinnacle sparse frames merge events, exact final events evict, PS snapshots replace',async t=>{
   const h=harness();t.after(()=>h.feed.stop());h.feed.start();await settle();
@@ -63,13 +63,13 @@ test('late REST reconciles missing events while preserving newer sparse Pinnacle
 });
 test('rate limit blocks the remaining sport requests globally and respects retry delay',async t=>{
   const h=harness(async()=>response({},429,{'retry-after':'120'}));t.after(()=>h.feed.stop());h.feed.start();await settle();
-  assert.equal(h.calls.length,3);assert.equal(h.feed.status().retryAt,now+120000);
+  assert.equal(h.calls.length,4);assert.equal(h.feed.status().retryAt,now+120000);
   assert.ok([...h.timers.values()].some(x=>x.ms===120000));
 });
 test('REST authentication failure stops repeated authenticated requests',async t=>{
   const h=harness(async()=>response({},401));t.after(()=>h.feed.stop());h.feed.start();await settle();
-  assert.equal(h.calls.length,3);assert.equal(h.feed.status().connection,'unauthorized');
-  [...h.timers.values()].find(x=>x.ms===300000).fn();await settle();assert.equal(h.calls.length,3);
+  assert.equal(h.calls.length,4);assert.equal(h.feed.status().connection,'unauthorized');
+  [...h.timers.values()].find(x=>x.ms===300000).fn();await settle();assert.equal(h.calls.length,4);
 });
 test('missing WebSocket entitlement disconnects and retries at five minutes, without leaking errors',async t=>{
   const h=harness();t.after(()=>h.feed.stop());h.feed.start();await settle();
@@ -107,14 +107,14 @@ test('coarse stale and unavailable book flags survive the merged normalization e
 test('silent connected stream falls back without a second socket and resumes on valid frames',async t=>{
   const h=harness();t.after(()=>h.feed.stop());h.feed.start();h.socket.emit('connect');
   h.socket.emit('odds-update',{sports:{nfl:[]},timestamp:new Date(now).toISOString()});await settle();
-  assert.equal(h.feed.status().streamHealthy,true);assert.equal(h.calls.length,9);
-  h.tick(46000);[...h.timers.values()].find(x=>x.ms===15000).fn();await settle();
+  assert.equal(h.feed.status().streamHealthy,true);assert.equal(h.calls.length,12);
+  h.tick(61000);[...h.timers.values()].find(x=>x.ms===15000).fn();await settle();
   assert.equal(h.feed.status().connected,true);assert.equal(h.feed.status().streamHealthy,false);
   assert.equal(h.feed.status().connection,'polling');assert.equal(h.socket.connects,1);
-  assert.equal(h.calls.length,12);assert.ok(h.calls.slice(9).every(([url])=>url.endsWith('/odds')));
-  h.socket.emit('odds-update',{timestamp:new Date(now+46000).toISOString()});
+  assert.equal(h.calls.length,16);assert.ok(h.calls.slice(12).every(([url])=>url.endsWith('/odds')));
+  h.socket.emit('odds-update',{timestamp:new Date(now+61000).toISOString()});
   assert.equal(h.feed.status().streamHealthy,false);
-  h.socket.emit('odds-update',{sports:{nfl:[]},timestamp:new Date(now+46000).toISOString()});
+  h.socket.emit('odds-update',{sports:{nfl:[]},timestamp:new Date(now+61000).toISOString()});
   assert.equal(h.feed.status().streamHealthy,true);assert.equal(h.feed.status().connection,'streaming');
 });
 
@@ -123,7 +123,7 @@ test('late REST cannot resurrect an event omitted by a newer empty full WS board
   let hold=false,release;const h=harness(url=>url.endsWith('/nfl/odds')&&hold?new Promise(r=>release=r):Promise.resolve(response({success:true,data:{}})));
   t.after(()=>h.feed.stop());h.feed.start();await settle();
   h.socket.emit('odds-update',{sports:{nfl:[event('a')]}});
-  hold=true;h.tick(45000);[...h.timers.values()].find(x=>x.ms===45000).fn();await settle();
+  hold=true;h.tick(60000);[...h.timers.values()].find(x=>x.ms===60000).fn();await settle();
   h.socket.emit('odds-update',{sports:{nfl:[]}});
   release(response({success:true,data:{pinnacle:[event('a')]}}));await settle();
   assert.deepEqual(h.feed.snapshot('nfl').events,[]);

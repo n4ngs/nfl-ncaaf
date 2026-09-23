@@ -179,7 +179,7 @@ for (const sport of ['nfl', 'ncaaf']) {
     assert.equal(ui.quoteFreshness(L, game(), 's', 'home').status, 'UNVERIFIED');
     assert.equal(ui.quoteCanAct(L, game(), 's', 'home'), false);
     assert.equal(ui.quotePairCanDevig(L, game(), 's'), false);
-    assert.equal(ui.provenanceSource('sharp'), 'Sharp API');
+    assert.equal(ui.provenanceSource('sharp'), 'WebSocket API');
   });
   test(`${sport}: delivery label does not conceal other invalidity or conflict`, () => {
     const E = harness(sport); E.sharp([event({ pin: line() })]);

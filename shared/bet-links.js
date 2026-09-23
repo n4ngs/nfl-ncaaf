@@ -10,6 +10,17 @@ function safeUrl(value,book) {
  try {const u=new URL(value); if(u.protocol!=='https:'||u.username||u.password||u.port||String(value).length>3000) return null;
  if(!(DOMAINS[book]||[]).some(d=>u.hostname===d||u.hostname.endsWith('.'+d)))return null;return u.href;}catch{return null;}
 }
+// Official iOS association paths checked 2026-09-22. Keep web and app targets distinct.
+function destinationFor(value, book, state, type) {
+ const safe=safeUrl(value,book);if(!safe)return null;
+ const u=new URL(safe);
+ if(book==='mgm' && /^sports\.[a-z]{2}\.betmgm\.com$/.test(u.hostname)) u.hostname='sports.'+state+'.betmgm.com';
+ if(book==='czr' && u.hostname==='sportsbook.caesars.com' && /^\/us\/[a-z]{2}\//.test(u.pathname)) u.pathname=u.pathname.replace(/^\/us\/[a-z]{2}\//,'/us/'+state+'/');
+ let appUrl=null;
+ if(book==='mgm' && u.hostname==='sports.'+state+'.betmgm.com' && /^\/en\/sports\//.test(u.pathname)) {const app=new URL(u);app.pathname=app.pathname.replace('/en/sports/','/en/sportsapp/');appUrl=app.href;}
+ if(book==='czr' && u.hostname==='sportsbook.caesars.com' && u.pathname.startsWith('/us/'+state+'/bet/')) appUrl=u.href;
+ return {url:u.href,type,book,...(appUrl?{appUrl}:{}),...(book==='mgm'||book==='czr'?{state}:{})};
+}
 function refForSharp(row,book) {return DOMAINS[book] && /^([0-9]{1,30}|[a-f0-9]{16})$/.test(String(row.id)) ? {provider:'sharp',id:String(row.id),book}:null;}
 function refForOwls(url,book) {const safe=safeUrl(url,book);return safe?{provider:'owls',url:safe,book}:null;}
 function validRef(ref) {if(!ref||typeof ref!=='object')return null;if(ref.provider==='sharp'){const base=refForSharp({id:ref.id},ref.book),fallback=safeUrl(ref.fallback,ref.book);return base&&fallback?{...base,fallback}:base;}if(ref.provider==='owls')return refForOwls(ref.url,ref.book);return null;}
@@ -26,18 +37,18 @@ function createLinkResolver({fetchImpl=globalThis.fetch,now=Date.now}={}) {
  const run=async fn=>{if(active>=4)await new Promise(resolve=>queue.push(resolve));active++;try{return await fn();}finally{active--;queue.shift()?.();}};
  async function resolve(raw,state='nv') {
   const ref=validRef(raw);if(!ref||!STATES.has(state))return null;
-  if(ref.provider==='owls')return {url:ref.url,type:'event',book:ref.book};
-  const key=refKey(ref,state),old=cache.get(key);if(old&&old.until>now())return old.value|| (ref.fallback?{url:ref.fallback,type:'event',book:ref.book}:null);
+  if(ref.provider==='owls')return destinationFor(ref.url,ref.book,state,'event');
+  const key=refKey(ref,state),old=cache.get(key);if(old&&old.until>now())return old.value|| (ref.fallback?destinationFor(ref.fallback,ref.book,state,'event'):null);
   if(pending.has(key))return pending.get(key);
   if(Math.floor(now()/60000)!==minute){minute=Math.floor(now()/60000);count=0;}
   if(++count>240||queue.length>96)return null;
   const task=run(async()=>{let value=null;try {
     const res=await fetchImpl('https://api.sharpapi.io/api/v1/deeplink/'+encodeURIComponent(ref.id)+'?state='+state,{redirect:'manual',signal:AbortSignal.timeout(3000),headers:{accept:'application/json'}});
     const url=safeUrl(res.headers.get('location'),ref.book),type=res.headers.get('x-deep-link-type');
-    if(res.status===302&&url&&['outcome','event','homepage'].includes(type))value={url,type,book:ref.book};
+    if(res.status===302&&url&&['outcome','event','homepage'].includes(type))value=destinationFor(url,ref.book,state,type);
     await res.body?.cancel?.();
    }catch{/* A failed resolver must not send a bettor to a guessed selection. */}
-   if(!value&&ref.fallback)value={url:ref.fallback,type:'event',book:ref.book};
+   if(!value&&ref.fallback)value=destinationFor(ref.fallback,ref.book,state,'event');
    cache.delete(key);cache.set(key,{value,until:now()+(value?60000:15000)});while(cache.size>5000)cache.delete(cache.keys().next().value);return value;
   });pending.set(key,task);try{return await task;}finally{pending.delete(key);}
  }
@@ -54,4 +65,4 @@ function createLinkResolver({fetchImpl=globalThis.fetch,now=Date.now}={}) {
  }
  return {resolve,handle};
 }
-module.exports={DOMAINS,STATES,safeUrl,refForSharp,refForOwls,validRef,refKey,attachLink,createLinkResolver};
+module.exports={destinationFor,DOMAINS,STATES,safeUrl,refForSharp,refForOwls,validRef,refKey,attachLink,createLinkResolver};

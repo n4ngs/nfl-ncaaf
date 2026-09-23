@@ -7,7 +7,7 @@
 })(typeof globalThis === 'object' ? globalThis : this, function (root) {
   'use strict';
 
-  const SPORTS = Object.freeze(['nfl', 'ncaaf', 'mlb']);
+  const SPORTS = Object.freeze(['nfl', 'ncaaf', 'mlb', 'nhl']);
   const SETTLED = new Set(['won', 'lost', 'push', 'void']);
   const DEFAULT_TTL = 5000;
   const DEFAULT_TIMEOUT = 8000;
@@ -79,6 +79,8 @@
         parts.push(`${label ? label + ' ' : 'Inning '}${inning}`);
       }
       if (outs != null && Number.isInteger(outs) && outs >= 0 && outs < 3 && halfLabel !== 'Mid' && halfLabel !== 'End') parts.push(`${outs} ${outs === 1 ? 'out' : 'outs'}`);
+    } else if (sport === 'nhl') {
+      const period=number(game.period);parts.push(game.intermission?'Intermission':game.periodType==='SO'?'SO':game.periodType==='OT'?'OT':period?'P'+period:'');if(text(game.clock))parts.push(game.clock);
     } else if (game.half === true) parts.push('Halftime');
     else {
       const period = number(game.period), clock = text(game.clock);
@@ -221,7 +223,7 @@
   // returned stop function. Each sport keeps its existing path-scoped HttpOnly identity.
   function subscribe(options = {}) {
     const sports = [...new Set(options.sports || [])];
-    if (sports.length > 2) throw new TypeError('Subscribe to at most two peer sports.');
+    if (sports.length > 3) throw new TypeError('Subscribe to at most three peer sports.');
     const destinations = sports.map((sport) => ({ sport: sportName(sport), basePath: baseFor(sport, options.basePaths?.[sport]) }));
     const EventSourceImpl = options.EventSourceImpl || root.EventSource;
     if (destinations.length && typeof EventSourceImpl !== 'function') throw new TypeError('Live ticket streams are unavailable.');

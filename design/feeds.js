@@ -5,16 +5,17 @@
     const bar = document.getElementById('xsport');
     if (!bar || document.getElementById('feed-monitor')) return;
     const sport = location.pathname.split('/')[1];
-    if (!['nfl','ncaaf','mlb'].includes(sport)) return;
+    if (!['nfl','ncaaf','mlb','nhl'].includes(sport)) return;
     const root = document.createElement('details');root.id='feed-monitor';root.className='feed-monitor';
     root.innerHTML='<summary aria-label="Market feed status"><span class="feed-dot"></span><span class="feed-summary">Connecting</span><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></summary>'
       +'<section class="feed-panel" aria-label="Market connection"><div class="feed-panel-heading"><span class="feed-eyebrow">THE.BOARD · CONNECTION</span><strong>Every update, in view.</strong></div>'
-      +'<div class="feed-provider" data-provider="sharp"><div><b>Sharp API</b><span class="feed-provider-role">Streaming feed</span></div><span class="feed-state">Connecting</span></div>'
+      +'<div class="feed-provider" data-provider="sharp"><div><b>WebSocket API</b><span class="feed-provider-role">Streaming feed</span></div><span class="feed-state">Connecting</span></div>'
       +'<div class="feed-metrics"><div><span>Latest feed delivery</span><strong class="feed-latency">—</strong></div><div><span>Books observed</span><strong class="feed-books">—</strong></div></div>'
-      +'<div class="feed-provider" data-provider="owls"><div><b>Owls Insight</b><span class="feed-provider-role">Additional coverage</span></div><span class="feed-state">Connecting</span></div>'
+      +'<div class="feed-provider" data-provider="owls"><div><b>Additional Coverage</b><span class="feed-provider-role">Supplemental markets</span></div><span class="feed-state">Connecting</span></div>'
       +'<div class="feed-updated">Waiting for connection data</div><p class="feed-note">Delivery speed and price freshness are different. Each price keeps its own source and verification.</p></section>';
     if(typeof BoardHandoff!=='undefined')BoardHandoff.mountSettings(root.querySelector('.feed-panel'));
     const admin=bar.querySelector('.xadm');bar.insertBefore(root,admin || null);
+    const target=document.createElement('button');target.className='feed-target';target.type='button';target.innerHTML='<span class="feed-target-dot" aria-hidden="true"></span><span>SUBSECOND TARGET</span><strong>0.20–0.79s</strong><span class="feed-target-more">View measured delivery ↗</span>';target.setAttribute('aria-label','Subsecond target: 0.20 to 0.79 seconds. View measured delivery.');target.onclick=()=>{root.open=!root.open;};bar.insertAdjacentElement('afterend',target);
     const summary=root.querySelector('.feed-summary'),latency=root.querySelector('.feed-latency'),books=root.querySelector('.feed-books'),updated=root.querySelector('.feed-updated');
     let pending=false,timer=null;
     function label(feed) {
@@ -44,7 +45,7 @@
         write(latency,sharp.streamHealthy && typeof value==='number' && value>=0 ? (value<1000?Math.round(value)+' ms':(value/1000).toFixed(1)+' s'):'—');
         // Provider book spellings differ; report each count instead of a misleading merged total.
         const a=Array.isArray(sharp.books?.[sport])?sharp.books[sport].length:null,b=Array.isArray(owls.books?.[sport])?owls.books[sport].length:null;
-        write(books,a!==null?String(a)+' Sharp':b!==null?String(b)+' Owls':'—');
+        write(books,a!==null?String(a)+' streaming':b!==null?String(b)+' additional':'—');
         const stamp=Math.max(Number(sharp.lastReceivedAt)||0,Number(owls.lastReceivedAt)||0);
         const age=stamp?Math.max(0,Math.floor((Date.now()-stamp)/1000)):null;
         write(updated,age===null?'Waiting for first update':age<2?'Latest update just received':'Latest update '+age+'s ago');

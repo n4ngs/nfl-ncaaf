@@ -2,15 +2,17 @@
 const { sourceTime } = require('./owls-schema');
 const { BOOK_KEYS } = require('./sharp-books');
 const { refForSharp } = require('./bet-links');
-const MARKETS = {moneyline:'ml',point_spread:'s',run_line:'s',total_points:'t',total_runs:'t'};
+const MARKETS = {moneyline:'ml',point_spread:'s',run_line:'s',total_points:'t',total_runs:'t',puck_line:'s',total_goals:'t'};
 const norm = v => String(v || '').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
 const finite = x => typeof x === 'number' && Number.isFinite(x) ? x : null;
 function normalizeBoard(payload, sport) {
   const rows = Array.isArray(payload) ? payload : payload?.data;
   if (!Array.isArray(rows)) return [];
   const events = new Map();
+  const drawMarkets=new Set(sport==='nhl'?rows.filter(r=>r.market_type==='moneyline'&&r.selection_type==='draw').map(r=>r.sportsbook+':'+r.event_id):[]);
   for (const row of rows) {
     if (!row || row.league !== sport || !row.id || !row.event_id) continue;
+    if(sport==='nhl'&&(drawMarkets.has(row.sportsbook+':'+row.event_id)||/regulation|60.?minute|3.?way/i.test(row.market_name||'')))continue;
     const market = MARKETS[row.market_type], book = BOOK_KEYS[row.sportsbook];
     if (!market || !book || row.is_main_line !== true || row.is_alternate_line === true || row.is_player_prop === true) continue;
     if (row.market_segment && row.market_segment !== 'full_game') continue;

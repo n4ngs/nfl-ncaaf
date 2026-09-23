@@ -175,7 +175,7 @@ test('HTTP200 refresh outcomes communicate errors, partial responses and schedul
 
 test('startup waits for day data and disables refresh while genuine loaded empty days stay empty', () => {
   const { c } = harness();
-  c.S.games.clear(); c.S.date = null; c.S.today = '2026-09-22'; c.S.loading = null;
+  c.S.games.clear(); c.S.date = null; c.S.today = '2026-09-22'; c.S.me={role:'owner'}; c.S.loading = null;
   const initial = c.oddsViewHTML();
   assert.match(initial, /role="status"><b>Loading this day’s games/);
   assert.match(initial, /data-odds-refresh[^>]*disabled aria-busy="true"/);

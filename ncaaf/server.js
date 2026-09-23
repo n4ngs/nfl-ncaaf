@@ -1017,7 +1017,7 @@ const uidOf = (req) => { const v = cookieOf(req).hl_uid || ''; return UID_RE.tes
 const BASE = process.env.BASE_PATH || '';
 // Slim terminal-style sport switcher injected at the top of <body> when mounted under the NFL.NCAAF
 // terminal. Cross-sport links are absolute (/nfl/, /ncaaf/) so they ignore <base href> on purpose.
-const SPORTS_NAV = [['/nfl','NFL'],['/ncaaf','NCAAF'],['/mlb','MLB']];
+const SPORTS_NAV = [['/nfl','NFL'],['/ncaaf','NCAAF'],['/mlb','MLB'],['/nhl','NHL']];
 const SPORTBAR = !BASE ? '' : ('<div id="xsport"><span class="brand"><svg class="xm" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="var(--ink)"/><path d="M21 21 L33 32 L21 43" fill="none" stroke="var(--accent)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="34" y="38.5" width="15" height="5" rx="2.5" fill="var(--surface)"/></svg><span class="wm">THE<b>.</b>BOARD</span></span><nav class="xseg" aria-label="Sport">'
   + SPORTS_NAV.map(function(x){return '<a href="'+x[0]+'/"'+(x[0]===BASE?' class="on" aria-current="page"':'')+'>'+x[1]+'</a>';}).join('')
   + '</nav></div><style>'

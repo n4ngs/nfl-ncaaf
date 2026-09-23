@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#142030"><link rel="icon" href="/icon.svg"><link rel="manifest" href="/manifest.webmanifest"><title>NHL · THE.BOARD</title>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="/_board/refined.css">
+<link rel="stylesheet" href="/_board/portfolio.css">
+</head><body>
+<main id="app" class="wrap"><header class="nh-head"><div><p class="eyebrow">THE ICE · LIVE MARKETS</p><h1>NHL board<span>.</span></h1><p id="slate-status" class="muted">Connecting to the ice…</p></div><label class="date-label">Slate date<input id="slate-date" type="date" aria-label="NHL slate date"></label></header>
+<nav class="nh-tabs" aria-label="NHL views"><a href="#board">Board</a><a href="#live">Live</a><a href="#bets">My bets</a></nav>
+<div id="feed-note" role="status" class="feed-note"></div><section id="board-view"><div class="nh-toolbar"><div class="seg" role="group" aria-label="Markets"><button data-market="ml" aria-pressed="true">Moneyline</button><button data-market="s" aria-pressed="false">Puck line</button><button data-market="t" aria-pressed="false">Total</button></div><p class="muted">Full game · Check OT / shootout rules at your book</p></div><div id="game-list" class="game-list"><div class="empty">Loading NHL schedule…</div></div></section>
+<section id="bets-view" hidden><div id="portfolio"></div></section><p class="nh-foot">WebSocket API + Additional Coverage · NHL scores and official replays · Automatic updates</p></main>
+<dialog id="game-dialog" aria-label="NHL game details"><div class="dialog-bar"><button data-close aria-label="Close game details">×</button></div><div id="game-detail"></div></dialog>
+<dialog id="ticket-dialog" aria-label="Log NHL ticket"><div class="dialog-bar"><button data-close aria-label="Close ticket">×</button></div><div id="ticket-detail"></div></dialog>
+<div id="nh-toast" role="status" aria-live="polite"></div>
+<script src="/_board/portfolio.js"></script>
+<script src="/_board/portfolio-view.js"></script>
+<script src="app.js"></script>
+</body></html>

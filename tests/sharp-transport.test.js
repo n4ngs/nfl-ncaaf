@@ -20,7 +20,7 @@ function harness(fetch=async()=>response()){
 }
 test('one key-owned native socket, all allowed books and leagues, WS bootstrap before REST',t=>{
  const h=harness();t.after(()=>h.feed.stop());h.begin();assert.equal(h.sockets.length,1);assert.equal(h.calls.length,0);
- const u=new URL(h.urls[0]);assert.equal(u.searchParams.get('league'),'nfl,ncaaf,mlb');assert.equal(u.searchParams.has('sportsbook'),false);assert.equal(u.searchParams.get('channels'),'odds');
+ const u=new URL(h.urls[0]);assert.equal(u.searchParams.get('league'),'nfl,ncaaf,mlb,nhl');assert.equal(u.searchParams.has('sportsbook'),false);assert.equal(u.searchParams.get('channels'),'odds');
  assert.equal(h.feed.status().connection,'streaming');assert.equal(JSON.stringify(h.feed.status()).includes('test-secret'),false);assert.equal(h.feed.snapshot('nfl').events.length,1);
 });
 test('initial chunks atomically replace prior snapshot only at completion',t=>{

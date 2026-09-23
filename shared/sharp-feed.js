@@ -1,7 +1,7 @@
 'use strict';
 // One server-owned Sharp stream. Provider delivery timestamps are never quote-observation clocks.
-const SPORTS = ['nfl', 'ncaaf', 'mlb'];
-const MARKETS = ['moneyline', 'point_spread', 'run_line', 'total_points', 'total_runs'];
+const SPORTS = ['nfl', 'ncaaf', 'mlb', 'nhl'];
+const MARKETS = ['moneyline', 'point_spread', 'run_line', 'total_points', 'total_runs', 'puck_line', 'total_goals'];
 const seqOf = frame => typeof frame.global_seq === 'string' && /^\d+$/.test(frame.global_seq) ? frame.global_seq : Number.isSafeInteger(frame.seq) ? String(frame.seq) : null;
 const compareSeq = (a, b) => a.length - b.length || a.localeCompare(b);
 const iso = value => Number.isFinite(Date.parse(value)) ? value : null;
