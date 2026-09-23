@@ -63,3 +63,20 @@ test('clock-only renewal retains version while refreshed deadline and trace are 
 test('Owls event links remain visible references but never promise exact outcome execution',()=>{const f=fixture();for(const L of Object.values(f.events[0].books))for(const q of Object.values(L.integrityMeta.ml)){q.source_observed_at=q.provider_received_at;delete q.provider_received_at;q.bet_link={provider:'owls',book:'mgm',url:'https://sports.nv.betmgm.com/en/sports/events/123'};}const rows=scan('owls','mlb',f,NOW).filter(x=>x.book==='mgm');assert.equal(rows.length,1);assert.equal(rows[0].clockKind,'SOURCE_OBSERVATION');assert.equal(rows[0].handoff,false);});
 test('unchanged quote rows preserve their receipt metadata when another event in that sport changes',()=>{let now=NOW;const s=new OpportunityService({now:()=>now});try{const f=fixture();f.events.push({...copy(f.events[0]),id:'second'});s.update('sharp','mlb',f);const before=new Map(s.snapshot().rows.map(r=>[r.eventId,r]));now+=200;f.receivedAt=now;offer(f).american_odds=115;s.update('sharp','mlb',f);const after=new Map(s.snapshot().rows.map(r=>[r.eventId,r]));assert.equal(after.get('second').receivedAt,before.get('second').receivedAt);assert.equal(after.get('mlb:event').receivedAt,now);assert.equal(s.snapshot().trace.receivedAt,now);}finally{s.close();}});
 test('deterministic fair-pair cache is bounded and immutable so repeated references cannot corrupt other opportunities',()=>{const a=-117.123456,b=-108.654321,first=fairPair(a,b);assert.equal(fairPair(a,b),first);assert.equal(Object.isFrozen(first),true);assert.throws(()=>{first[0]=1;},TypeError);for(let i=0;i<2200;i++)assert.ok(fairPair(-110-i/10000,-109));const refitted=fairPair(a,b);assert.notEqual(refitted,first);assert.deepEqual(refitted,first);assert.equal(fairPair(String(a),b),null);});
+
+
+test('Novig stays in raw coverage but cannot qualify for EV or alerts in pregame or live markets',()=>{
+ for(const live of [false,true])for(const provider of ['sharp','owls']){
+  const frame=fixture({live}),books=frame.events[0][live?'live':'books'];
+  books.novig=copy(books.mgm);
+  for(const q of Object.values(books.novig.integrityMeta.ml)){q.pair_id='novig:ml';q.bet_link=null;q.max_bet=null;}
+  const before=copy(frame),service=new OpportunityService({now:()=>NOW});
+  try{
+   service.update(provider,'mlb',frame);
+   const rows=service.snapshot().rows;
+   assert.ok(rows.some(r=>r.book==='mgm'&&r.eligible===true),`${provider} ${live?'live':'pregame'} ordinary book remains eligible`);
+   assert.equal(rows.some(r=>r.book==='novig'),false,`${provider} ${live?'live':'pregame'} Novig is not published to qualified rows/alerts`);
+   assert.deepEqual(frame,before,'scanner quarantine must not remove or mutate raw board quotes');
+  }finally{service.close();}
+ }
+});

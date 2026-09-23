@@ -49,6 +49,9 @@ function scan(provider, sport, frame, now) {
         if (sport === 'nfl' && market === 'ml') continue;
         const sides = market === 't' ? ['over', 'under'] : ['home', 'away'];
         for (const [book, line] of Object.entries(books)) {
+          // Novig execution requires order-side/liquidity evidence and live taker fees.
+          // Keep raw board coverage, but do not qualify gross exchange prices for EV/alerts.
+          if (book === 'novig') continue;
           for (const [index, side] of sides.entries()) {
             const quote = line?.integrityMeta?.[market]?.[side], opposite = line?.integrityMeta?.[market]?.[sides[1-index]];
             const ownExpiries = [deadline(quote, live, now), deadline(opposite, live, now)];

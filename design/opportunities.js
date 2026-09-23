@@ -96,7 +96,8 @@
     list.innerHTML = rows.length ? rows.map(r => card(r, before.get(r.id))).join('') : '<div class="op-empty"><strong>No qualified prices right now.</strong>Try a lower threshold or another book. Prices with incomplete evidence are excluded.</div>';
     list.querySelectorAll('details').forEach(el => { el.open = open.has(el.closest('[data-id]').dataset.id); });
     $('op-total').textContent = rows.length; $('op-best').textContent = rows.length ? '+' + Math.max(...rows.map(r => r.evPct)).toFixed(1) + '%' : '—';
-    $('op-count').textContent = `${data.rows.length} qualified prices across ${new Set(data.rows.map(r => r.book)).size} books`; $('op-held').textContent = 'Sorted by estimated EV';
+    const bookCount = new Set(data.rows.map(r => r.book)).size;
+    $('op-count').textContent = `${data.rows.length} qualified ${data.rows.length === 1 ? 'price' : 'prices'} across ${bookCount} ${bookCount === 1 ? 'book' : 'books'}`; $('op-held').textContent = 'Sorted by estimated EV';
     const metric = data.metrics || {}; $('op-metric-description').textContent = metric.description || 'Delivery measurements appear after rendered updates are acknowledged.'; $('op-p50').textContent = ms(metric.receiptToAckMs?.p50); $('op-p95').textContent = ms(metric.receiptToAckMs?.p95); $('op-samples').textContent = metric.sampleCount ? `${metric.sampleCount} samples · last hour` : 'Waiting for measured samples';
     data.rows.forEach(r => { if (![...$('op-book').options].some(o => o.value === r.book)) $('op-book').add(new Option(String(r.bookName || r.book), r.book)); }); syncControls();
     chart(rows); expire(); lastPaint = performance.now(); requestNotice(rows); acknowledge(packet, began, paintGeneration, rows);
