@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { StringDecoder } = require('node:string_decoder');
 
 const RESOLVER_VERSION = 'clv-integrity-v1';
 const DEFAULT_CONFIG = Object.freeze({ pregame_max_age_ms: 10 * 60e3, live_max_age_ms: 30e3, closing_max_age_ms: 10 * 60e3, aging_ratio: 0.5 });
@@ -154,8 +155,28 @@ class IntegrityStore {
     this.snapshots = new Map(); this.signals = new Map(); this.entries = new Map(); this.resolutions = new Map(); this.errors = []; this.byEvent = new Map(); this.byMarket = new Map();
     for (const [kind, map, id] of [['snapshots', this.snapshots, 'snapshot_id'], ['signals', this.signals, 'signal_id'], ['entries', this.entries, 'entry_id'], ['resolutions', this.resolutions, 'resolution_id']]) {
       const file = path.join(this.dir, `${kind}.jsonl`); if (!fs.existsSync(file)) continue;
-      const lines = fs.readFileSync(file, 'utf8').split('\n');
-      for (let i = 0; i < lines.length; i++) { if (!lines[i].trim()) continue; try { const row = JSON.parse(lines[i]); if (!row[id] || (map.has(row[id]) && stable(map.get(row[id])) !== stable(row))) throw new Error('duplicate or missing identity'); map.set(row[id], immutable(row)); } catch { this.errors.push({ journal: kind, line: i + 1, reason_code: 'INVALID_JOURNAL_RECORD' }); } }
+      // Journals can exceed V8's single-string limit. Decode bounded chunks while
+      // preserving every record, UTF-8 boundaries and original line numbers.
+      const fd = fs.openSync(file, 'r'), buffer = Buffer.allocUnsafe(64 * 1024), decoder = new StringDecoder('utf8');
+      let pending = '', line = 0;
+      const accept = (text) => {
+        line++; if (!text.trim()) return;
+        try {
+          const row = JSON.parse(text);
+          if (!row[id] || (map.has(row[id]) && stable(map.get(row[id])) !== stable(row))) throw new Error('duplicate or missing identity');
+          if (!map.has(row[id])) map.set(row[id], immutable(row));
+        } catch { this.errors.push({ journal: kind, line, reason_code: 'INVALID_JOURNAL_RECORD' }); }
+      };
+      try {
+        let bytes;
+        while ((bytes = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) {
+          pending += decoder.write(buffer.subarray(0, bytes));
+          let start = 0, end;
+          while ((end = pending.indexOf('\n', start)) !== -1) { accept(pending.slice(start, end)); start = end + 1; }
+          pending = pending.slice(start);
+        }
+        pending += decoder.end(); if (pending.length) accept(pending);
+      } finally { fs.closeSync(fd); }
     }
     for (const q of this.snapshots.values()) this.index(q);
   }
@@ -246,10 +267,10 @@ class IntegrityStore {
   }
   evaluateEntry(input, event = {}) {
     const entry = entryInfo(input), resolved = this.resolve({ ...event, id: entry.canonical_event_id, team: entry.team, quote_source: this.snapshot(entry.entry_snapshot_id)?.source }, entry.market_type, entry.selection, entry.sportsbook);
-    if (this.errors.length) return { ...evaluateCLV(entry, this.snapshot(entry.entry_snapshot_id), resolved, { config: this.config, event, snapshots: [...this.snapshots.values()] }), eligibility_status: 'SOURCE_CONFLICT', status: 'SOURCE_CONFLICT', reason_code: 'INVALID_INTEGRITY_JOURNAL', line_clv_points: null, clv_fair_probability_pp: null, clv_ev_pct: null };
+    if (this.errors.length) return { ...evaluateCLV(entry, this.snapshot(entry.entry_snapshot_id), resolved, { config: this.config, event, snapshots: this.byEvent.get(entry.canonical_event_id) || [] }), eligibility_status: 'SOURCE_CONFLICT', status: 'SOURCE_CONFLICT', reason_code: 'INVALID_INTEGRITY_JOURNAL', line_clv_points: null, clv_fair_probability_pp: null, clv_ev_pct: null };
     return evaluateCLV(entry, this.snapshot(entry.entry_snapshot_id), resolved, { config: this.config, event: { ...event, id: entry.canonical_event_id }, snapshots: this.byEvent.get(entry.canonical_event_id) || [] });
   }
-  evaluate(input, close) { return close ? evaluateCLV(input, this.snapshot(input.entry_snapshot_id), close, { config: this.config, snapshots: [...this.snapshots.values()] }) : this.evaluateEntry(input, input.event || input); }
+  evaluate(input, close) { return close ? evaluateCLV(input, this.snapshot(input.entry_snapshot_id), close, { config: this.config, snapshots: this.byEvent.get(entryInfo(input).canonical_event_id) || [] }) : this.evaluateEntry(input, input.event || input); }
   recordEntry(input) {
     const entry = entryInfo(input); if (!entry.entry_id || !entry.entry_created_at || !entry.bet_id) throw new Error('An immutable entry requires entry_id, bet_id and a UTC entry time');
     const record = { ...entry, resolver_version: RESOLVER_VERSION };

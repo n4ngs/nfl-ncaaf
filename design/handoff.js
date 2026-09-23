@@ -19,16 +19,16 @@ var BoardHandoff = (() => {
   return (q.source||q.src)==='sharp'&&q.source_observed_at==null&&delay>=0&&delay<=(q.is_live?30000:120000)&&q.reason_code==='MISSING_SOURCE_TIMESTAMP';
  }
  function result(ref){const item=cache.get(keyOf(ref));return item&&item.until>Date.now()?item.value:undefined;}
- function fallback(ref){return ref.provider==='sharp'?'https://api.sharpapi.io/api/v1/deeplink/'+encodeURIComponent(ref.id)+'?state='+state+(ref.fallback?'&fallback='+encodeURIComponent(ref.fallback):''):ref.url;}
+ function fallback(ref){return '/'+location.pathname.split('/')[1]+'/api/bet-links?state='+state+'&ref='+encodeURIComponent(JSON.stringify(ref))+(mobile()?'&app=1':'');}
  function destination(ref){const v=result(ref);return (mobile()?v?.appUrl:null)||v?.url||fallback(ref);}
- function caption(value){return value?.type==='outcome'?'Open single bet':value?.type==='event'?'Open game at sportsbook':value?.type==='homepage'?'Open sportsbook':'Open sportsbook · check selection';}
+ function caption(value){return value?.reason==='REGION_SELECTION_UNAVAILABLE'?'Open '+value.state.toUpperCase()+' sportsbook · find selection':value?.type==='outcome'?'Open single bet':value?.type==='event'?'Open game at sportsbook':value?.type==='homepage'?'Open sportsbook':'Open sportsbook · check selection';}
  function enqueue(ref){if(result(ref)!==undefined)return;queue.set(keyOf(ref),ref);if(!timer)timer=setTimeout(flush,40);}
  async function flush(){timer=null;if(busy||document.hidden||!queue.size)return;busy=true;const refs=[...queue.values()].slice(0,24),region=state;for(const ref of refs)queue.delete(keyOf(ref));
   try{const response=await fetch('/'+location.pathname.split('/')[1]+'/api/bet-links',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({state:region,refs}),signal:AbortSignal.timeout(4500)});
    if(response.ok){const data=await response.json();for(const [key,value]of Object.entries(data.links||{})){cache.delete(key);cache.set(key,{value,until:Date.now()+(value?55000:15000)});}while(cache.size>1500)cache.delete(cache.keys().next().value);
     for(const el of document.querySelectorAll('[data-bet-handoff]')){const item=quotes.get(el.dataset.betHandoff);if(!item)continue;const v=result(item.q.bet_link);el.href=destination(item.q.bet_link);el.title=item.context.label+' · '+caption(v);el.setAttribute('aria-label',el.title);el.dataset.linkType=v?.type||'lookup';}
    }
-  }catch{/* Keep the public provider redirect as the one-tap fallback. */}finally{busy=false;if(queue.size&&!document.hidden)timer=setTimeout(flush,80);}
+  }catch{/* The same-origin redirect still validates state before any outbound navigation. */}finally{busy=false;if(queue.size&&!document.hidden)timer=setTimeout(flush,80);}
  }
  let observer=null;
  function watch(){if(!observer&&typeof IntersectionObserver==='function')observer=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){const item=quotes.get(entry.target.dataset.betHandoff);if(item)enqueue(item.q.bet_link);}},{rootMargin:'80px'});
@@ -61,7 +61,7 @@ var BoardHandoff = (() => {
  function mountSettings(panel){if(!panel||panel.querySelector('.handoff-settings'))return;const el=document.createElement('div');el.className='handoff-settings';el.innerHTML='<label>Sportsbook region<select aria-label="Sportsbook state">'+states.map(x=>'<option value="'+x+'"'+(x===state?' selected':'')+'>'+x.toUpperCase()+'</option>').join('')+'</select></label><p>Selection links prefill where supported. BetMGM and Caesars use app-compatible links where available. Your phone decides whether to open the installed app or a browser.</p>';panel.appendChild(el);
  el.querySelector('select').addEventListener('change',e=>{state=e.target.value;save('board.betting-state',state);queue.clear();for(const a of document.querySelectorAll('[data-bet-handoff]')){const item=quotes.get(a.dataset.betHandoff);if(item){a.href=destination(item.q.bet_link);enqueue(item.q.bet_link);}}});}
  document.addEventListener('click',e=>{const a=e.target.closest?.('[data-bet-handoff]');if(a){const item=quotes.get(a.dataset.betHandoff),q=item&&current(item);if(!q||!eligible(q)||q.american_odds!==item.q.american_odds||q.line_value!==item.q.line_value){e.preventDefault();e.stopImmediatePropagation();message('This price changed or is unavailable. Select its current price.');return;}
-  const value=result(q.bet_link);if(value===undefined && q.bet_link.provider==='owls'){e.preventDefault();e.stopImmediatePropagation();enqueue(q.bet_link);message('Preparing the sportsbook link for '+state.toUpperCase()+'. Tap again in a moment.');return;}
+  const value=result(q.bet_link);
   if(value===null){e.preventDefault();e.stopImmediatePropagation();message('This sportsbook has no link for this selection right now.');return;}
   a.href=destination(q.bet_link);a.target='_blank';save('board.ticket-draft',{...item.context,line:q.line_value,odds:q.american_odds,created:Date.now()});draftPanel();e.stopImmediatePropagation();return;}
   if(e.target.closest?.('[data-handoff-review]')){e.preventDefault();e.stopImmediatePropagation();review();}

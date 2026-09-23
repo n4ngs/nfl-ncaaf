@@ -10,12 +10,26 @@ function safeUrl(value,book) {
  try {const u=new URL(value); if(u.protocol!=='https:'||u.username||u.password||u.port||String(value).length>3000) return null;
  if(!(DOMAINS[book]||[]).some(d=>u.hostname===d||u.hostname.endsWith('.'+d)))return null;return u.href;}catch{return null;}
 }
-// Official iOS association paths checked 2026-09-22. Keep web and app targets distinct.
+// Official Nevada landing pages; cross-state selection IDs are not interchangeable evidence.
+const NEVADA_HOME = Object.freeze({mgm:'https://www.nv.betmgm.com/en/engage/lan/sports/nevada',czr:'https://www.caesars.com/sportsbook-and-casino/nv'});
+const nevadaFallback=book=>({url:NEVADA_HOME[book],type:'homepage',book,state:'nv',reason:'REGION_SELECTION_UNAVAILABLE',selectionVerified:false});
+function regionsIn(u) {
+ const regions=new Set();let text=u.href.toLowerCase();
+ try{text=decodeURIComponent(text);}catch{}
+ for(const pattern of [/(?:^|[./])([a-z]{2})\.betmgm\.com\b/g,/\/(?:us|sportsbook-and-casino)\/([a-z]{2})(?:[/?#]|$)/g,/[?&](?:state|statecode|region|jurisdiction|jurisdictioncode)=([a-z]{2})(?:[&#]|$)/g])
+  for(const match of text.matchAll(pattern))if(STATES.has(match[1]))regions.add(match[1]);
+ return regions;
+}
+// Preserve a provider's already-regional selection; never manufacture an NV selection by rewriting NJ.
 function destinationFor(value, book, state, type) {
- const safe=safeUrl(value,book);if(!safe)return null;
+ const safe=safeUrl(value,book);if(!safe||!STATES.has(state))return null;
  const u=new URL(safe);
- if(book==='mgm' && /^sports\.[a-z]{2}\.betmgm\.com$/.test(u.hostname)) u.hostname='sports.'+state+'.betmgm.com';
- if(book==='czr' && u.hostname==='sportsbook.caesars.com' && /^\/us\/[a-z]{2}\//.test(u.pathname)) u.pathname=u.pathname.replace(/^\/us\/[a-z]{2}\//,'/us/'+state+'/');
+ if(state==='nv'&&safe===NEVADA_HOME[book])return nevadaFallback(book);
+ if(book==='mgm'||book==='czr') {
+  const regions=regionsIn(u),regional=book==='mgm'?new RegExp('^(?:www\\.|sports\\.)?'+state+'\\.betmgm\\.com$').test(u.hostname)
+   : u.hostname==='sportsbook.caesars.com'&&new RegExp('^/us/'+state+'(?:/|$)','i').test(u.pathname);
+  if([...regions].some(region=>region!==state)||!regional)return state==='nv'?nevadaFallback(book):null;
+ }
  let appUrl=null;
  if(book==='mgm' && u.hostname==='sports.'+state+'.betmgm.com' && /^\/en\/sports\//.test(u.pathname)) {const app=new URL(u);app.pathname=app.pathname.replace('/en/sports/','/en/sportsapp/');appUrl=app.href;}
  if(book==='czr' && u.hostname==='sportsbook.caesars.com' && u.pathname.startsWith('/us/'+state+'/bet/')) appUrl=u.href;
@@ -49,12 +63,22 @@ function createLinkResolver({fetchImpl=globalThis.fetch,now=Date.now}={}) {
     await res.body?.cancel?.();
    }catch{/* A failed resolver must not send a bettor to a guessed selection. */}
    if(!value&&ref.fallback)value=destinationFor(ref.fallback,ref.book,state,'event');
+   if(!value&&state==='nv'&&NEVADA_HOME[ref.book])value=nevadaFallback(ref.book);
    cache.delete(key);cache.set(key,{value,until:now()+(value?60000:15000)});while(cache.size>5000)cache.delete(cache.keys().next().value);return value;
   });pending.set(key,task);try{return await task;}finally{pending.delete(key);}
  }
  async function handle(req,res) {
   const send=(code,body)=>{res.writeHead(code,{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(body));};
-  if(req.method!=='POST')return send(405,{error:'POST required'});
+  // Unwarmed anchors, including middle-click and context-menu opens, resolve here
+  // rather than exposing a provider redirect with an unchecked regional fallback.
+  if(req.method==='GET') {
+   if(String(req.url).length>7000)return send(414,{error:'Link request too large'});
+   let query,ref;try{query=new URL(req.url,'https://local.invalid').searchParams;ref=JSON.parse(query.get('ref'));}catch{return send(400,{error:'Invalid link request'});}
+   if(!STATES.has(query.get('state'))||!validRef(ref))return send(400,{error:'Invalid link request'});
+   const value=await resolve(ref,query.get('state'));if(!value)return send(404,{error:'This sportsbook has no verified destination for this selection and state.'});
+   res.writeHead(302,{location:query.get('app')==='1'&&value.appUrl?value.appUrl:value.url,'cache-control':'no-store','referrer-policy':'no-referrer','x-content-type-options':'nosniff'});return res.end();
+  }
+  if(req.method!=='POST')return send(405,{error:'GET or POST required'});
   let body='',tooLarge=false;req.setEncoding('utf8');
   for await(const chunk of req){body+=chunk;if(body.length>24000){tooLarge=true;break;}}
   if(tooLarge)return send(413,{error:'Request too large'});

@@ -98,3 +98,28 @@ test('metadata-only suspended observations supersede the prior active price', (t
   const records = f.store.observeLine(f.event, 'mgm', { integrityMeta: { s: { home: { source_observed_at: iso(540e3), received_at: iso(541e3), market_status: 'suspended', line_value: null, american_odds: null } } } }, { market_type: 's', source: 'betmgm', is_live: false });
   assert.equal(records.length, 1); const r = f.store.resolve(f.event, 's', 'home', 'mgm', T + 660e3); assert.equal(r.current, null); assert.equal(r.close, null); assert.equal(r.reason_code, 'SUSPENDED_MARKET');
 });
+
+test('journal loader preserves UTF-8 across chunks, CRLF, blank lines and duplicate identities', (t) => {
+  const f = setup(t), q = f.quote(), file = path.join(f.dir, 'integrity/snapshots.jsonl');
+  const prefix = JSON.stringify(q).slice(0, -1) + ',"note":"';
+  const padding = 'x'.repeat(65535 - Buffer.byteLength(prefix));
+  const row = { ...q, note: padding + '🏒 Montréal' };
+  fs.writeFileSync(file, JSON.stringify(row) + '\r\n\n' + JSON.stringify(row));
+  const read = fs.readFileSync;
+  fs.readFileSync = function(p, ...args) { if (p === file) throw Error('Whole-journal reads are forbidden'); return read.call(this, p, ...args); };
+  let loaded;
+  try { loaded = new IntegrityStore({ dataDir: f.dir, sport: 'nfl' }); } finally { fs.readFileSync = read; }
+  assert.equal(loaded.health().ok, true); assert.equal(loaded.snapshots.size, 1);
+  assert.equal(loaded.snapshot(q.snapshot_id).note, row.note);
+  assert.equal(loaded.rows(f.event, 's', 'home', 'mgm').length, 1);
+  assert.ok(Object.isFrozen(loaded.snapshot(q.snapshot_id)));
+});
+test('chunked journal preserves line numbers and fails closed on conflicting IDs and truncated tails', (t) => {
+  const f = setup(t), q = f.quote(), file = path.join(f.dir, 'integrity/snapshots.jsonl');
+  fs.writeFileSync(file, JSON.stringify(q) + '\n\n' + JSON.stringify({ ...q, american_odds: -115 }) + '\n{truncated');
+  const loaded = new IntegrityStore({ dataDir: f.dir, sport: 'nfl' });
+  assert.deepEqual(loaded.errors.map(e => e.line), [3, 4]);
+  assert.equal(loaded.snapshot(q.snapshot_id).american_odds, q.american_odds);
+  assert.equal(loaded.rows(f.event, 's', 'home', 'mgm').length, 1);
+  assert.throws(() => loaded.ingestObservation({}), /requires repair/);
+});
