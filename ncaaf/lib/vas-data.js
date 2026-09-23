@@ -136,7 +136,7 @@ function crossBook(openers, { asOf = Infinity } = {}) {
   return { n: live.length, openCons: cons, totalCons: tcons, books };
 }
 
-function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {} }) {
+function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, seed = path.join(__dirname, 'ncaaf-vas-closes-seed.json') }) {
   fs.mkdirSync(dir, { recursive: true });
   const status = { seasons: {}, closes: { cached: 0, missing: 0 }, lastRefresh: null, lastError: null };
   const tried = new Map();   // url -> last failed attempt
@@ -144,7 +144,17 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {} })
   const readGz = (f) => JSON.parse(zlib.gunzipSync(fs.readFileSync(f)).toString('utf8'));
   const writeAtomic = (f, data) => { const tmp = f + '.tmp'; fs.writeFileSync(tmp, data); fs.renameSync(tmp, f); };
   let closes = null;
-  const loadCloses = () => { if (!closes) { try { closes = JSON.parse(fs.readFileSync(closeFile, 'utf8')); } catch { closes = {}; } } return closes; };
+  // Closes cached on the volume, topped up from the seed shipped with the code (ncaaf-vas-closes-seed.json, built from
+  // the research odds + ESPN with the same closeFromOdds rule) so a fresh volume starts complete. Cached values win.
+  const loadCloses = () => {
+    if (closes) return closes;
+    try { closes = JSON.parse(fs.readFileSync(closeFile, 'utf8')); } catch { closes = {}; }
+    let added = 0;
+    try { for (const [k, v] of Object.entries(require(seed).closes || {})) if (!(k in closes)) { closes[k] = v; added++; } }
+    catch { /* no seed shipped */ }
+    if (added) { log(`[ncaaf-vas] seeded ${added} closing spreads`); writeAtomic(closeFile, JSON.stringify(closes)); }
+    return closes;
+  };
   const mem = new Map();     // season -> {mtime, data}
 
   async function get(url) {

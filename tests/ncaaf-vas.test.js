@@ -168,7 +168,7 @@ test('loader: closing spread filter (live odds, non-books, juice-in-spread) and 
 test('loader: caching, 12 h refresh, hourly retry, gradual close backfill, upcoming', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ncaaf-vas-'));
   let T = Date.parse('2026-09-20T12:00:00Z'), fail = false; const calls = [];
-  const v = D.create({ dir, now: () => T,
+  const v = D.create({ dir, now: () => T, seed: '/nonexistent-seed.json',
     fetchBuffer: async (u) => { calls.push(u); if (fail) throw Error('down'); const s = Number(u.match(/_(\d{4})\.csv$/)[1]); const r = rawSeason(s, (s - 2000) * 100);
       return u.includes('schedules') ? r.schedule : u.includes('gamelog') ? r.gamelog : u.includes('summaries') ? r.teams : r.playerBox; },
     fetchJSON: async (u) => {
@@ -199,7 +199,7 @@ test('loader parity: real 2023-25 raw files -> engine -> 2025 features equal Pyt
     const odds = new Map();
     for (const l of fs.readFileSync(RAW + 'espn/odds.jsonl', 'utf8').split('\n')) if (l) { const e = JSON.parse(l); odds.set(e.id, e.books); }
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ncaaf-vas-par-'));
-    const v = D.create({ dir, now: () => Date.parse('2026-01-20T00:00:00Z'),
+    const v = D.create({ dir, now: () => Date.parse('2026-01-20T00:00:00Z'), seed: '/nonexistent-seed.json',
       fetchBuffer: async (u) => fs.readFileSync(RAW + 'sdv_csv/' + u.split('/').pop()),
       fetchJSON: async (u) => { const gid = Number(u.split('/events/')[1].split('/')[0]); return { items: (odds.get(gid) || []).map((b) => ({ provider: { name: b.book }, spread: b.spread })) }; } });
     const t0 = process.hrtime.bigint();
@@ -224,3 +224,16 @@ test('loader parity: real 2023-25 raw files -> engine -> 2025 features equal Pyt
     assert.ok(worst < 1e-8, 'max feature difference ' + worst);
     console.log(`# loader parity: ${games} games, ${n} values, max |diff| ${worst}, load+parse ${ms.toFixed(0)} ms`);
   });
+
+test('loader: shipped close seed fills a fresh cache without overriding cached values', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ncaaf-vas-seed-'));
+  const seed = path.join(dir, 'seed.json'); fs.writeFileSync(seed, JSON.stringify({ closes: { 11: -3, 12: null, 13: 7 } }));
+  fs.writeFileSync(path.join(dir, 'closes.json'), JSON.stringify({ 13: 2 }));
+  const v = D.create({ dir, seed, fetchBuffer: async () => { throw Error('offline'); }, fetchJSON: async () => { throw Error('offline'); } });
+  return v.closeSpreads([11, 12, 13], { max: 0 }).then((c) => { assert.deepEqual(c, { 11: -3, 12: null, 13: 2 }); });
+});
+const SEED = path.join(__dirname, '../ncaaf/lib/ncaaf-vas-closes-seed.json');
+test('shipped close seed is well formed', { skip: !fs.existsSync(SEED) }, () => {
+  const c = JSON.parse(fs.readFileSync(SEED)).closes; const v = Object.values(c);
+  assert.ok(v.length > 2000); assert.ok(v.every((x) => x === null || (Number.isFinite(x) && Math.abs(x) < 80)));
+});
