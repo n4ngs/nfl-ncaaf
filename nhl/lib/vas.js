@@ -12,7 +12,7 @@
 //  - Every GOLD/DIAMOND signal is logged with its entry price and scored against the last pre-puck market, so the
 //    live record proves or disproves the edge on its own. Nothing here places bets or changes displayed prices.
 const fs = require('node:fs'), path = require('node:path');
-const E = require('./vas-engine'), Data = require('./vas-data');
+const E = require('./vas-engine'), Data = require('./vas-data'), Record = require('../../shared/vas-record');
 const MODEL = require('./nhl-vas-model.json');
 
 const dec = a => 1 + (a > 0 ? a / 100 : 100 / -a);
@@ -53,9 +53,16 @@ function create({ dir, getBody, now = Date.now, log = console.log, fetchBuffer }
   let state = null, builtAt = null, building = false, historyInfo = null, lastError = null;
   const confirmed = new Map();                 // gid -> {home: id, away: id} from NHL pregame boxscores
   const recFile = path.join(dir, 'signals.json');
-  let record = {};
-  try { record = JSON.parse(fs.readFileSync(recFile, 'utf8')); } catch {}
-  const saveRecord = () => { const t = recFile + '.tmp'; fs.writeFileSync(t, JSON.stringify(record)); fs.renameSync(t, recFile); };
+  // One-time migration: early NHL records stored the HOME probability; the shared record stores the bet side's.
+  try {
+    const old = JSON.parse(fs.readFileSync(recFile, 'utf8')); let changed = false;
+    for (const r of Object.values(old)) if (!r.market) {
+      for (const k of ['entryProb', 'lastProb', 'closeProb']) if (r[k] != null && r.side === 'away') r[k] = 1 - r[k];
+      r.market = 'ml'; changed = true;
+    }
+    if (changed) fs.writeFileSync(recFile, JSON.stringify(old));
+  } catch {}
+  const record = Record.create({ file: recFile, now });
 
   async function refresh(tailGames = []) {
     if (building) return; building = true;
@@ -116,48 +123,24 @@ function create({ dir, getBody, now = Date.now, log = console.log, fetchBuffer }
     return out;
   }
 
-  // Live record: first GOLD/DIAMOND sighting is the entry; the last pre-puck market is the close.
+  // Live record (shared scorer): first GOLD/DIAMOND sighting is the entry; the last pre-puck market is the close.
   function track(g, v, m) {
-    const id = String(g.id), r = record[id];
-    if (v.tier === 'GOLD' || v.tier === 'DIAMOND') {
-      if (!r || (r.tier === 'GOLD' && v.tier === 'DIAMOND')) {
-        record[id] = { gid: id, start: g.start, matchup: `${g.away.abbr} @ ${g.home.abbr}`, tier: v.tier, side: v.side, move: v.move,
-          entryAt: new Date(now()).toISOString(), entryOdds: v.entry && v.entry.odds, entryBook: v.entry && v.entry.book,
-          entryProb: m.prob, lastProb: m.prob, lastAt: new Date(now()).toISOString(), closeProb: null, result: null };
-        saveRecord();
-      }
-    }
-    if (record[id] && !record[id].closeProb) { record[id].lastProb = m.prob; record[id].lastAt = new Date(now()).toISOString(); }
+    const sideProb = s => s === 'home' ? m.prob : 1 - m.prob;
+    const r = record.observe(g.id, { tier: v.tier, side: v.side, market: 'ml', entryOdds: v.entry && v.entry.odds, entryBook: v.entry && v.entry.book,
+      sideProb: sideProb(v.side), move: v.move, matchup: `${g.away.abbr} @ ${g.home.abbr}`, start: g.start });
+    if (r && r.side !== v.side) record.mark(g.id, sideProb(r.side));
   }
   function closeOut(g) {
-    const r = record[String(g.id)]; if (!r) return;
-    let dirty = false;
-    if (r.closeProb == null && r.lastProb != null) { r.closeProb = r.lastProb; dirty = true; }
-    if (g.final && r.result == null && Number.isFinite(g.home?.score) && Number.isFinite(g.away?.score)) {
-      r.result = (g.home.score > g.away.score ? 'home' : 'away') === r.side ? 'won' : 'lost'; dirty = true;
-    }
-    if (dirty) saveRecord();
+    record.close(g.id);
+    const r = record.get(g.id);
+    if (r && g.final && Number.isFinite(g.home?.score) && Number.isFinite(g.away?.score)) record.settle(g.id, (g.home.score > g.away.score ? 'home' : 'away') === r.side ? 'won' : 'lost');
   }
-  function summary() {
-    const rows = Object.values(record).filter(r => r.closeProb != null && Number.isFinite(r.entryOdds));
-    const by = {};
-    for (const r of rows) {
-      const pc = r.side === 'home' ? r.closeProb : 1 - r.closeProb, ev = pc * dec(r.entryOdds) - 1;
-      const moved = r.side === 'home' ? r.closeProb - r.entryProb : r.entryProb - r.closeProb;
-      for (const k of [r.tier, 'ALL']) {
-        const b = by[k] || (by[k] = { bets: 0, ev: 0, beat: 0, won: 0, settled: 0, profit: 0 });
-        b.bets++; b.ev += ev; b.beat += moved > 0 ? 1 : 0;
-        if (r.result) { b.settled++; if (r.result === 'won') { b.won++; b.profit += dec(r.entryOdds) - 1; } else b.profit -= 1; }
-      }
-    }
-    for (const b of Object.values(by)) { b.clvEvPct = b.bets ? b.ev / b.bets * 100 : null; b.beatCloseRate = b.bets ? b.beat / b.bets : null; b.roiPct = b.settled ? b.profit / b.settled * 100 : null; delete b.ev; delete b.beat; delete b.profit; }
-    return { tiers: by, open: Object.values(record).filter(r => r.closeProb == null).length, signals: Object.values(record).sort((a, b) => b.entryAt.localeCompare(a.entryAt)).slice(0, 200) };
-  }
+  const summary = () => record.summary();
 
   return {
     refresh, observeBox, forGame, summary, market,
     ready: () => !!state,
-    status: () => ({ model: MODEL.version, builtAt, building, history: historyInfo, data: data.status(), lastError, record: Object.keys(record).length,
+    status: () => ({ model: MODEL.version, builtAt, building, history: historyInfo, data: data.status(), lastError, pendingSignals: record.summary().pending,
       proven: MODEL.holdout_report, tiers: MODEL.tiers }),
   };
 }
