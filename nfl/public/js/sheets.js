@@ -89,6 +89,7 @@ function gameSheet() {
     <div class="gs-meta">${meta.map((m) => `<span class="tag">${esc(m)}</span>`).join('')}${follow(g.away)}${follow(g.home)}</div>
     ${isLive(g) ? `<div class="gs-sec">${fieldSVG(g, true)}<div class="situ"><span>${g.sit?.text ? `<b>${esc(g.sit.text)}</b>` : ''}${g.last ? ` ${esc(g.last.slice(0, 120))}` : ''}</span>${g.sit?.rz ? '<span class="rz">Red zone</span>' : ''}</div></div>` : ''}
     ${typeof vasPanel === 'function' ? vasPanel(g) : ''}
+    ${typeof modelPanel === 'function' ? modelPanel(g) : ''}
     <div class="gs-grid gs-sec">
       <div>
         <div class="sub-h">Line movement <span class="seg" style="padding:2px" role="group" aria-label="Chart market"><button type="button" data-cm="s" aria-pressed="${mkt === 's'}" style="height:28px">Spread</button><button type="button" data-cm="t" aria-pressed="${mkt === 't'}" style="height:28px">Total</button></span></div>

@@ -8,9 +8,9 @@
 const fs = require('node:fs'), path = require('node:path');
 
 const dec = a => 1 + (a > 0 ? a / 100 : 100 / -a);
-const RANK = { GOLD: 1, DIAMOND: 2 };
+const RANK = { WEAK: 1, GOLD: 1, LEAN: 1, THIN: 2, SOLID: 3, DIAMOND: 2, PROVEN: 2 };
 
-function create({ file, now = Date.now, tiers = ['GOLD', 'DIAMOND'] }) {
+function create({ file, now = Date.now, tiers = ['GOLD', 'DIAMOND', 'LEAN', 'PROVEN'] }) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let rec = {};
   try { rec = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
@@ -21,6 +21,7 @@ function create({ file, now = Date.now, tiers = ['GOLD', 'DIAMOND'] }) {
 
   return {
     // v: {tier, side, market, line, entryOdds, entryBook, sideProb, move, matchup, start}
+    // Callers key by `${gameId}:${market}` so one game can carry a total read and a side read independently.
     observe(gid, v) {
       const id = String(gid), r = rec[id];
       if (r && r.closeProb != null) return r;

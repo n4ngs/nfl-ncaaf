@@ -6,3 +6,6 @@ ncaaf/data/
 *.log
 nhl/research/data/
 nhl/research/.venv/
+nfl/research/data/
+ncaaf/research/data/
+mlb/research/data/

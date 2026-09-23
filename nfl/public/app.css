@@ -875,3 +875,11 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
 @media (min-width:1440px){
   .head,.view-h{max-width:1400px}
 }
+/* model read + Injury Matrix (js/model.js) */
+.model-read .mr-read{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface)}
+.model-read .mr-read p{margin:0;font-size:14px;line-height:1.4}.model-read .mr-read .tag{align-self:flex-start}
+.model-read .mr-why{font-size:12px !important;color:var(--ink-2)}.model-read .mr-quiet{font-size:13px;color:var(--ink-2);margin:0}
+.model-read .mr-injs{display:grid;grid-template-columns:1fr 1fr;gap:12px}.model-read .mr-inj .k{font-size:12px;font-weight:600;margin-bottom:6px}
+.model-read table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}.model-read th{text-align:left;color:var(--ink-2);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line)}
+.model-read td{padding:5px 6px;border-bottom:1px solid var(--line)}
+@media (max-width:700px){.model-read .mr-injs{grid-template-columns:1fr}}

@@ -116,6 +116,8 @@ function nextId() {
 
 // CLV Integrity v1 keeps provider observations separate from this mutable display cache.
 // Legacy chart files remain intact; the append-only ledger is the authority for entries and closes.
+// Research model read (lib/vas-service.js); kept outside the integrity helpers the tests evaluate in isolation.
+const Model = require('./lib/vas-service').create({ dir: path.join(U.DATA, 'nfl-vas'), log });
 function retainObservation(G, book, L, source, receivedAt, isLive = false, period = 'full_game', providerEvent = null, extra = {}) {
   if (!L) return L;
   const metadata = { source, received_at: receivedAt, is_live: typeof L.is_live === 'boolean' ? L.is_live : isLive, period,
@@ -341,6 +343,7 @@ function pub(G, W) {
     mkt: canonicalLine(canonical, 'current'),
     open: canonicalLine(canonical, 'open'),
     close: canonicalLine(canonical, 'close'),
+    model: (() => { try { return Model.forGame(G, canonicalLine(canonical, 'open'), canonicalLine(canonical, 'current')); } catch { return null; } })(),
     integrity: { markets: canonical, thresholds: integrityThresholds(), retrospective_status: 'RETROSPECTIVE_MARKET_MOVE' },
     splits: an.splits || null,
     tt: an.tt || null,
@@ -1479,7 +1482,8 @@ const server = http.createServer(async (req, res) => {
         if (!G) continue;
         const s = await summary(G);
         if (s?.fpi && G.state === 'pre') W.fpi.set(G.id, { home: s.fpi.home, at: Date.now() });
-        return sendJSON(res, 200, { now: Date.now(), game: pub(G, W), hist: integrityHistory(G, W), summary: s });
+        let injuries = null; try { injuries = Model.injuries(G, s?.inj); } catch {}
+        return sendJSON(res, 200, { now: Date.now(), game: pub(G, W), hist: integrityHistory(G, W), summary: s, injuries });
       }
       return sendJSON(res, 404, { error: 'That game is not loaded. Open its week first.' });
     }
@@ -1830,8 +1834,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/keys') return sendJSON(res, 200, (await margins((cal.season || new Date().getFullYear()) - 1)) || { n: 0 });
     if (p === '/api/lan') return sendJSON(res, 200, { urls: PUBLIC_URL ? [PUBLIC_URL] : lanUrls(), public: !!PUBLIC_URL, port: PORT });
+    if (p === '/api/vas/record') {
+      if (role !== 'owner') return ownerOnly();
+      return sendJSON(res, 200, Model.summary());
+    }
     if (p === '/api/health') {
       return sendJSON(res, 200, {
+        vas: Model.status(),
         integrity: integrity.health(), polling: polls.health(), owls: owlsFeed?.status() || { enabled: false }, sharp: sharpFeed?.status() || { enabled: false },
         ok: true, season: cal.season, def: defId, cur: curId, clients: clients.size, sources: U.health(), vsin: VSIN_AT,
         weeks: tracked().map((W) => ({ id: W.id, games: W.games.size, matched: W.an.size, at: W.at, live: [...W.games.values()].filter((g) => g.state === 'in').length })),
@@ -1882,6 +1891,9 @@ process.on('SIGTERM', shutdown);
 (async () => {
   // Accept connections right away: hosting platforms health-check the port during boot.
   // Pages that connect early get an empty snapshot, then the full one as soon as the data is in.
+  // Model history (nflverse, cached on the volume): first build shortly after boot, then every 6 hours.
+  const modelLoop = async () => { await Model.refresh(); setTimeout(modelLoop, 6 * 3600e3).unref(); };
+  setTimeout(modelLoop, 20000).unref();
   server.listen(PORT, CLIENT_IP_OPTIONS?.mode === 'internal' ? '127.0.0.1' : undefined, () => {
     log(`Pick Six is up → ${PUBLIC_URL || `http://localhost:${PORT}`}`);
     if (!PUBLIC_URL) for (const u of lanUrls()) log(`  on your phone (same Wi-Fi) → ${u}`);
