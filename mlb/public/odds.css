@@ -521,3 +521,10 @@ html[data-theme="dark"] .odds-view,html[data-theme="dark"] .odds-sheet{--odds-go
   .odds-select-label{gap:0}
   .odds-select-label select{width:100%}
 }
+/* VAS model block (js/vas.js) */
+.vas-card{padding:var(--s2) var(--s3);margin:0 0 var(--s3);border:1px solid var(--line)}
+.vas-head{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline;margin-bottom:8px}.vas-head b{color:var(--ink)}.vas-head span{font-size:12px;color:var(--ink-2)}
+.vas-row{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line)}.vas-row b{color:var(--ink);font-variant-numeric:tabular-nums}
+.vas-row small{display:block;color:var(--ink-2);font-size:12px;margin-top:2px}
+.vas-tag{flex:none;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--fill);color:var(--accent)}
+.vas-quiet{margin:0;font-size:13px;color:var(--ink-2)}

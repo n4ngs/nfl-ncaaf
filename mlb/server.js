@@ -80,6 +80,8 @@ const WP_FIELDS = 'atBatIndex,homeTeamWinProbability,homeTeamWinProbabilityAdded
 const CONTENT_FIELDS = 'highlights,items,guid,headline,duration,playbacks,name,url,image,cuts,width,src';
 
 const log = (...a) => console.log(new Date().toTimeString().slice(0, 8), ...a);
+// Research model (mlb/research; parity-tested Node port): DraftKings-opener gap rule + live closing-line record.
+const Vas = require('./lib/vas-service').create({ dir: path.join(require('./lib/util').DATA, 'mlb-vas'), log });
 const num = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
 const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
 
@@ -1315,6 +1317,15 @@ async function oddsRoutes(req, res, url, uid) {
     res.end();
     return true;
   }
+  if (p === '/api/vas' && M === 'GET') {
+    const date = url.searchParams.get('date');
+    sendJSON(res, 200, { reads: Vas.forDate(date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null), ready: !!(Vas.status().history && Vas.status().history.complete) });
+    return true;
+  }
+  if (p === '/api/vas/record' && M === 'GET') {
+    if (roleOf(req) !== 'owner') { sendJSON(res, 403, { error: 'Owner only.' }); return true; }
+    sendJSON(res, 200, Vas.summary()); return true;
+  }
   if (p === '/api/odds' && M === 'GET') {
     const date = url.searchParams.get('date') || today?.date || baseballToday();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) { sendJSON(res, 400, { error: 'Use ?date=YYYY-MM-DD' }); return true; }
@@ -1585,7 +1596,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/health') {
       return sendJSON(res, 200, {
-        ok: true, date: today?.date, clients: clients.size, feedMs: FEED_MS,
+        ok: true, date: today?.date, clients: clients.size, feedMs: FEED_MS, vas: Vas.status(),
         games: [...(today?.games.values() || [])].map((g) => ({ pk: g.pk, state: g.state, feedAge: g.feedAt ? Date.now() - g.feedAt : null })),
         ...(hasAccess(req) ? { odds: Odds.healthInfo() } : {}),
       });
@@ -1632,6 +1643,10 @@ process.on('SIGTERM', shutdown);
   contentLoop();
   Odds.start({ today: () => today, emit });
   pollStrays().then(gradeBets);
+  // Model: history backfill (quick until complete, then every 6 h) and today's/tomorrow's slate every 10 minutes.
+  const vasHistory = async () => { await Vas.refreshHistory(); const st = Vas.status(); setTimeout(vasHistory, st.history && st.history.complete ? 6 * 3600e3 : 120e3).unref(); };
+  const vasSlate = async () => { try { await Vas.refreshSlate(); } catch (e) { log('vas slate', e.message); } setTimeout(vasSlate, 10 * 60e3).unref(); };
+  setTimeout(vasHistory, 25000).unref(); setTimeout(vasSlate, 90000).unref();
   server.listen(PORT, CLIENT_IP_OPTIONS?.mode === 'internal' ? '127.0.0.1' : undefined, () => {
     log(`Bing Bong Live is up → http://localhost:${PORT}   (live at-bats every ${FEED_MS / 1000}s)${ACCESS_TOKEN ? '   [access code on]' : ''}`);
     for (const u of lanUrls()) log(`  on your phone (same Wi-Fi) → ${u}`);

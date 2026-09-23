@@ -385,7 +385,7 @@ function oddsViewHTML() {
   const section = (title, list) => list.length ? `<div class="odds-grp"><h2>${esc(title)}</h2><span>${list.length} game${list.length === 1 ? '' : 's'}</span></div>${block(list)}` : '';
   const wasOpen = document.getElementById('oddsDone')?.open;
   const contextOpen = document.getElementById('oddsContext')?.open;
-  return `${head}${oddsOverview(games, mkt)}<div class="odds-toolbar">${oddsMktSeg(mkt)}${oddsFilterBar(games)}</div>
+  return `${head}${oddsOverview(games, mkt)}<div class="odds-toolbar">${oddsMktSeg(mkt)}${oddsFilterBar(games)}</div>${typeof mlbVasBlock === 'function' ? mlbVasBlock(games) : ''}
     ${f?.error ? `<p class="odds-health" role="status">${esc(f.error)} <button type="button" class="odds-link" data-odds-refresh>Retry</button></p>` : oddsRefreshFeedback(refresh)}
     <div class="odds-lay"><div class="odds-boards">
       ${section('Live', live)}${section(S.isToday ? 'Up next' : 'Scheduled', soon)}
