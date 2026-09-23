@@ -4,3 +4,5 @@ nfl/data/
 ncaaf/data/
 .DS_Store
 *.log
+nhl/research/data/
+nhl/research/.venv/

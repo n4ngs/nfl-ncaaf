@@ -8,7 +8,7 @@
 <main id="app" class="wrap"><header class="nh-head"><div><p class="eyebrow"><span class="league-mark">NHL</span> THE.BOARD / HOCKEY</p><h1>Hockey, in play<span>.</span></h1><p class="nh-deck">The score. The market. The moment.</p></div><label class="date-label">YOUR SLATE<input id="slate-date" type="date" aria-label="NHL slate date"></label></header>
 <div class="slate-overview" id="slate-overview" aria-label="Slate overview"></div><p id="slate-status" class="sr-only" role="status">Connecting to the ice…</p>
 <nav class="nh-tabs" aria-label="NHL views"><a href="#board">Board</a><a href="#live">Live</a><a href="#bets">My bets</a></nav>
-<div id="feed-note" role="status" class="feed-note"></div><section id="board-view"><div class="nh-toolbar"><div class="seg" role="group" aria-label="Markets"><button data-market="ml" aria-pressed="true">Moneyline</button><button data-market="s" aria-pressed="false">Puck line</button><button data-market="t" aria-pressed="false">Total</button></div><p class="market-note">Full game <span>Includes OT · check shootout rules</span></p></div><div id="game-list" class="game-list"><div class="empty">Loading NHL schedule…</div></div></section>
+<div id="feed-note" role="status" class="feed-note"></div><section id="board-view"><div class="nh-toolbar"><div class="seg" role="group" aria-label="Markets"><button data-market="ml" aria-pressed="true">Moneyline</button><button data-market="s" aria-pressed="false">Puck line</button><button data-market="t" aria-pressed="false">Total</button></div><p class="market-note">Full game <span>Includes OT · check shootout rules</span></p></div><section id="goalie-matrix" class="goalie-matrix" aria-label="Goalie Matrix"></section><div id="game-list" class="game-list"><div class="empty">Loading NHL schedule…</div></div></section>
 <section id="bets-view" hidden><div id="portfolio"></div></section><p class="nh-foot">WebSocket API + Additional Coverage · NHL scores and official replays · Automatic updates</p></main>
 <dialog id="game-dialog" aria-label="NHL game details"><div class="dialog-bar"><button data-close aria-label="Close game details">×</button></div><div id="game-detail"></div></dialog>
 <dialog id="ticket-dialog" aria-label="Log NHL ticket"><div class="dialog-bar"><button data-close aria-label="Close ticket">×</button></div><div id="ticket-detail"></div></dialog>
@@ -16,7 +16,7 @@
 <script src="/_board/portfolio.js"></script>
 <script src="/_board/portfolio-view.js"></script>
 <script src="replays.js"></script>
-<script src="app.js"></script>
+<script src="vas.js"></script><script src="app.js"></script>
 <script src="/_board/activity.js"></script>
 <script src="/_board/support.js"></script>
 </body></html>
