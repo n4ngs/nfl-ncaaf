@@ -38,12 +38,17 @@ const ADMIN_CODE = (process.env.ACCESS_CODE || '').trim();
 const GUEST_CODE = (process.env.GUEST_CODE || '').trim();
 const hashCode = (c) => crypto.createHash('sha256').update(`hl:${c}`).digest('hex');
 const OWNER_HASH = ADMIN_CODE ? hashCode(ADMIN_CODE) : '';
-const GUEST_HASH = GUEST_CODE ? hashCode('guest:' + GUEST_CODE) : '';
+/* Universal access (owner's call, 2026-09-23): no guest code, no guest link. Open boards still need a guest
+   credential the engines can verify, so without GUEST_CODE one is derived from the admin code: private, never shown,
+   never accepted at a sign-in box, and stable across deploys. Every browser gets its own device id, so bets stay
+   private per person. Setting GUEST_CODE restores the old shareable code and /g/ link. */
+const GUEST_SECRET = GUEST_CODE || (ADMIN_CODE ? crypto.createHash('sha256').update(`open-guest:${ADMIN_CODE}`).digest('hex') : '');
+const GUEST_HASH = GUEST_SECRET ? hashCode('guest:' + GUEST_SECRET) : '';
 // A stable, unguessable one-tap guest link: share https://host/g/<GUEST_LINK>.
 // Bing Bong Live hashes its own way, so mint its token too and one entry covers all three sports.
 const bblTok = (x) => crypto.createHash('sha256').update(`bing-bong-live:${x}`).digest('hex').slice(0, 40);
 const BBL_OWNER = ADMIN_CODE ? bblTok(ADMIN_CODE) : '';
-const BBL_GUEST = GUEST_CODE ? bblTok('guest:' + GUEST_CODE) : '';
+const BBL_GUEST = GUEST_SECRET ? bblTok('guest:' + GUEST_SECRET) : '';
 const GUEST_LINK = GUEST_CODE ? crypto.createHash('sha256').update(`guestlink:${GUEST_CODE}`).digest('hex').slice(0, 24) : '';
 const OWNER_NAME = (process.env.OWNER_NAME || '').trim().slice(0, 24);
 const GATED = !!ADMIN_CODE;
@@ -115,7 +120,8 @@ function childEnv(key) {
   env.TELEMETRY_PEER_URL = `http://127.0.0.1:${sib.port}`;
   env.TELEMETRY_PEER_NAME = sib.appId;
   for (const k of ['ACCESS_CODE', 'GUEST_CODE', 'OWNER_NAME', 'OWNER_CODE']) {
-    const v = pick(key, k);
+    let v = pick(key, k);
+    if (k === 'GUEST_CODE' && v == null && GUEST_SECRET) v = GUEST_SECRET;
     if (v != null) env[k] = v; else delete env[k];
   }
   return env;
