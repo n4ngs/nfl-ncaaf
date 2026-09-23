@@ -45,9 +45,48 @@ function marketScore(sides) {
   const rows=Object.values(sides), clocks=rows.map(q=>Date.parse(q.source_observed_at));
   return clocks.length && clocks.every(Number.isFinite) ? Math.min(...clocks) : -Infinity;
 }
+function suspectZeroSpreads(events,sport) {
+  const suspect=new Set(), cohorts=new Map();
+  if(!['nfl','ncaaf'].includes(sport))return suspect;
+  const probability=odds=>odds<0?-odds/(100-odds):100/(100+odds);
+  for(const e of events) {
+    if(phase(e)!==false || e.__owlsChannel==='ps3838-realtime' || !sourceTime(e.commence_time)
+      || typeof e.home_team!=='string' || typeof e.away_team!=='string' || !norm(e.home_team) || !norm(e.away_team)
+      || norm(e.home_team)===norm(e.away_team) || e.market_type==='outright')continue;
+    for(const b of e.bookmakers || []) {
+      if((b.key||e.__owlsBook)!=='betmgm')continue;
+      const pair=m=>{
+        if(!m || state(m,b,e)!=='active' || m.outcomes?.length!==2)return null;
+        const rows=[e.home_team,e.away_team].map(name=>m.outcomes.find(o=>norm(o.name)===norm(name)));
+        if(rows.some(o=>!o || num(o.price)===null || Math.abs(num(o.price))<100))return null;
+        const clocks=rows.map(o=>sourceTime(o.last_update??m.last_update??b.last_update??e.lastUpdate));
+        if(!clocks[0] || clocks[0]!==clocks[1])return null;
+        const probabilities=rows.map(o=>probability(num(o.price)));
+        return {rows,clock:clocks[0],homeProbability:probabilities[0]/(probabilities[0]+probabilities[1])};
+      };
+      const market=b.markets?.find(m=>m.key==='spreads'),spread=pair(market);
+      if(!spread || spread.rows.some(o=>num(o.point)===null))continue;
+      const moneyline=pair(b.markets?.find(m=>m.key==='h2h'));
+      const zero=spread.rows.every(o=>num(o.point)===0),key=spread.clock.slice(0,16);
+      const cohort=cohorts.get(key)||{games:new Map(),rows:[]};cohorts.set(key,cohort);
+      const row={market,spread,moneyline,zero};cohort.rows.push(row);
+      const game=`${norm(e.away_team)}@${norm(e.home_team)}:${sourceTime(e.commence_time)}`;
+      const prior=cohort.games.get(game);if(!prior || prior.spread.clock<=spread.clock)cohort.games.set(game,row);
+    }
+  }
+  // Observed upstream failure: an entire current BetMGM batch reports 0 handicap.
+  // Require a >=5-game, >=90%-zero source-minute cohort AND a >=8pp same-clock
+  // ML disagreement per game. Genuine PK prices, other periods/books and clocks survive.
+  for(const {games,rows} of cohorts.values()) {
+    if(games.size<5 || [...games.values()].filter(r=>r.zero).length/games.size<0.9)continue;
+    for(const {market,spread,moneyline,zero} of rows)if(zero && moneyline?.clock===spread.clock
+      && Math.abs(spread.homeProbability-moneyline.homeProbability)>=0.08)suspect.add(market);
+  }
+  return suspect;
+}
 function normalizeBoard(payload,sport,options={}) {
-  const grouped=new Map();
-  for (const e of rawEvents(payload,sport)) {
+  const grouped=new Map(),events=rawEvents(payload,sport),suspectZeros=suspectZeroSpreads(events,sport);
+  for (const e of events) {
     const start=sourceTime(e.commence_time), home=e.home_team, away=e.away_team;
     if (!start || typeof home!=='string' || typeof away!=='string' || !norm(home) || !norm(away) || norm(home)===norm(away) || e.market_type==='outright') continue;
     const live=phase(e), id=`${sport}:${norm(away)}@${norm(home)}:${start}`;
@@ -66,13 +105,14 @@ function normalizeBoard(payload,sport,options={}) {
         for(const o of m.outcomes || []) {
           const side=market==='t'?(/^(over|under)$/i.test(o.name||'')?String(o.name).toLowerCase():null):norm(o.name)===norm(home)?'home':norm(o.name)===norm(away)?'away':null;
           if(!side) continue;
-          const price=num(o.price), line=market==='ml'?null:num(o.point);
+          const price=num(o.price), reportedLine=market==='ml'?null:num(o.point), quarantined=suspectZeros.has(m),line=quarantined?null:reportedLine;
           const q={line_value:line,american_odds:price,source_observed_at:sourceTime(o.last_update ?? m.last_update ?? b.last_update ?? e.lastUpdate),market_status:state(o,m,b,e,e.freshness,payload?.bookStatus?.[b.key]),is_live:live,
             provider_event_id:String(e.id ?? e.eventId ?? ''),provider_quote_id:o.selectionId ?? o.id ?? null,
             optionMarketId:o.marketId ?? m.id ?? null,optionId:o.selectionId ?? null,
             bet_link:refForOwls(b.event_link,book),provider_channel:e.__owlsChannel || options.channel || 'odds',
             pair_id:`owls:${e.id ?? id}:${b.key}:${m.key}:${m.last_update ?? b.last_update ?? e.lastUpdate ?? 'untimed'}`};
           if(price===null || Math.abs(price)<100 || (market!=='ml' && line===null)) q.market_status=q.market_status==='active'?'unverified':q.market_status;
+          if(quarantined)Object.assign(q,{reported_line_value:reportedLine,reason_code:'UPSTREAM_ZERO_HANDICAP_CONFLICT'});
           if(candidates[side]) { candidates[side].market_status='unverified'; candidates[side].conflicted=true; continue; }
           candidates[side]=q;
         }
