@@ -89,13 +89,17 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {} })
   async function shots(year, current) {
     const f = shotsFile(year), fresh = fs.existsSync(f) && (!current || now() - fs.statSync(f).mtimeMs < 20 * 3600e3);
     if (!fresh) {
-      try {
-        const buf = await fetchBuffer(`https://moneypuck.com/moneypuck/playerData/shots/shots_${year}.zip`);
-        const rows = parseShots(unzipFirst(buf)); writeGz(f, rows); log(`[vas] MoneyPuck ${year}: ${rows.length} shots`);
-      } catch (e) { status.lastError = `shots ${year}: ${String(e.message || e).slice(0, 120)}`; }
+      // MoneyPuck first. Older seasons leave that path, so fall back to a public mirror of the same files
+      // (its 2025-26 file was verified byte-identical to moneypuck.com).
+      for (const url of [`https://moneypuck.com/moneypuck/playerData/shots/shots_${year}.zip`, `https://peter-tanner.com/moneypuck/downloads/shots_${year}.zip`]) {
+        try {
+          const rows = parseShots(unzipFirst(await fetchBuffer(url))); writeGz(f, rows);
+          status.seasons[year] = { source: new URL(url).hostname }; log(`[vas] ${year}: ${rows.length} shots from ${new URL(url).hostname}`); break;
+        } catch (e) { status.lastError = `shots ${year} (${new URL(url).hostname}): ${String(e.message || e).slice(0, 100)}`; }
+      }
     }
     if (!fs.existsSync(f)) return [];
-    const rows = readGz(f); status.seasons[year] = { shots: rows.length, updated: new Date(fs.statSync(f).mtimeMs).toISOString() }; return rows;
+    const rows = readGz(f); status.seasons[year] = { ...(status.seasons[year] || {}), shots: rows.length, updated: new Date(fs.statSync(f).mtimeMs).toISOString() }; return rows;
   }
   const boxFile = gid => path.join(dir, 'box', gid + '.json');
   async function box(gid) {
