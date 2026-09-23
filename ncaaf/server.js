@@ -117,7 +117,7 @@ function nextId() {
 // CLV Integrity v1 keeps provider observations separate from this mutable display cache.
 // Legacy chart files remain intact; the append-only ledger is the authority for entries and closes.
 // Research model read (lib/vas-service.js); kept outside the integrity helpers the tests evaluate in isolation.
-const Model = require('./lib/vas-service').create({ dir: path.join(U.DATA, 'ncaaf-vas'), log, fetchJSON: (url) => U.getJSON(url).then((r) => r.body), nevada: BOOKS.filter((b) => b.vegas).map((b) => b.key) });
+const Model = require('./lib/vas-service').create({ dir: path.join(U.DATA, 'ncaaf-vas'), log, fetchJSON: (url) => U.getJSON(url, { timeout: 60000 }).then((r) => r.body), nevada: BOOKS.filter((b) => b.vegas).map((b) => b.key) });
 function retainObservation(G, book, L, source, receivedAt, isLive = false, period = 'full_game', providerEvent = null, extra = {}) {
   if (!L) return L;
   const metadata = { source, received_at: receivedAt, is_live: typeof L.is_live === 'boolean' ? L.is_live : isLive, period,

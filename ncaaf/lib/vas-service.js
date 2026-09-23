@@ -37,9 +37,11 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
       const season = seasonOf(new Date(now()));
       const h = await data.history(season, { maxCloses: 400 });
       state = E.build(h, MODEL.config);
-      const up = await data.upcoming(season);
-      upcoming = new Map(up.map(r => [String(r.gid), r]));
-      builtAt = new Date(now()).toISOString(); info = { season, games: h.games.length, complete: h.complete, upcoming: up.length }; lastError = null;
+      builtAt = new Date(now()).toISOString(); lastError = null;
+      // A slow or failed scoreboard call must not throw away a good history build: keep the previous schedule.
+      try { const up = await data.upcoming(season); upcoming = new Map(up.map(r => [String(r.gid), r])); }
+      catch (e) { lastError = 'upcoming: ' + String(e.message || e).slice(0, 120); }
+      info = { season, games: h.games.length, complete: h.complete, upcoming: upcoming.size };
     } catch (e) { lastError = String(e.message || e).slice(0, 160); log('[ncaaf-vas] refresh failed: ' + lastError); }
     finally { building = false; }
   }
