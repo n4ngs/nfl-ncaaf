@@ -65,17 +65,24 @@ test('unchanged quote rows preserve their receipt metadata when another event in
 test('deterministic fair-pair cache is bounded and immutable so repeated references cannot corrupt other opportunities',()=>{const a=-117.123456,b=-108.654321,first=fairPair(a,b);assert.equal(fairPair(a,b),first);assert.equal(Object.isFrozen(first),true);assert.throws(()=>{first[0]=1;},TypeError);for(let i=0;i<2200;i++)assert.ok(fairPair(-110-i/10000,-109));const refitted=fairPair(a,b);assert.notEqual(refitted,first);assert.deepEqual(refitted,first);assert.equal(fairPair(String(a),b),null);});
 
 
-test('Novig stays in raw coverage but cannot qualify for EV or alerts in pregame or live markets',()=>{
- for(const live of [false,true])for(const provider of ['sharp','owls']){
-  const frame=fixture({live}),books=frame.events[0][live?'live':'books'];
-  books.novig=copy(books.mgm);
-  for(const q of Object.values(books.novig.integrityMeta.ml)){q.pair_id='novig:ml';q.bet_link=null;q.max_bet=null;}
+test('unsupported exchange and contract books cannot qualify across providers, phases and markets',()=>{
+ const excluded=['novig','prophetx','betfair','betfair_lay','matchbook','smarkets','sx_bet','polymarket','kalshi','robinhood','fanatics_markets','gemini'];
+ for(const live of [false,true])for(const provider of ['sharp','owls'])for(const market of ['ml','s','t']){
+  const frame=fixture({live,market}),books=frame.events[0][live?'live':'books'];
+  for(const book of [...excluded,'fd','fanatics']){
+   books[book]=copy(books.mgm);
+   for(const q of Object.values(books[book].integrityMeta[market])){
+    q.pair_id=book+':'+market;q.max_bet=1000;
+    // Complete, current pairs and an exact selection link cannot bypass execution policy.
+    q.bet_link={provider:'sharp',book,id:q.provider_quote_id};
+   }
+  }
   const before=copy(frame),service=new OpportunityService({now:()=>NOW});
   try{
    service.update(provider,'mlb',frame);
-   const rows=service.snapshot().rows;
-   assert.ok(rows.some(r=>r.book==='mgm'&&r.eligible===true),`${provider} ${live?'live':'pregame'} ordinary book remains eligible`);
-   assert.equal(rows.some(r=>r.book==='novig'),false,`${provider} ${live?'live':'pregame'} Novig is not published to qualified rows/alerts`);
+   const rows=service.snapshot().rows,context=`${provider} ${live?'live':'pregame'} ${market}`;
+   for(const book of ['mgm','fd','fanatics'])assert.ok(rows.some(r=>r.book===book&&r.eligible===true),`${context} ${book} remains eligible`);
+   for(const book of excluded)assert.equal(rows.some(r=>r.book===book),false,`${context} ${book} is absent from qualified rows/alerts`);
    assert.deepEqual(frame,before,'scanner quarantine must not remove or mutate raw board quotes');
   }finally{service.close();}
  }

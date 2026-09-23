@@ -5,6 +5,13 @@ const { BOOK_NAMES } = require('./sharp-books');
 const { validRef } = require('./bet-links');
 const SPORTS = new Set(['nfl', 'ncaaf', 'mlb', 'nhl']);
 const REFERENCES = ['pin', 'circa'];
+// These catalog identities are exchanges/event contracts. The gross sportsbook
+// formula cannot model their order-side, liquidity, fees or contract settlement.
+// Qualification is independent of raw board coverage and of provider flags.
+const UNSUPPORTED_EXECUTION_BOOKS = new Set([
+  'novig', 'prophetx', 'betfair', 'betfair_lay', 'matchbook', 'smarkets', 'sx_bet',
+  'polymarket', 'kalshi', 'robinhood', 'fanatics_markets', 'gemini'
+]);
 const fairPairs = new Map(), FAIR_PAIR_CACHE_LIMIT = 2048;
 const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 const decimal = odds => Number.isFinite(odds) && Math.abs(odds) >= 100 ? odds > 0 ? 1 + odds / 100 : 1 + 100 / -odds : null;
@@ -49,9 +56,7 @@ function scan(provider, sport, frame, now) {
         if (sport === 'nfl' && market === 'ml') continue;
         const sides = market === 't' ? ['over', 'under'] : ['home', 'away'];
         for (const [book, line] of Object.entries(books)) {
-          // Novig execution requires order-side/liquidity evidence and live taker fees.
-          // Keep raw board coverage, but do not qualify gross exchange prices for EV/alerts.
-          if (book === 'novig') continue;
+          if (UNSUPPORTED_EXECUTION_BOOKS.has(book)) continue;
           for (const [index, side] of sides.entries()) {
             const quote = line?.integrityMeta?.[market]?.[side], opposite = line?.integrityMeta?.[market]?.[sides[1-index]];
             const ownExpiries = [deadline(quote, live, now), deadline(opposite, live, now)];
