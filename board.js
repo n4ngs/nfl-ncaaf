@@ -103,6 +103,12 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     }
     ring.sort((a, b) => a.t - b.t);
     for (const l of byDev.values()) l.sort((a, b) => a.t - b.t);
+    // Backfill the sticky owner mark for profiles that used the owner code before it existed.
+    for (const [id, d] of Object.entries(state.devices)) {
+      if (d.ownerAt) continue;
+      const e = (byDev.get(id) || []).find((x) => x.role === 'owner');
+      if (e || d.role === 'owner') { d.ownerAt = e ? e.t : d.last || Date.now(); dirty = true; }
+    }
   })();
   function isCleared(ev) { const c = state.cleared[ev.dev]; return !!c && ev.t <= c; }
 
@@ -150,6 +156,9 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     if (t - d.last > 30e3) dirty = true;
     d.last = t;
     if (role && d.role !== role) { d.role = role; dirty = true; }
+    // Once a browser has come through the door with the owner code it stays yours, even if a later request
+    // (a boards page opened before signing in again, an expired cookie) arrives as a guest.
+    if (role === 'owner' && !d.ownerAt) { d.ownerAt = t; dirty = true; }
     if (who.ua) {
       if (d.ua !== who.ua) { d.ua = who.ua; dirty = true; }
       // Every distinct browser string this device id has arrived with: a change is worth seeing.
@@ -347,7 +356,83 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
   }
 
   const canLookup = (ip) => resolveClientIp({ headers: {}, socket: { remoteAddress: ip } }, { mode: 'direct' }).kind === 'public';
-  const roleOfDev = (d) => d.roleSet || d.role || 'none';
+  const roleOfDev = (d) => d.roleSet || (d.ownerAt ? 'owner' : d.role) || 'none';
+
+  /* People, not browser profiles. A private/incognito window, a second browser or cleared cookies make a new
+     tb_dev, so one person can be many rows. Grouping, in order of confidence:
+       1. the owner: every profile that has used the owner code (sticky), or that you marked as yours;
+       2. likely you: a profile with the SAME browser string (user agent) as one of your profiles, seen on the
+          SAME network (same IPv4 address, or same IPv6 /64) within a day of your profile using it. Incognito
+          keeps the user agent, so this is what an owner incognito visit looks like. Mark it "Not me" to undo;
+       3. a name: every profile carrying the same name (the name a guest typed, or your label) is one person;
+       4. the same same-browser-same-network rule joins unnamed profiles to each other and to a named one.
+     Everything else is one unnamed person per profile. The result is an estimate and is labelled as one. */
+  const DAY_MS = 86400e3;
+  function netKey(ip) {
+    if (!ip) return '';
+    if (!ip.includes(':')) return ip;
+    const [head, tail] = ip.split('::'); const l = head ? head.split(':') : [], r = tail !== undefined && tail ? tail.split(':') : [];
+    const g = l.concat(Array(Math.max(0, 8 - l.length - r.length)).fill('0'), r);
+    return g.slice(0, 4).map((x) => (parseInt(x, 16) || 0).toString(16)).join(':') + '::/64';
+  }
+  const nameOf = (d) => (d.label || engineName(d) || '').trim();
+  let peopleCache = null;
+  function people() {
+    const ids = Object.keys(state.devices);
+    const sig = ids.length + ':' + ids.reduce((a, id) => Math.max(a, state.devices[id].last || 0), 0);
+    if (peopleCache && peopleCache.sig === sig && Date.now() - peopleCache.at < 15e3) return peopleCache.v;
+    const devs = state.devices;
+    const owner = new Set(ids.filter((id) => roleOfDev(devs[id]) === 'owner'));
+    // network windows: netKey -> [{id, ua, first, last}]
+    const nets = new Map();
+    for (const id of ids) for (const [ip, h] of Object.entries(devs[id].ips || {})) {
+      const k = netKey(ip); if (!k) continue;
+      let l = nets.get(k); if (!l) nets.set(k, (l = []));
+      l.push({ id, ua: devs[id].ua || '', first: h.first, last: h.last });
+    }
+    const near = (a, b) => a.first <= b.last + DAY_MS && b.first <= a.last + DAY_MS;
+    const twins = new Map();     // id -> Set of ids with same UA on the same network at about the same time
+    for (const l of nets.values()) for (let i = 0; i < l.length; i++) for (let j = i + 1; j < l.length; j++) {
+      const a = l[i], b = l[j];
+      if (a.id === b.id || !a.ua || a.ua !== b.ua || !near(a, b)) continue;
+      (twins.get(a.id) || twins.set(a.id, new Set()).get(a.id)).add(b.id);
+      (twins.get(b.id) || twins.set(b.id, new Set()).get(b.id)).add(a.id);
+    }
+    const likelyYou = new Set();
+    for (const id of ids) {
+      if (owner.has(id) || devs[id].roleSet === 'guest' || nameOf(devs[id])) continue;
+      if ([...(twins.get(id) || [])].some((o) => owner.has(o))) likelyYou.add(id);
+    }
+    // union-find over the rest
+    const parent = new Map(ids.map((id) => [id, id]));
+    const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+    const join = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(rb, ra); };
+    const rest = ids.filter((id) => !owner.has(id) && !likelyYou.has(id));
+    const byName = new Map();
+    for (const id of rest) { const n = nameOf(devs[id]).toLowerCase(); if (!n) continue; if (byName.has(n)) join(byName.get(n), id); else byName.set(n, id); }
+    const restSet = new Set(rest);
+    for (const id of rest) for (const o of twins.get(id) || []) {
+      if (!restSet.has(o)) continue;
+      const na = nameOf(devs[id]).toLowerCase(), nb = nameOf(devs[o]).toLowerCase();
+      if (na && nb && na !== nb) continue;                     // two different names are two people
+      join(id, o);
+    }
+    const groups = new Map();
+    for (const id of rest) { const r = find(id); let g = groups.get(r); if (!g) groups.set(r, (g = [])); g.push(id); }
+    const list = [...groups.values()].map((g) => {
+      const name = g.map((id) => nameOf(devs[id])).find(Boolean) || '';
+      const roles = new Set(g.map((id) => roleOfDev(devs[id])));
+      return { devices: g, name, first: Math.min(...g.map((id) => devs[id].first)), last: Math.max(...g.map((id) => devs[id].last)),
+        role: roles.has('guest') ? 'guest' : [...roles][0] || 'none', joined: g.length > 1 };
+    }).sort((a, b) => a.first - b.first);
+    let k = 0;
+    for (const p of list) { p.key = 'p' + find(p.devices[0]).slice(0, 8); p.label = p.name || `Unnamed visitor ${++k}`; }
+    const personOf = new Map();
+    for (const p of list) for (const id of p.devices) personOf.set(id, p);
+    const v = { owner, likelyYou, list, personOf };
+    peopleCache = { sig, at: Date.now(), v };
+    return v;
+  }
   function summary(id) {
     const d = state.devices[id];
     const ev = byDev.get(id) || [];
@@ -370,9 +455,13 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     const bets = betsOf(d);
     const done = bets.filter((b) => b.status === 'won' || b.status === 'lost' || b.status === 'push');
     const name = engineName(d);
-    const who = d.label || name || '';
+    const P = people(), person = P.personOf.get(id) || null, likely = P.likelyYou.has(id);
+    const who = d.label || name || (person && person.joined ? person.label : '') || '';
+    const net = netKey(d.ipLast || '');
     return {
-      id, role: roleOfDev(d), roleSet: d.roleSet || null, roleSeen: d.role || null, label: d.label || '', name, who,
+      id, role: likely ? 'owner' : roleOfDev(d), likelyYou: likely, ownerAt: d.ownerAt || null, roleSet: d.roleSet || null, roleSeen: d.role || null, label: d.label || '', name, who,
+      person: person ? { key: person.key, label: person.label, named: !!person.name, devices: person.devices.length } : null,
+      ipVersion: d.ipLast ? (d.ipLast.includes(':') ? 6 : 4) : null, network: net && net !== d.ipLast ? net : '',
       ua: d.ua || '', ...info, ctx: d.ctx || null,
       ipLast: d.ipLast || '', ipInfo: d.ipInfo || null, ipCount: Object.keys(d.ips || {}).length,
       first: d.first, last: d.last, live: streams.has(id) || (!!lastReal && Date.now() - lastReal < LIVE_MS), streaming: streams.get(id) || 0,
@@ -397,7 +486,17 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
       if (activity.length < 500) activity.push(v);
       if (v.lvl === 1 && feed.length < 250) feed.push(v);
     }
-    return { now: Date.now(), owner: ownerName, devices, feed, activity, activityLimit: 500 };
+    const P = people(), WEEK = 7 * DAY_MS, now = Date.now();
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const counts = {
+      people: P.list.length, named: P.list.filter((p) => p.name).length, unnamed: P.list.filter((p) => !p.name).length,
+      newWeek: P.list.filter((p) => now - p.first < WEEK).length, newToday: P.list.filter((p) => p.first >= today.getTime()).length,
+      activeWeek: P.list.filter((p) => now - p.last < WEEK).length,
+      yourProfiles: P.owner.size, likelyYou: P.likelyYou.size, profiles: devices.length,
+    };
+    const peopleList = P.list.map((p) => ({ key: p.key, label: p.label, named: !!p.name, first: p.first, last: p.last, role: p.role, devices: p.devices }))
+      .sort((a, b) => b.last - a.last);
+    return { now, owner: ownerName, devices, feed, activity, activityLimit: 500, counts, people: peopleList };
   }
   function deviceJSON(id) {
     const d = state.devices[id];
@@ -441,7 +540,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     for (const w of wrongByIp.values()) if (w.n >= 3) alerts.push({ t: w.last, sev: 'high', kind: 'Repeated wrong codes', dev: [...w.devs][0], ip: w.ip, text: `${w.n} wrong codes from ${w.ip} in the last day (after 10 the address is locked out for 15 minutes).` });
     for (const [id, d] of Object.entries(devs)) {
       const role = roleOfDev(d);
-      if (now - d.first < WEEK && role !== 'owner') alerts.push({ t: d.first, sev: role === 'guest' ? 'notice' : 'info', kind: role === 'guest' ? 'New guest device' : 'New signed-out visitor', dev: id, ip: Object.entries(d.ips || {}).sort((a, b) => a[1].first - b[1].first)[0]?.[0] || '', text: role === 'guest' ? 'A device came in as a guest for the first time.' : 'A device reached the sign-in screen and never got in.' });
+      if (now - d.first < WEEK && role !== 'owner' && !people().likelyYou.has(id)) alerts.push({ t: d.first, sev: role === 'guest' ? 'notice' : 'info', kind: role === 'guest' ? 'New guest device' : 'New signed-out visitor', dev: id, ip: Object.entries(d.ips || {}).sort((a, b) => a[1].first - b[1].first)[0]?.[0] || '', text: role === 'guest' ? 'A device came in as a guest for the first time.' : 'A device reached the sign-in screen and never got in.' });
       for (const [ua, h] of Object.entries(d.uas || {})) if (h.first - d.first > 60e3 && now - h.first < WEEK) {
         const a = uaInfo(ua);
         alerts.push({ t: h.first, sev: role === 'owner' ? 'info' : 'notice', kind: 'Different browser on the same device', dev: id, ip: d.ipLast, text: `This device's sign-in showed up in ${[`${a.browser} ${a.bVer}`.trim() || 'an unrecognised browser', `${a.os} ${a.osVer}`.trim()].filter(Boolean).join(' on ')}. Either the browser updated, or the sign-in was copied to another browser.` });
@@ -517,6 +616,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     if (body.action) return act(id, d, body.action);
     if (typeof body.label === 'string') d.label = body.label.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 40);
     if (body.role === 'owner' || body.role === 'guest' || body.role === null || body.role === 'auto') d.roleSet = body.role === 'auto' ? null : body.role;
+    peopleCache = null;
     dirty = true; save();
     return true;
   }
@@ -557,6 +657,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     const d = state.devices[id];
     if (!d) return false;
     state.cleared[id] = Date.now();
+    peopleCache = null;
     for (const sp of SPORT_KEYS) for (const u of d.links?.[sp] || []) engineToDev.delete(`${sp}:${u}`);
     delete state.devices[id];
     const gone = new Set(byDev.get(id) || []);
