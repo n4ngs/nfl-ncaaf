@@ -22,7 +22,17 @@ F['clv_home'] = F.bet_line - F.close
 S1 = sum(GROUPS.values(), [])
 SD = float((F.margin + F.close)[F.season < HOLDOUT[0]].std()); TSD = float((F.total - F.tclose)[F.season < HOLDOUT[0]].std())
 CTX2 = ['x_open', 'x_open_abs', 'early', 'home', 'min_n', 'tier_g5', 'tier_fcs', 'conf_game', 'd_mkt', 'd_talent', 'd_qb_pepa', 'd_qb_starts']
-S2 = {'A': ['x_gap'] + CTX2, 'B': ['x_gap'] + CTX2 + ['x_open_vs_cons'], 'C': ['x_gap'] + CTX2 + LATE}
+# key skill players (late news): lead back / lead receiver absent, weighted by his share (keyplayers.py)
+K = pd.read_parquet('data/cache/keyplayers.parquet')
+for side in ('home', 'away'):
+    F = F.merge(K.rename(columns={'team': f'{side}_id', 'rb_out': f'{side}_rb_out', 'wr_out': f'{side}_wr_out', 'rb_share': f'{side}_rb_share', 'wr_share': f'{side}_wr_share'}), on=['gid', f'{side}_id'], how='left')
+for c in [f'{s}_{k}' for s in ('home', 'away') for k in ('rb_out', 'wr_out', 'rb_share', 'wr_share')]: F[c] = F[c].fillna(0)
+F['L_d_rb_out'] = F.home_rb_out * F.home_rb_share - F.away_rb_out * F.away_rb_share
+F['L_d_wr_out'] = F.home_wr_out * F.home_wr_share - F.away_wr_out * F.away_wr_share
+REC = ['d_last_ats', 'd_last_upset', 'd_last_blowout']
+KEY = ['L_d_rb_out', 'L_d_wr_out']
+# E = "explain the move": everything known by kickoff (recency + QB + key players). Explanation model, late news.
+S2 = {'A': ['x_gap'] + CTX2, 'B': ['x_gap'] + CTX2 + ['x_open_vs_cons'], 'C': ['x_gap'] + CTX2 + LATE, 'E': ['x_gap'] + CTX2 + REC + LATE + KEY}
 TOT1 = ['t_pts', 't_plays', 'early', 'min_n', 'neutral', 'home_fbs', 'away_fbs']
 TOT2 = {'A': ['tx_gap', 'tx_open', 'early', 'min_n', 'tier_g5', 'tier_fcs', 'x_open_abs'], 'B': ['tx_gap', 'tx_open', 'early', 'min_n', 'tier_g5', 'tier_fcs', 'x_open_abs', 'tx_open_vs_cons']}
 
@@ -44,7 +54,7 @@ tk = F.tbet_line.notna() & F.tclose.notna() & F.t_fund.notna()
 proof = json.load(open('data/cache/proof.json'))
 # conservative: every rule ever scored on the holdout during this research, including two earlier exploratory proof.py
 # runs (20 + 32 rules) made while the pipeline was being built, + ablate.py (10 configs x 2 thresholds)
-n_prior = proof.get('n_rules_spread', 0) + proof.get('n_rules_totals', 0) + 20 + 52
+n_prior = proof.get('n_rules_spread', 0) + proof.get('n_rules_totals', 0) + 20 + 52 + 10   # + move.py (5 variants x 2)
 THR = (0.5, 1.0, 1.5)
 n_here = len(S2) * len(THR) + len(TOT2) * len(THR)
 BONF = n_prior + n_here
@@ -96,7 +106,9 @@ model = {
         'B': 'needs the median OPEN across several books, captured before the bet book moves (the app must record openers itself); '
              'historical opens come from different feeds whose open timestamps are not published, so the edge is statistically proven '
              'on the holdout but its real-time availability is NOT verified -> forward-test before trusting.',
-        'C': 'late news: needs the confirmed starting QB (first snap) before the books adjust; only actionable on early QB news.'},
+        'C': 'late news: needs the confirmed starting QB (first snap) before the books adjust; only actionable on early QB news.',
+        'E': 'explains the open->close move with everything known by kickoff: model gap, last-week result vs the spread (recency), '
+             'starting-QB change, lead back / lead receiver out (share-weighted). Used to EXPLAIN a move; late news, not a bet by itself.'},
     'preseason': {'season': 2026, 'talent_z': pre.get('2026', {}), 'non_fbs_talent_z': -2.0,
                   'ret_off': {str(int(t)): float(o) for t, o in zip(rp.team_id, rp.off_returning) if pd.notna(o)},
                   'ret_def': {str(int(t)): float(d) for t, d in zip(rp.team_id, rp.def_returning) if pd.notna(d)}, 'ret_missing': 0.5},

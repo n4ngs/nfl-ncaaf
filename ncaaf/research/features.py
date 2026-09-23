@@ -34,6 +34,7 @@ class Walk:
         self.M = {}        # market rating
         self.qb_last = {}  # team -> qb id of last game
         self.qb = {}       # (team, qb) -> [starts, pepa_sum]
+        self.recent = {}   # team -> [season, last-game ATS margin (clipped), won as underdog, won by 21+]
 
     def _st(self, t):
         s = self.S.get(t)
@@ -77,6 +78,11 @@ class Walk:
         r['qb_starts'] = math.log1p(st[0])
         r['qb_pepa'] = (st[1] + self.c['k_qb'] * prior) / (st[0] + self.c['k_qb'])
         r['qb'] = q
+        L = self.recent.get(t)
+        same = L is not None and L[0] == season
+        r['last_ats'] = L[1] if same else 0.0
+        r['last_upset'] = L[2] if same else 0
+        r['last_blowout'] = L[3] if same else 0
         return r
 
     def update_day(self, games):
@@ -133,6 +139,10 @@ class Walk:
                 mh = self.M.get(h, 0.0 if g['home_fbs'] else self.c['fcs_m']); ma = self.M.get(a, 0.0 if g['away_fbs'] else self.c['fcs_m'])
                 err = -c - (mh - ma + self.c['hfa_m'] * (1 - g['neutral']))
                 self.M[h] = mh + self.c['lr_m'] * err; self.M[a] = ma - self.c['lr_m'] * err
+                # recency (open-safe): last game against its own closing spread, from each team's side
+                m = g['home_pts'] - g['away_pts']
+                self.recent[h] = [g['season'], max(-28.0, min(28.0, float(m + c))), int(m > 0 and c > 0), int(m > 21)]
+                self.recent[a] = [g['season'], max(-28.0, min(28.0, float(-m - c))), int(m < 0 and c < 0), int(-m > 21)]
 
 def combine(h, a, g):
     f = {}
@@ -144,6 +154,8 @@ def combine(h, a, g):
     f['d_rest'] = h['rest'] - a['rest']
     f['min_n'] = min(h['n'], a['n'])
     f['d_qb_starts'] = h['qb_starts'] - a['qb_starts']; f['d_qb_pepa'] = h['qb_pepa'] - a['qb_pepa']
+    f['d_last_ats'] = h['last_ats'] - a['last_ats']; f['d_last_upset'] = h['last_upset'] - a['last_upset']
+    f['d_last_blowout'] = h['last_blowout'] - a['last_blowout']
     f['neutral'] = g['neutral']; f['conf_game'] = g['conf_game']
     f['home_fbs'] = g['home_fbs']; f['away_fbs'] = g['away_fbs']
     return f

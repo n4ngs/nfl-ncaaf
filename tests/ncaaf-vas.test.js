@@ -237,3 +237,27 @@ test('shipped close seed is well formed', { skip: !fs.existsSync(SEED) }, () => 
   const c = JSON.parse(fs.readFileSync(SEED)).closes; const v = Object.values(c);
   assert.ok(v.length > 2000); assert.ok(v.every((x) => x === null || (Number.isFinite(x) && Math.abs(x) < 80)));
 });
+
+test('explainMove: parts add up to the variant-E prediction, actual move and what-if per lead player', () => {
+  const st = { features: ['x_gap', 'd_last_ats', 'L_d_rb_out', 'early'], coef: [0.3, 0.2, -0.4, 0.1], mean: [0, 0, 0, 0.2], std: [5, 10, 0.1, 0.4], intercept: 0.05 };
+  const m = { stage2: { E: st } };
+  const e = E.explainMove({ d_last_ats: 14, early: 0 }, 4, { open: -3, now: -5 }, m, { away: { rb: 0.5 } });
+  const lin = E.linear(st, { x_gap: 1, d_last_ats: 14, L_d_rb_out: -0.5, early: 0 });
+  assert.ok(Math.abs(e.predicted - lin) < 1e-12, 'sum of parts = linear model');
+  assert.equal(e.actual, 2, 'open -3 -> now -5 = 2 pts toward home');
+  assert.ok(Math.abs(e.unexplained - (2 - lin)) < 1e-12);
+  assert.ok(Math.abs(e.parts.find((p) => p.key === 'key').pts - (-0.4 * -0.5 / 0.1)) < 1e-12, 'away lead back out moves it toward home');
+  assert.ok(Math.abs(e.perShare.rb - (-4)) < 1e-12);
+  assert.equal(E.explainMove({}, 0, { open: -3 }, {}), null, 'no variant E in the model');
+});
+
+test('loader: lead back / receiver from the last 3 games (passers excluded upstream), share thresholds', () => {
+  const g = (n, rush, rec) => ({ season: 2026, start: `2026-09-0${n}T19:00Z`, home_id: 1, away_id: 2, home_rush: rush, home_rec: rec, away_rush: [], away_rec: [] });
+  const games = [g(1, [[10, 20, 'Lacy'], [11, 5, 'B']], [[20, 3, 'W1'], [21, 3, 'W2'], [22, 3, 'W3'], [23, 3, 'W4'], [24, 3, 'W5']]),
+    g(2, [[10, 18, 'Lacy'], [11, 6, 'B']], [[20, 2, 'W1']]), g(3, [[11, 12, 'B']], [])];
+  const L = D.leads(games, 1, 2026);
+  assert.equal(L.rb.name, 'Lacy'); assert.ok(Math.abs(L.rb.share - 38 / 61) < 1e-12);
+  assert.equal(L.wr.name, 'W1'); assert.ok(Math.abs(L.wr.share - 5 / 17) < 1e-12);
+  assert.equal(D.leads([g(1, [], [[20, 3, 'W1'], [21, 3, 'W2'], [22, 3, 'W3'], [23, 3, 'W4'], [24, 3, 'W5']]), g(2, [], [[25, 3, 'W6']])], 1, 2026).wr, null, 'no receiver reaches 22 % of catches');
+  assert.equal(D.leads(games.slice(0, 1), 1, 2026).rb, null, 'needs two games');
+});

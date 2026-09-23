@@ -33,6 +33,7 @@ const P5 = new Set(['SEC', 'Big Ten', 'Big 12', 'ACC', 'Pac-12']);
 const NOTRE_DAME = 87;
 const NOT_BOOKS = new Set(['numberfire', 'teamrankings', 'accuscore', 'consensus', 'SportsInsights', 'Opening']);
 const CURRENT_TTL = 12 * 3600e3, RETRY = 3600e3;
+const CACHE_V = 2;   // bump when the compact season format changes: older season caches are rebuilt once
 
 function splitCsv(line) {
   if (line.indexOf('"') < 0) return line.split(',');
@@ -73,8 +74,14 @@ function compactSeason(season, { schedule, gamelog, teams, playerBox }) {
     const o = {}; for (const [key, col] of Object.entries(STAT)) o[key] = num(r[col]); stats.set(k, o);
   }
   const qb = new Map();   // most pass attempts, ties -> larger athlete id (research: stable sort by att, id; last)
-  for (const r of csvRows(playerBox, (l) => l.includes('passing'))) {
+  const skill = new Map(); // gid:team -> {rush: {id: [carries, name]}, rec: {id: [catches, name]}, pass: Set(ids)}
+  const sk = (k) => { let v = skill.get(k); if (!v) skill.set(k, (v = { rush: {}, rec: {}, pass: new Set() })); return v; };
+  for (const r of csvRows(playerBox, (l) => l.includes('passing') || l.includes('rushing') || l.includes('receiving'))) {
+    const id0 = num(r.athlete_id), k0 = num(r.game_id) + ':' + num(r.team_id);
+    if (id0 !== null && r.category === 'rushing') { const n = num(r.rushingAttempts) ?? num(String(r.stat_1 || '').split('/')[0]); if (n) sk(k0).rush[id0] = [n, r.athlete_name || '']; }
+    if (id0 !== null && r.category === 'receiving') { const n = num(r.receptions) ?? num(String(r.stat_1 || '').split('/')[0]); if (n) sk(k0).rec[id0] = [n, r.athlete_name || '']; }
     if (r.category !== 'passing') continue;
+    if (id0 !== null) sk(k0).pass.add(id0);
     const raw = (r['completions/passingAttempts'] !== undefined && r['completions/passingAttempts'] !== '') ? r['completions/passingAttempts'] : r.stat_1;
     const att = num(String(raw || '').split('/')[1]) || 0, id = num(r.athlete_id);
     if (id === null) continue;
@@ -94,11 +101,34 @@ function compactSeason(season, { schedule, gamelog, teams, playerBox }) {
       const s = stats.get(gid + ':' + t);
       for (const key of Object.keys(STAT)) g[side + '_' + key] = s ? s[key] : null;
       const q = qb.get(gid + ':' + t); g[side + '_qb'] = q ? q[1] : 0;
+      // top ball carriers / receivers of this game (passers excluded from carries), for the lead-player read
+      const x = skill.get(gid + ':' + t);
+      const top = (o, skip) => Object.entries(o || {}).filter(([id]) => !(skip && skip.has(Number(id)))).sort((p, q2) => q2[1][0] - p[1][0]).slice(0, 5).map(([id, v]) => [Number(id), v[0], v[1]]);
+      g[side + '_rush'] = x ? top(x.rush, x.pass) : []; g[side + '_rec'] = x ? top(x.rec) : [];
     }
     games.push(g);
   }
   games.sort((x, y) => (x.start < y.start ? -1 : x.start > y.start ? 1 : x.gid - y.gid));
-  return { season, teams: T, games };
+  return { v: CACHE_V, season, teams: T, games };
+}
+
+// Lead back / lead receiver going into a team's next game: most carries (catches) over its last 3 games this
+// season, if that is >= 35 % (22 %) of the team's total - the same rule as research/keyplayers.py. Needs >= 2 games.
+function leads(games, teamId, season) {
+  const mine = games.filter((g) => g.season === season && (g.home_id === teamId || g.away_id === teamId)).sort((a, b) => (a.start < b.start ? -1 : 1)).slice(-3);
+  const out = { rb: null, wr: null, games: mine.length };
+  if (mine.length < 2) return out;
+  for (const [key, field, thr] of [['rb', 'rush', 0.35], ['wr', 'rec', 0.22]]) {
+    const tot = new Map(), names = new Map(); let all = 0;
+    for (const g of mine) {
+      const side = g.home_id === teamId ? 'home' : 'away';
+      for (const [id, n, name] of g[side + '_' + field] || []) { tot.set(id, (tot.get(id) || 0) + n); names.set(id, name); all += n; }
+    }
+    let best = null, bn = 0;
+    for (const [id, n] of tot) if (n > bn || (n === bn && id > best)) { best = id; bn = n; }
+    if (best !== null && all > 0 && bn / all >= thr) out[key] = { id: best, name: names.get(best) || '', share: bn / all };
+  }
+  return out;
 }
 
 // ESPN core odds JSON -> consensus closing home spread (null if no real book has one)
@@ -172,7 +202,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, s
   async function season(s, current) {
     let d = load(s);
     // age from the fetch time stored in the file (the injected clock), not the file mtime
-    if (!d || (current && !(now() - (d.fetchedAt || 0) <= CURRENT_TTL))) {
+    if (!d || d.v !== CACHE_V || (current && !(now() - (d.fetchedAt || 0) <= CURRENT_TTL))) {
       try {
         const t0 = Date.now();
         const [schedule, gamelog, teams, playerBox] = await Promise.all([URLS.schedule(s), URLS.gamelog(s), URLS.teams(s), URLS.playerBox(s)].map(get));
@@ -252,4 +282,4 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, s
   return { history, closeSpreads, upcoming, season, status: () => JSON.parse(JSON.stringify(status)) };
 }
 
-module.exports = { create, compactSeason, closeFromOdds, crossBook, median, splitCsv, csvRows, URLS, STAT };
+module.exports = { create, compactSeason, closeFromOdds, crossBook, leads, median, splitCsv, csvRows, URLS, STAT };

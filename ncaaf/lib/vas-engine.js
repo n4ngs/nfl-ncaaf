@@ -25,7 +25,7 @@ function build(history, cfg) {
   const C = cfg;
   const dec = Math.pow(0.5, 1 / C.hl);
   const S = new Map(), league = new Map(), seasonOf = new Map(), lastDay = new Map(), fbsOf = new Map();
-  const M = new Map(), qbLast = new Map(), QB = new Map();
+  const M = new Map(), qbLast = new Map(), QB = new Map(), recent = new Map();
   const st = (t) => { let s = S.get(t); if (!s) { s = {}; S.set(t, s); } return s; };
   const mean = (key) => { const v = league.get(key); return v && v[1] > 0 ? v[0] / v[1] : 0; };
   const lg = (key) => { let v = league.get(key); if (!v) { v = [0, 0]; league.set(key, v); } return v; };
@@ -57,6 +57,8 @@ function build(history, cfg) {
     r.qb_starts = Math.log1p(qs[0]);
     r.qb_pepa = (qs[1] + C.k_qb * prior) / (qs[0] + C.k_qb);
     r.qb = q;
+    const L = recent.get(t), same = !!L && L[0] === season;
+    r.last_ats = same ? L[1] : 0; r.last_upset = same ? L[2] : 0; r.last_blowout = same ? L[3] : 0;
     return r;
   }
   // research-only: an arbitrary (e.g. the confirmed) starter's history for this team
@@ -108,6 +110,9 @@ function build(history, cfg) {
         const mh = M.has(h) ? M.get(h) : (g.home_fbs ? 0 : C.fcs_m), ma = M.has(a) ? M.get(a) : (g.away_fbs ? 0 : C.fcs_m);
         const err = -c - (mh - ma + C.hfa_m * (1 - g.neutral));
         M.set(h, mh + C.lr_m * err); M.set(a, ma - C.lr_m * err);
+        const m = g.home_pts - g.away_pts;
+        recent.set(h, [g.season, Math.max(-28, Math.min(28, m + c)), m > 0 && c > 0 ? 1 : 0, m > 21 ? 1 : 0]);
+        recent.set(a, [g.season, Math.max(-28, Math.min(28, -m - c)), m < 0 && c < 0 ? 1 : 0, -m > 21 ? 1 : 0]);
       }
     }
   }
@@ -151,6 +156,7 @@ function combine(h, a, g) {
   f.d_rest = h.rest - a.rest;
   f.min_n = Math.min(h.n, a.n);
   f.d_qb_starts = h.qb_starts - a.qb_starts; f.d_qb_pepa = h.qb_pepa - a.qb_pepa;
+  f.d_last_ats = h.last_ats - a.last_ats; f.d_last_upset = h.last_upset - a.last_upset; f.d_last_blowout = h.last_blowout - a.last_blowout;
   f.neutral = g.neutral; f.conf_game = g.conf_game; f.home_fbs = g.home_fbs; f.away_fbs = g.away_fbs;
   return f;
 }
@@ -206,4 +212,37 @@ function totalSignal(f, total, market, model, variant = 'A') {
   return { clv, side: clv > 0 ? 'over' : 'under', tier, proven: !!t.proven, gap: x.tx_gap };
 }
 
-module.exports = { build, combine, withContext, predict, predictTotal, signal, totalSignal, linear, STATS };
+// Explain an open -> current line move with model variant E (everything known by kickoff). Returns the predicted
+// move and its parts, in points toward the HOME side (+ = market moving to the home team), next to the actual move.
+//   f:      features from featuresFor(game, {late: {homeQb, awayQb}}) passed through withContext (late QB optional)
+//   market: {open: opening home spread (consensus), now: current home spread (consensus)}
+//   keyOut: {home: {rb: share, wr: share}, away: {...}}: lead back / receiver ruled out (share of carries/catches,
+//           x0.5 for questionable), from injury news the caller supplies. Omitted = nothing known.
+const GROUPS = [
+  ['gap', 'Model number vs the opening line', ['x_gap']],
+  ['recency', 'Last week\'s result vs the spread (recency)', ['d_last_ats', 'd_last_upset', 'd_last_blowout']],
+  ['qb', 'Starting quarterback', ['d_qb_pepa', 'd_qb_starts', 'L_d_qb_starts', 'L_d_qb_pepa', 'L_home_qb_change', 'L_away_qb_change']],
+  ['key', 'Lead back / lead receiver out', ['L_d_rb_out', 'L_d_wr_out']],
+];
+function explainMove(f, margin, market, model, keyOut = {}) {
+  const st = model.stage2 && model.stage2.E;
+  if (!st || !market || !Number.isFinite(market.open)) return null;
+  const ko = (side, k) => Number((keyOut[side] || {})[k]) || 0;
+  const x = { ...f, x_gap: margin + market.open, x_open: market.open, x_open_abs: Math.abs(market.open),
+    L_d_rb_out: ko('home', 'rb') - ko('away', 'rb'), L_d_wr_out: ko('home', 'wr') - ko('away', 'wr') };
+  for (const k of ['L_d_qb_starts', 'L_d_qb_pepa']) if (!Number.isFinite(x[k])) x[k] = k === 'L_d_qb_starts' ? f.d_qb_starts : f.d_qb_pepa;
+  for (const k of ['L_home_qb_change', 'L_away_qb_change']) if (!Number.isFinite(x[k])) x[k] = 0;
+  const part = {};
+  st.features.forEach((name, i) => { const v = Number.isFinite(x[name]) ? x[name] : st.mean[i]; part[name] = st.coef[i] * (v - st.mean[i]) / st.std[i]; });
+  const used = new Set();
+  const parts = GROUPS.map(([key, label, names]) => { names.forEach((n) => used.add(n)); return { key, label, pts: names.reduce((a, n) => a + (part[n] || 0), 0) }; });
+  parts.push({ key: 'context', label: 'Game context (spread size, tier, week, sample)', pts: st.intercept + Object.entries(part).filter(([n]) => !used.has(n)).reduce((a, [, v]) => a + v, 0) });
+  const predicted = parts.reduce((a, p) => a + p.pts, 0);
+  const actual = Number.isFinite(market.now) ? market.open - market.now : null;
+  // what a lead player being ruled out would add (points toward home), per unit of share
+  const i = st.features.indexOf('L_d_rb_out'), j = st.features.indexOf('L_d_wr_out');
+  const perShare = { rb: i >= 0 ? st.coef[i] / st.std[i] : 0, wr: j >= 0 ? st.coef[j] / st.std[j] : 0 };
+  return { predicted, actual, unexplained: actual == null ? null : actual - predicted, parts, perShare, open: market.open, now: Number.isFinite(market.now) ? market.now : null };
+}
+
+module.exports = { build, combine, withContext, predict, predictTotal, signal, totalSignal, explainMove, linear, STATS };

@@ -21,6 +21,8 @@ $PY -m nn                 # Keras VectorNet + GRU + Transformer, rolling origin,
 $PY nn_report.py          # which stage-1 models help
 $PY -m proof              # THE PROOF: stage 2 + CLV tables, spreads + totals -> proof.json
 $PY ablate.py             # which inputs carry the signal (portable math)
+$PY keyplayers.py         # lead back / lead receiver and whether he played (late news) -> keyplayers.parquet
+$PY move.py               # can the model EXPLAIN the open->close move? recency + QB + key players -> move.json
 $PY portable.py           # portable re-check + export data/cache/ncaaf-vas-model.json
 PARITY=2023 $PY build_features.py && (cd ../.. && node --test tests/ncaaf-vas.test.js)
 ```
@@ -199,3 +201,26 @@ Variant B live: record every book's OPENER (spread + prices + firstSeenAt; inclu
 not only Nevada books, as the research consensus mixed ESPN BET, DraftKings, Bovada). For each Nevada book b:
 `cb = crossBook(openers, {asOf: now})`, then `signal(f, margin, {open: cb.books[b].open, openCons: cb.openCons}, model, 'B')`,
 priced at b's own opener prices, valid only while b still shows that opener. With one book, x_open_vs_cons = 0 (B ~= A).
+
+## Explaining line moves (`move.py`, variant E)
+Question: when a line moves between the open and kickoff, how much of it can the model account for? Inputs added to
+stage 2 (ridge, rolling origin, holdout 2023-25):
+- recency (open-safe, in the feature walk and the Node port): last game's result vs its own closing spread (ATS
+  margin, clipped +-28), won as an underdog, won by 21+;
+- late news (known by kickoff): first-snap QB change (C), lead back / lead receiver absent, weighted by his share of
+  the team's carries / catches over the previous 3 games (`keyplayers.py`; absence read from the box score).
+
+| stage 2 inputs | move variance explained (R2) | corr (2023 / 2024 / 2025) | pred >= 1.5: bets, CLV EV, seasons |
+|---|---|---|---|
+| A open-safe (shipped) | 2.9 % | 0.125 / 0.131 / 0.264 | 24, +3.8 %, mixed |
+| A + recency | 4.4 % | 0.171 / 0.185 / 0.282 | 45, +5.2 %, 2024 negative |
+| + first-snap QB (C) | 6.5 % | 0.231 / 0.242 / 0.297 | 54, +6.6 % |
+| + QB + lead RB/WR | 6.6 % | 0.240 / 0.239 / 0.299 | 61, +6.9 % |
+| **E = + QB + lead RB/WR + recency** | **8.2 %** | 0.266 / 0.277 / 0.318 | 76, +6.5 % (p 4.9e-5, Bonferroni x136 = 0.007), +10.4 / +6.0 / +5.2 % |
+
+Sizes (raw units, points of line move): lead back ruled out ~ -0.55 x his carry share (a 60 % back is ~0.3 pt),
+lead receiver ~ -0.94 x his catch share, a covered-by-14 last week ~ +0.2 pt toward that team, an upset win last week
+~ -0.13 pt (letdown). Most of any move (~92 % of the variance) is information the model does not have (injury reports,
+weather, large bets). The app shows, per game, the actual move, the part each input explains, the unexplained
+remainder, and for each team's lead back / receiver what a ruled-out report would add (college football has no
+official injury feed, so availability is never assumed). Variant E is exported for explanation; it is late news.

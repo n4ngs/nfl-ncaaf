@@ -27,7 +27,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
     return Buffer.from(await r.arrayBuffer());
   }) });
   const record = Record.create({ file: path.join(dir, 'signals.json'), now, tiers: ['WEAK', 'THIN', 'SOLID'] });
-  let state = null, upcoming = new Map(), builtAt = null, building = false, lastError = null, info = null;
+  let state = null, upcoming = new Map(), builtAt = null, building = false, lastError = null, info = null, hist = null;
   const SD = MODEL ? MODEL.sd_margin : 15.8;
   const NV = new Set(nevada);
 
@@ -36,7 +36,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
     try {
       const season = seasonOf(new Date(now()));
       const h = await data.history(season, { maxCloses: 400 });
-      state = E.build(h, MODEL.config);
+      state = E.build(h, MODEL.config); hist = h;
       builtAt = new Date(now()).toISOString(); lastError = null;
       // A slow or failed scoreboard call must not throw away a good history build: keep the previous schedule.
       try { const up = await data.upcoming(season); upcoming = new Map(up.map(r => [String(r.gid), r])); }
@@ -65,10 +65,11 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
       if (first && Number.isFinite(first[1])) openers[b] = { spread: first[1], firstSeenAt: first[0] };
     }
     const cb = Data.crossBook(openers, { asOf: now() });
-    if (!cb || cb.n < 3) return { status: 'OK', note: 'Waiting for at least three books to open.' };
-    const f = state.featuresFor(row);
+    const f = state.featuresFor(row, { late: {} });
     const x = E.withContext(f, row, { seasonType: row.seasonType, week: row.week, homeP5: row.homeP5, awayP5: row.awayP5 }, MODEL);
     const margin = E.predict(x, MODEL);
+    const move = explain(row, x, margin, cb, books);
+    if (!cb || cb.n < 3) return { status: 'OK', note: 'Waiting for at least three books to open.', move };
     const reads = [];
     for (const b of Object.keys(cb.books)) {
       if (NV.size && !NV.has(b)) continue;                          // Nevada books only
@@ -82,7 +83,28 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
       track(G, b, sig.side, tier, cb.books[b].open, price, cb.openCons, books);
     }
     reads.sort((a, b) => Math.abs(b.clv) - Math.abs(a.clv));
-    return { status: 'OK', model: MODEL.version, books: cb.n, consensusOpen: cb.openCons, reads };
+    return { status: 'OK', model: MODEL.version, books: cb.n, consensusOpen: cb.openCons, reads, move };
+  }
+
+  // Why the line moved (model variant E): consensus opener -> consensus now, split into what the model can see.
+  // Lead back / receiver status is not published for college football, so each lead player comes back as a
+  // "what if he is ruled out" amount instead of being assumed.
+  function explain(row, x, margin, cb, books) {
+    try {
+      if (!cb || !cb.n || !MODEL.stage2 || !MODEL.stage2.E) return null;
+      const nowCons = consensusNow(books);
+      const e = E.explainMove(x, margin, { open: cb.openCons, now: nowCons }, MODEL);
+      if (!e) return null;
+      const lead = (team) => (hist ? Data.leads(hist.games, team, row.season) : { rb: null, wr: null });
+      const whatIf = [];
+      for (const [side, team] of [['home', row.home_id], ['away', row.away_id]]) {
+        const L = lead(team);
+        for (const k of ['rb', 'wr']) if (L[k]) whatIf.push({ side, role: k === 'rb' ? 'lead back' : 'lead receiver', name: L[k].name, share: L[k].share,
+          pts: (side === 'home' ? 1 : -1) * e.perShare[k] * L[k].share });
+      }
+      return { open: e.open, now: e.now, actual: e.actual, predicted: e.predicted, unexplained: e.unexplained, books: cb.n, margin,
+        parts: e.parts.map((p) => ({ key: p.key, label: p.label, pts: p.pts })), whatIf };
+    } catch { return null; }
   }
 
   const consensusNow = books => median(Object.values(books || {}).map(L => L && L.s));
