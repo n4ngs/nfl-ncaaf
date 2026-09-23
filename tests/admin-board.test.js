@@ -11,9 +11,9 @@ const ADMIN = '/entry-0123456789abcdef0123456789abcdef';
 const DEV = '0123456789abcdef01234567';
 const SPORTS = { nfl: { ck: 'ps', label: 'NFL', dir: 'nfl' } };
 
-function setup(t, adminPath = ADMIN) {
+function setup(t, adminPath = ADMIN, extra = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'private-admin-board-'));
-  const board = createBoard({ dataDir: dir, sports: SPORTS, adminPath });
+  const board = createBoard({ dataDir: dir, sports: SPORTS, adminPath, ...extra });
   t.after(() => { board.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   const request = (route, { role = 'owner', method = 'GET', headers = {}, body = '' } = {}) => new Promise(resolve => {
     const req = Object.assign(new EventEmitter(), { method, socket: { remoteAddress: '127.0.0.1' }, headers: { host: 'board.test', cookie: `tb_dev=${DEV}`, 'user-agent': 'Mozilla/5.0 Browser', ...headers } });
@@ -156,4 +156,15 @@ test('owner, brand and sport display labels cannot escape generated HTML or its 
   assert.equal(context.labelAttack, undefined);
   assert.equal(context.displayValues.OWNER, ownerName);
   assert.equal(context.displayValues.SPORT[sportKey], sportLabel);
+});
+
+
+test('blocking or signing out a device revokes its linked account sessions; cosmetic changes do not', async t => {
+  const revoked = [], x = setup(t, ADMIN, { onRevokeDevice: id => revoked.push(id) });
+  for (const action of ['block', 'unblock', 'signout']) {
+    const result = await x.request(`${ADMIN}/api/device/${DEV}`, { method: 'POST', headers: WRITE, body: JSON.stringify({ action }) });
+    assert.equal(result.status, 200);
+  }
+  await x.request(`${ADMIN}/api/device/${DEV}`, { method: 'POST', headers: WRITE, body: JSON.stringify({ label: 'My friend' }) });
+  assert.deepEqual(revoked, [DEV, DEV]);
 });

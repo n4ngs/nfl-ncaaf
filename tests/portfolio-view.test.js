@@ -231,3 +231,62 @@ test('default peer live score text is escaped and never leaks onto settled ticke
   const settled = { ...live, status: 'won', phase: 'settled' };
   assert.doesNotMatch(View.renderTicket(settled, { sport: 'nfl' }), /Top 2 · 0 outs/);
 });
+
+test('scorecard ROI uses identical known-profit positive-stake rows in numerator and denominator', () => {
+  const tickets = [normalized('nfl', 'win', { status: 'won', stake: 100, net: 25 }),
+    normalized('nfl', 'loss', { status: 'lost', stake: 100, net: -100 }), normalized('mlb', 'push', { status: 'push', stake: 100, net: 0 }),
+    normalized('nfl', 'no-net', { status: 'won', stake: 1000, net: null }), normalized('mlb', 'no-stake', { status: 'won', stake: null, net: 500 }),
+    normalized('nfl', 'zero-stake', { status: 'won', stake: 0, net: 50 }), normalized('nfl', 'void', { status: 'void', stake: 10000, net: 9999 }), normalized('nfl', 'open', { stake: 5000, net: 100 })];
+  const data = View.scorecardData(tickets);
+  assert.deepEqual(data.roi, { value: -25, sample: 3, excluded: 3, stake: 300, net: -75 });
+  assert.equal(data.settled, 6);
+  assert.equal(View.scorecardData([tickets[3], tickets[4]]).roi.value, null);
+});
+
+test('scorecard drawdown uses dated known profits in chronological order and batches identical timestamps', () => {
+  const dated = (id, net, settled) => normalized('nfl', id, { status: net >= 0 ? 'won' : 'lost', net, settled });
+  const tickets = [dated('loss-two', -80, '2026-09-22T04:00:00Z'), dated('win', 100, '2026-09-22T02:00:00Z'), dated('loss-one', -30, '2026-09-22T03:00:00Z'), dated('recover', 20, '2026-09-22T05:00:00Z'), dated('undated', -9999, null), dated('missing-net', null, '2026-09-22T06:00:00Z')];
+  const before = JSON.stringify(tickets), data = View.scorecardData(tickets);
+  assert.deepEqual(data.drawdown, { value: 110, sample: 4, excluded: 2 }); assert.equal(JSON.stringify(tickets), before);
+  const sameTime = [dated('a', 100, '2026-09-22T02:00:00Z'), dated('b', -100, '2026-09-22T02:00:00Z')];
+  assert.equal(View.scorecardData(sameTime).drawdown.value, 0);
+  assert.equal(View.scorecardData([...sameTime].reverse()).drawdown.value, 0);
+  assert.equal(View.scorecardData([dated('missing', 100, null)]).drawdown.value, null);
+});
+
+test('scorecard CLV includes only verified evidence and comparable per-metric samples, preserving zero', () => {
+  const record = (id, integrity) => normalized('nfl', id, { legs: [{ gid: '123', mkt: 's', state: 'open', integrity }] });
+  const tickets = [record('valid-zero', { eligibility_status: 'VERIFIED_CLV', price_clv_status: 'COMPARABLE', line_clv_points: 0, clv_fair_probability_pp: 0, clv_ev_pct: 0 }),
+    record('line-only', { eligibility_status: 'VERIFIED_CLV', price_clv_status: 'INCOMPLETE_MARKET_FOR_DEVIG', line_clv_points: 2, clv_fair_probability_pp: 999, clv_ev_pct: 999 }),
+    record('provisional', { eligibility_status: 'PROVISIONAL_CLV', price_clv_status: 'COMPARABLE', line_clv_points: 99, clv_fair_probability_pp: 99, clv_ev_pct: 99 }),
+    record('conflict', { eligibility_status: 'SOURCE_CONFLICT', status: 'VERIFIED_CLV', price_clv_status: 'COMPARABLE', line_clv_points: 99 }), record('legacy', null)];
+  const data = View.scorecardData(tickets);
+  assert.deepEqual(data.clv, { legs: 5, verified: 2, excluded: 3, fair: { count: 1, average: 0 }, ev: { count: 1, average: 0 } });
+  assert.deepEqual(data.groups[0].line, { count: 2, average: 1 });
+  const html = View.renderScorecard(data);
+  assert.match(html, /0 pp/); assert.match(html, /1 comparable verified legs/); assert.doesNotMatch(html, /999|99 pts/);
+});
+
+test('scorecard retains parlay money once while grouping verified leg CLV by sport and market units', () => {
+  const integrity = { eligibility_status: 'VERIFIED_CLV', line_clv_points: 1, price_clv_status: 'NOT_COMPARABLE' };
+  const tickets = [normalized('nfl', 'parlay', { status: 'won', stake: 25, net: 50, legs: [{ gid: 'a', mkt: 's', integrity }, { gid: 'b', mkt: 't', integrity }] }),
+    normalized('mlb', 'baseball', { status: 'push', stake: 10, net: 0, legs: [{ pk: 1, mkt: 'rl', integrity }] }),
+    normalized('nhl', 'hockey', { status: 'open', legs: [{ gid: 'n', mkt: 's', integrity }] })];
+  const data = View.scorecardData(tickets), parlay = data.groups.find((g) => g.market === 'parlay');
+  assert.equal(parlay.net, 50); assert.equal(parlay.roiStake, 25); assert.equal(parlay.roi, 200); assert.equal(parlay.legs, 0);
+  assert.equal(data.groups.reduce((n, g) => n + (g.net || 0), 0), 50);
+  assert.equal(data.groups.reduce((n, g) => n + g.roiStake, 0), 35);
+  assert.equal(data.groups.find((g) => g.sport === 'mlb').unit, 'runs');
+  assert.equal(data.groups.find((g) => g.sport === 'nhl').unit, 'goals');
+  assert.equal(data.groups.find((g) => g.sport === 'nfl' && g.market === 's').unit, 'pts');
+  assert.equal(data.clv.verified, 4); assert.equal(Object.hasOwn(data.clv, 'line'), false);
+});
+
+test('empty scorecard marks absent metrics unavailable and labels logged wagers rather than model performance', () => {
+  const data = View.scorecardData([]), html = View.renderScorecard(data);
+  assert.equal(data.roi.value, null); assert.equal(data.drawdown.value, null); assert.equal(data.clv.fair.average, null);
+  assert.match(html, /Logged results/); assert.match(html, /not a model track record/); assert.match(html, /<strong>—<\/strong>/);
+  assert.match(html, /0 \/ 0/); assert.doesNotMatch(html, /NaN|Infinity/);
+  const insight = View.insightData([]);
+  assert.deepEqual(insight.scorecard, data); assert.match(View.renderInsights(insight), /Logged results/);
+});

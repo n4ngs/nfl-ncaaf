@@ -59,7 +59,8 @@ var BoardHandoff = (() => {
   message('Check the actual ticket price, stake and wager time before saving.');
  }
  function mountSettings(panel){if(!panel||panel.querySelector('.handoff-settings'))return;const el=document.createElement('div');el.className='handoff-settings';el.innerHTML='<label>Sportsbook region<select aria-label="Sportsbook state">'+states.map(x=>'<option value="'+x+'"'+(x===state?' selected':'')+'>'+x.toUpperCase()+'</option>').join('')+'</select></label><p>Selection links prefill where supported. BetMGM and Caesars use app-compatible links where available. Your phone decides whether to open the installed app or a browser.</p>';panel.appendChild(el);
- el.querySelector('select').addEventListener('change',e=>{state=e.target.value;save('board.betting-state',state);queue.clear();for(const a of document.querySelectorAll('[data-bet-handoff]')){const item=quotes.get(a.dataset.betHandoff);if(item){a.href=destination(item.q.bet_link);enqueue(item.q.bet_link);}}});}
+ el.querySelector('select').addEventListener('change',e=>setState(e.target.value));}
+ function setState(value){const next=String(value||'').toLowerCase();if(!states.includes(next))return false;if(next===state)return true;state=next;save('board.betting-state',state);queue.clear();for(const select of document.querySelectorAll('.handoff-settings select'))select.value=state;for(const a of document.querySelectorAll('[data-bet-handoff]')){const item=quotes.get(a.dataset.betHandoff);if(item){const v=result(item.q.bet_link);a.href=destination(item.q.bet_link);a.title=item.context.label+' · '+caption(v);a.setAttribute('aria-label',a.title);a.dataset.linkType=v?.type||'lookup';enqueue(item.q.bet_link);}}if(typeof CustomEvent==='function')document.dispatchEvent(new CustomEvent('board:betting-state',{detail:{state}}));return true;}
  document.addEventListener('click',e=>{const a=e.target.closest?.('[data-bet-handoff]');if(a){const item=quotes.get(a.dataset.betHandoff),q=item&&current(item);if(!q||!eligible(q)||q.american_odds!==item.q.american_odds||q.line_value!==item.q.line_value){e.preventDefault();e.stopImmediatePropagation();message('This price changed or is unavailable. Select its current price.');return;}
   const value=result(q.bet_link);
   if(value===null){e.preventDefault();e.stopImmediatePropagation();message('This sportsbook has no link for this selection right now.');return;}
@@ -71,6 +72,6 @@ var BoardHandoff = (() => {
  document.addEventListener('focusin',e=>{const a=e.target.closest?.('[data-bet-handoff]'),item=a&&quotes.get(a.dataset.betHandoff);if(item)enqueue(item.q.bet_link);});
  document.addEventListener('visibilitychange',()=>{if(!document.hidden){draftPanel();if(queue.size&&!busy)flush();}});
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',draftPanel,{once:true});else draftPanel();
- return {cell,eligible,mountSettings};
+ return {cell,eligible,mountSettings,getState:()=>state,setState};
 })();
 function betHandoffCell(q,book,gid,market,side,label,html){return BoardHandoff.cell(q,{sport:location.pathname.split('/')[1],book,gid:String(gid),market,side,label},html);}

@@ -31,7 +31,8 @@ test('unknown net, missing settlement dates and void tickets never invent a time
   const model = View.insightData(input);
   assert.equal(model.points.length, 0); assert.equal(model.missingNet, 1); assert.equal(model.missingDate, 1); assert.equal(model.settled, 2);
   const html = View.renderInsights(model);
-  assert.doesNotMatch(html, /<svg|data-pf-day|\+\$40|\+\$999/);
+  // The scorecard may show a known undated net; it must still be absent from the dated timeline.
+  assert.doesNotMatch(html.slice(html.indexOf('<div class="portfolio-insight-grid">')), /<svg|data-pf-day|\+\$40|\+\$999/);
   assert.match(html, /no recorded net result/); assert.match(html, /no settlement time/);
   assert.match(html, /timeline appears/);
 });

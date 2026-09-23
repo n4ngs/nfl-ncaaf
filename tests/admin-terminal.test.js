@@ -4,6 +4,9 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const fixtureDirs = [];
+test.after(() => { for (const dir of fixtureDirs) fs.rmSync(dir, { recursive: true, force: true }); });
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const { EventEmitter } = require('node:events');
@@ -21,17 +24,23 @@ const hashCode = value => crypto.createHash('sha256').update(`hl:${value}`).dige
 const ownerCookie = `ps_code=${hashCode(ADMIN_CODE)}`;
 const guestCookie = `ps_guest=${hashCode(`guest:${GUEST_CODE}`)}`;
 
-function enginePage(sport) {
+function enginePage(sport, cookie = '') {
   const source = fs.readFileSync(path.join(root, sport, 'server.js'), 'utf8');
   const sportbar = source.match(/const SPORTS_NAV[\s\S]*?\+ '<\/style>'\);/);
   assert.ok(sportbar, `${sport} engine sport bar must be available for a realistic proxy response`);
   const nav = vm.runInNewContext(sportbar[0] + '\nSPORTBAR;', { BASE: `/${sport}` });
-  return fs.readFileSync(path.join(root, sport, 'public/index.html'), 'utf8')
+  let html = fs.readFileSync(path.join(root, sport, 'public/index.html'), 'utf8')
     .replace('<head>', `<head><base href="/${sport}/">`).replace('<body>', '<body>' + nav);
+  if (['nfl','ncaaf'].includes(sport) && cookie.includes('ps_code=' + hashCode(ADMIN_CODE))) {
+    const prefix = sport === 'nfl' ? 'ps' : 'hl';
+    html = html.replace('<link rel="manifest" href="manifest.webmanifest">', `<link rel="manifest" href="m/c/${'d'.repeat(32)}.webmanifest"><script>try{localStorage.setItem('${prefix}.ok',"${'d'.repeat(32)}");sessionStorage.removeItem('${prefix}.heal')}catch(e){}</script>`);
+  }
+  return html;
 }
 
 function terminal(env = {}) {
   let handler, boardConfig;
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'admin-terminal-accounts-')); fixtureDirs.push(fixtureDir);
   const forwarded = [], forwardedBodies = [], boardCalls = [], entrances = [];
   const board = {
     identify: () => ({ dev: '0123456789abcdef01234567', ip: '198.51.100.10' }),
@@ -67,14 +76,14 @@ function terminal(env = {}) {
           response.headers = { 'content-type': isPage ? 'text/html; charset=utf-8' : 'application/json',
             'cache-control': 'public, max-age=600', etag: '"upstream-public-fixture"' };
           const sport = options.port === 5063 ? 'mlb' : options.port === 5062 ? 'ncaaf' : 'nfl';
-          const body = isPage ? Buffer.from(enginePage(sport)) : Buffer.from('{"ok":true}');
+          const body = isPage ? Buffer.from(enginePage(sport, options.headers.cookie || '')) : Buffer.from('{"ok":true}');
           callback(response); response.end(body); done();
         },
       });
     },
   };
   const fixtureProcess = {
-    env: { ACCESS_CODE: ADMIN_CODE, GUEST_CODE, ADMIN_PATH, OPEN_BOARDS: '1', DATA_DIR: '/tmp/unused-admin-terminal-fixture', ...env },
+    env: { ACCESS_CODE: ADMIN_CODE, GUEST_CODE, ADMIN_PATH, OPEN_BOARDS: '1', DATA_DIR: fixtureDir, ACCOUNT_ORIGIN: ORIGIN, ...env },
     execPath: process.execPath, on() {}, exit() {},
   };
   const context = vm.createContext({
@@ -159,7 +168,7 @@ test('private dashboard and admin API require an authenticated owner', async () 
   assert.equal(app.forwarded.length, 0);
 });
 
-test('private sign-in accepts the owner code only and mints protected cookies for all sports', async () => {
+test('private sign-in accepts the owner code only and mints a revocable protected session', async () => {
   const app = terminal();
   const page = await app.request(`${ADMIN_PATH}/login`);
   assert.equal(page.status, 200);
@@ -172,11 +181,11 @@ test('private sign-in accepts the owner code only and mints protected cookies fo
   assert.equal(owner.status, 303);
   assert.equal(owner.headers.location, ADMIN_PATH);
   const cookies = [].concat(owner.headers['set-cookie'] || []);
-  for (const name of ['ps_code', 'hl_code', 'bbl_access']) {
-    const value = cookies.find(item => item.startsWith(`${name}=`));
-    assert.ok(value, `${name} authenticated cookie must be set`);
-    assert.match(value, /; HttpOnly/); assert.match(value, /; Secure/); assert.match(value, /; SameSite=Lax/);
-  }
+  const value = cookies.find(item => item.startsWith('tb_account='));
+  assert.ok(value, 'opaque account session must be set');
+  assert.match(value, /; HttpOnly/); assert.match(value, /; Secure/); assert.match(value, /; SameSite=Lax/);
+  noOwnerCookies(owner);
+  for (const [sport, name] of [['nfl','ps_code'],['ncaaf','hl_code'],['mlb','bbl_access']]) assert(cookies.some(value => value.startsWith(name + '=;') && value.includes(`Path=/${sport};`) && value.includes('Max-Age=0')), 'legacy sport-scoped credentials expire');
   const authenticated = cookies.map(value => value.split(';')[0]).join('; ');
   assert.equal((await app.request(ADMIN_PATH, { cookie: authenticated })).status, 200);
 });
@@ -394,4 +403,69 @@ test('hostile telemetry cannot persist through either legacy football ingestion 
     for(let i=0;i<4;i++)await app.request('/'+sport+'/api/telemetry',{method:'POST',cookie:guestCookie,headers:{origin:ORIGIN},body:flood});
     assert.deepEqual(JSON.parse(app.forwardedBodies.at(-1)),{events:[]});
   }
+});
+
+async function accountBrowser(app, initialCookie = '') {
+  const jar = Object.fromEntries(initialCookie.split(';').map(v => v.trim().split('=')).filter(([key]) => key)); let csrf = '';
+  const client = { jar, async call(url, data, extra = {}) {
+    const cookie = Object.entries(jar).map(([key, value]) => `${key}=${value}`).join('; ');
+    const response = await app.request(url, { cookie, ...(data === undefined ? {} : { method: 'POST', body: JSON.stringify(data), headers: { origin: ORIGIN, 'content-type': 'application/json', 'x-account-csrf': csrf } }), ...extra });
+    for (const c of [].concat(response.headers['set-cookie'] || [])) { const [key, value] = c.split(';')[0].split('='); jar[key] = value; }
+    try { const payload = JSON.parse(response.body); if (payload.csrf) csrf = payload.csrf; response.data = payload; } catch {}
+    return response;
+  } };
+  await client.call('/api/account/me'); return client;
+}
+test('optional account signup maps sport IDs internally, preserves anonymous IDs, and never grants admin', async () => {
+  const app = terminal(), browser = await accountBrowser(app, `ps_uid=${'f'.repeat(32)}`);
+  const result = await browser.call('/api/account/signup', { username: 'testuser', password: 'local fixture passphrase' }); assert.equal(result.status, 201); noOwnerCookies(result);
+  const me = await browser.call('/api/account/me'); assert.equal(me.data.account.owner, false);
+  await browser.call('/nfl/api/bets'); const forwarded = app.forwarded.at(-1); assert(!forwarded.headers.cookie.includes('ps_uid=' + 'f'.repeat(32))); assert(forwarded.headers.cookie.includes('ps_guest='));
+  notFound(await browser.call(ADMIN_PATH)); assert.equal((await browser.call('/nfl/api/me/link', {})).status, 409);
+  await browser.call('/api/account/logout', {}); await browser.call('/nfl/api/bets'); assert(app.forwarded.at(-1).headers.cookie.includes('ps_uid=' + 'f'.repeat(32)));
+});
+test('private code owner session preserves existing device tickets and logout revokes admin', async () => {
+  const app = terminal(), response = await app.request(`${ADMIN_PATH}/login`, { method: 'POST', headers: { origin: ORIGIN }, body: `code=${ADMIN_CODE}` });
+  const token = [].concat(response.headers['set-cookie']).find(c => c.startsWith('tb_account=')).split(';')[0];
+  const browser = await accountBrowser(app, token + `; ps_uid=${'e'.repeat(32)}`);
+  assert.equal((await browser.call(ADMIN_PATH)).status, 200);
+  await browser.call('/nfl/api/bets'); assert(app.forwarded.at(-1).headers.cookie.includes('ps_uid=' + 'e'.repeat(32))); assert(app.forwarded.at(-1).headers.cookie.includes('ps_code=' + hashCode(ADMIN_CODE))); assert(!app.forwarded.at(-1).headers.cookie.includes('tb_account=')); assert(!app.forwarded.at(-1).headers.cookie.includes('tb_account_csrf='));
+  await browser.call('/api/account/logout', {}); notFound(await app.request(ADMIN_PATH, { cookie: token }));
+});
+test('closed boards require guest entrance before signup and before opportunities or notifications', async () => {
+  const app = terminal({ OPEN_BOARDS: '0' }), browser = await accountBrowser(app);
+  assert.equal((await browser.call('/api/account/signup', { username: 'testuser', password: 'local fixture passphrase' })).status, 401);
+  for (const route of ['/api/opportunities', '/api/notifications', '/opportunities']) assert.equal((await app.request(route)).status, 401);
+  assert.equal((await app.request('/api/opportunities', { cookie: guestCookie })).status, 200);
+});
+test('public feature routes, account page and passkey assets expose no admin path or secret credentials', async () => {
+  const app = terminal();
+  for (const route of ['/account', '/api/account/me', '/opportunities', '/api/opportunities', '/api/notifications', '/_board/passkeys.js', '/sw.js']) {
+    const response = await app.request(route); assert.equal(response.status, 200, route); assert(!response.body.includes(ADMIN_PATH)); assert(!response.body.includes(ADMIN_CODE)); assert(!response.body.includes(hashCode(ADMIN_CODE))); noOwnerCookies(response);
+  }
+});
+
+
+test('revocable owner pages do not embed permanent launch credentials, token manifests, or healing stashes', async () => {
+  const app = terminal(), response = await app.request(`${ADMIN_PATH}/login`, { method: 'POST', headers: { origin: ORIGIN }, body: `code=${ADMIN_CODE}` });
+  const token = [].concat(response.headers['set-cookie']).find(c => c.startsWith('tb_account=')).split(';')[0];
+  const browser = await accountBrowser(app, token);
+  for (const sport of ['nfl','ncaaf']) {
+    const page = await browser.call(`/${sport}/`); assert.equal(page.status, 200);
+    assert(!page.body.includes('d'.repeat(32))); assert(!page.body.includes('m/c/'));
+    assert(!/localStorage\.setItem\(['"](?:ps|hl)\.ok/.test(page.body));
+    assert(page.body.includes('href="/manifest.webmanifest"'));
+    assert(page.body.includes('localStorage.removeItem("ps.ok")'));
+    const manifest = await browser.call(`/${sport}/m/c/${'d'.repeat(32)}.webmanifest`);
+    assert.equal(manifest.status, 200); assert.equal(JSON.parse(manifest.body).start_url, '/');
+  }
+  await browser.call('/api/account/logout', {});
+  const count = app.forwarded.length;
+  for (const sport of ['nfl','ncaaf']) {
+    const launch = await app.request(`/${sport}/?%63=${'d'.repeat(32)}&portfolio=mine`, { cookie: token });
+    assert.equal(launch.status, 303); assert.equal(launch.headers.location, `/${sport}/?portfolio=mine`); noOwnerCookies(launch);
+    notFound(await app.request(`/${sport}/m/c/${'d'.repeat(32)}.webmanifest`, { cookie: token }));
+  }
+  assert.equal(app.forwarded.length, count, 'revoked launch tokens never reach the authenticating engine');
+  notFound(await app.request(ADMIN_PATH, { cookie: token }));
 });

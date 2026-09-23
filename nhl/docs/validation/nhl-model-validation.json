@@ -1,0 +1,34 @@
+{
+  "version": "nhl-pregame-logit-v1",
+  "generatedAt": "2026-09-23T02:45:18.278Z",
+  "dataSha256": "fdc44f7b9c2de8fb7b005b4c405c7cc8b0547bdd19c60d8968fe8d91fdaf9b39",
+  "status": "INSUFFICIENT_DATA",
+  "method": "Chronological walk-forward features; frozen train / calibration / test partitions by UTC date. No random split.",
+  "sourceRows": 0,
+  "conflictingRows": 0,
+  "eligible": 0,
+  "rejected": {},
+  "counts": {
+    "train": 0,
+    "calibration": 0,
+    "test": 0
+  },
+  "policy": {
+    "teamGames": 20,
+    "goalieShots": 200,
+    "lookbackDays": 365,
+    "teamWindow": 60,
+    "minTrain": 300,
+    "minCalibration": 150,
+    "minTest": 200,
+    "maxCalibrationError": 0.08,
+    "maxArtifactDays": 365
+  },
+  "metrics": null,
+  "limitations": [
+    "Historical starter confirmations require evidence available before kickoff. Postgame boxscores cannot reconstruct them.",
+    "Result/goalie statistics use all situations, include overtime and shootout game outcomes, and are not 5v5 xG, high-danger chances or GSAA.",
+    "No archived executable odds: ROI, CLV, expected value calibration and betting profitability are not evaluated.",
+    "This is a regular-season pregame two-way moneyline model; no live, puck-line, totals, playoff or preseason estimates."
+  ]
+}

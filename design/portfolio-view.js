@@ -33,6 +33,65 @@
       net: knownNet.reduce((n, t) => n + t.profit, 0), knownNet: knownNet.length, missingNet: settled.length - knownNet.length,
       won: settled.filter((t) => t.status === 'won').length, lost: settled.filter((t) => t.status === 'lost').length };
   }
+  const marketLabels = { s: 'Spread', t: 'Total', ml: 'Moneyline', rl: 'Run line', h1s: 'First-half spread', h1t: 'First-half total', tt: 'Team total', f5ml: 'First-five moneyline', f5rl: 'First-five run line', f5t: 'First-five total', parlay: 'Parlay', unknown: 'Unmapped market' };
+  const marketOf = (leg) => Object.prototype.hasOwnProperty.call(marketLabels, leg?.mkt || leg?.integrity?.entry?.market_type) ? leg.mkt || leg.integrity.entry.market_type : 'unknown';
+  const average = (values) => ({ count: values.length, average: values.length ? values.reduce((sum, n) => sum + n, 0) / values.length : null });
+  function scorecardData(tickets) {
+    const settled = tickets.filter((t) => isSettled(t) && t.status !== 'void');
+    const matched = settled.filter((t) => Number.isFinite(t.profit) && Number.isFinite(t.stake) && t.stake > 0);
+    const risk = matched.reduce((sum, t) => sum + t.stake, 0), matchedNet = matched.reduce((sum, t) => sum + t.profit, 0);
+    const timeline = new Map(); let dated = 0;
+    for (const t of settled) {
+      const time = typeof t.settledAt === 'string' && /(?:Z|[+-]\d{2}:\d{2})$/i.test(t.settledAt) ? Date.parse(t.settledAt) : NaN;
+      if (Number.isFinite(time) && Number.isFinite(t.profit)) { timeline.set(time, (timeline.get(time) || 0) + t.profit); dated++; }
+    }
+    let balance = 0, peak = 0, drawdown = 0;
+    for (const [, net] of [...timeline].sort((a, b) => a[0] - b[0])) { balance += net; peak = Math.max(peak, balance); drawdown = Math.max(drawdown, peak - balance); }
+    const groups = new Map(), fair = [], ev = []; let legs = 0, verified = 0;
+    const group = (sport, market) => {
+      const key = `${sport}:${market}`;
+      if (!groups.has(key)) groups.set(key, { key, sport, market, label: `${names[sport] || sport} · ${marketLabels[market]}`, settled: 0, net: 0, knownNet: 0, roiStake: 0, roiNet: 0, roiSample: 0, legs: 0, verified: 0, lines: [], fair: [], ev: [] });
+      return groups.get(key);
+    };
+    for (const t of tickets) {
+      if (!['open', 'won', 'lost', 'push'].includes(t.status)) continue;
+      if (isSettled(t)) {
+        // A parlay is one wager; never duplicate its profit or stake across its legs.
+        const row = group(t.sport, t.legs.length > 1 ? 'parlay' : marketOf(t.legs[0])); row.settled++;
+        if (Number.isFinite(t.profit)) { row.net += t.profit; row.knownNet++; }
+        if (Number.isFinite(t.profit) && Number.isFinite(t.stake) && t.stake > 0) { row.roiNet += t.profit; row.roiStake += t.stake; row.roiSample++; }
+      }
+      for (const l of t.legs) {
+        if (l.state === 'void') continue;
+        const row = group(t.sport, marketOf(l)); row.legs++; legs++;
+        const i = l.integrity;
+        if ((i?.eligibility_status || i?.status) !== 'VERIFIED_CLV') continue;
+        row.verified++; verified++;
+        if (Number.isFinite(i.line_clv_points) && !['ml', 'f5ml', 'unknown'].includes(row.market)) row.lines.push(i.line_clv_points);
+        if (i.price_clv_status === 'COMPARABLE') {
+          if (Number.isFinite(i.clv_fair_probability_pp)) { row.fair.push(i.clv_fair_probability_pp); fair.push(i.clv_fair_probability_pp); }
+          if (Number.isFinite(i.clv_ev_pct)) { row.ev.push(i.clv_ev_pct); ev.push(i.clv_ev_pct); }
+        }
+      }
+    }
+    return { settled: settled.length,
+      roi: { value: risk > 0 ? 100 * matchedNet / risk : null, sample: matched.length, excluded: settled.length - matched.length, stake: risk, net: matchedNet },
+      drawdown: { value: dated ? drawdown : null, sample: dated, excluded: settled.length - dated },
+      clv: { legs, verified, excluded: legs - verified, fair: average(fair), ev: average(ev) },
+      groups: [...groups.values()].sort((a, b) => a.label.localeCompare(b.label)).map((r) => ({ key: r.key, label: r.label, sport: r.sport, market: r.market, settled: r.settled, net: r.knownNet ? r.net : null, knownNet: r.knownNet,
+        roi: r.roiStake > 0 ? 100 * r.roiNet / r.roiStake : null, roiSample: r.roiSample, roiStake: r.roiStake, roiNet: r.roiNet, legs: r.legs, verified: r.verified, line: average(r.lines), fair: average(r.fair), ev: average(r.ev), unit: r.sport === 'mlb' ? 'runs' : r.sport === 'nhl' ? 'goals' : 'pts' })) };
+  }
+  function renderScorecard(model) {
+    if (!model) return '';
+    const metric = (value, unit = '%') => Number.isFinite(value) ? `${value > 0 ? '+' : ''}${Math.round(value * 100) / 100}${unit}` : '—';
+    const { roi, drawdown, clv } = model;
+    return `<section class="portfolio-trend portfolio-scorecard" aria-label="Logged results scorecard"><div class="portfolio-insight-heading"><h2>Logged results</h2><span>Saved wagers · loaded logs</span></div>
+      <div class="portfolio-values"><div><small>Settled ROI</small><strong>${metric(roi.value)}</strong><small>${roi.sample} tickets · ${money(roi.stake)} matched stake${roi.excluded ? ` · ${roi.excluded} excluded` : ''}</small></div><div><small>Maximum drawdown</small><strong>${money(drawdown.value)}</strong><small>${drawdown.sample} dated results${drawdown.excluded ? ` · ${drawdown.excluded} excluded` : ''}</small></div><div><small>Verified CLV coverage</small><strong>${clv.verified} / ${clv.legs}</strong><small>Logged legs with verified entry and close</small></div></div>
+      <div class="portfolio-values"><div><small>Average no-vig CLV</small><strong>${metric(clv.fair.average, ' pp')}</strong><small>${clv.fair.count} comparable verified legs</small></div><div><small>Average closing-fair EV</small><strong>${metric(clv.ev.average)}</strong><small>${clv.ev.count} comparable verified legs</small></div></div>
+      <p class="portfolio-insight-note">ROI uses the same settled tickets for known net and positive recorded stake. Drawdown uses dated known profits in settlement order; equal timestamps are combined. Excluded records can change the full result. These are logged wager results, not a model track record.</p>
+      ${model.groups.length ? `<div class="portfolio-insight-table"><table><caption>By sport and market. Parlays retain their own ticket results; CLV samples count individual legs.</caption><thead><tr><th scope="col">Sport · market</th><th scope="col">Known net</th><th scope="col">ROI</th><th scope="col">Verified CLV legs</th><th scope="col">Average line CLV</th></tr></thead><tbody>${model.groups.map((r) => `<tr><th scope="row">${esc(r.label)}</th><td>${money(r.net, true)}<small> ${r.knownNet}/${r.settled} results</small></td><td>${metric(r.roi)}<small> n=${r.roiSample}</small></td><td>${r.verified}/${r.legs}</td><td>${metric(r.line.average, ' ' + r.unit)}<small> n=${r.line.count}</small></td></tr>`).join('')}</tbody></table></div>` : '<p class="portfolio-insight-note">Log tickets to build a results scorecard. Unavailable CLV stays out of the averages.</p>'}</section>`;
+  }
+
   function insightBook(value) {
     const label = String(value || '').trim(), alias = label.toLowerCase().replace(/[^a-z0-9]/g, '');
     const labels = { mgm: 'BetMGM', betmgm: 'BetMGM', dk: 'DraftKings', draftkings: 'DraftKings', fd: 'FanDuel', fanduel: 'FanDuel',
@@ -72,7 +131,7 @@
     }
     let cumulative = 0;
     const points = [...days.values()].sort((a, b) => a.day.localeCompare(b.day)).map((row) => ({ ...row, cumulative: cumulative += row.net }));
-    return { points, net: cumulative, settled, dated, missingNet, missingDate, open, risk, missingStake,
+    return { points, net: cumulative, settled, dated, missingNet, missingDate, open, risk, missingStake, scorecard: scorecardData(tickets),
       exposure: [...exposure.values()].sort((a, b) => b.stake - a.stake || a.label.localeCompare(b.label)) };
   }
   function chooseInsightDay(points, selectedDay, action) {
@@ -111,7 +170,7 @@
       <div class="portfolio-chart-controls"><button type="button" data-pf-day-step="previous" data-pf-insight-control="previous" aria-label="Previous settlement day" ${index <= 0 ? 'disabled' : ''}>←</button><label><span class="sr-only">Settlement day</span><input type="range" min="0" max="${points.length - 1}" step="1" value="${index}" data-pf-day data-pf-insight-control="day" aria-label="Settlement day" aria-valuetext="${esc(insightDay(point.day))}: ${esc(money(point.cumulative, true))} cumulative net" ${points.length < 2 ? 'disabled' : ''}></label><button type="button" data-pf-day-step="next" data-pf-insight-control="next" aria-label="Next settlement day" ${index >= points.length - 1 ? 'disabled' : ''}>→</button></div>`
       : `<div class="portfolio-insight-empty"><strong>${model.settled ? 'A result needs a date to tell its story.' : 'Your first result starts the line.'}</strong><p>${model.settled ? 'The timeline appears when a settled ticket has both a recorded net result and settlement time.' : 'Settle a saved ticket to start your performance history.'}</p></div>`;
     const rows = model.exposure.map((row) => `<div class="portfolio-exposure-row"><div><span>${esc(row.label)}</span><strong>${row.missing === row.count ? '—' : money(row.stake)}</strong></div><div class="portfolio-exposure-track" aria-hidden="true"><span style="width:${model.risk ? Math.max(0, Math.min(100, row.stake / model.risk * 100)) : 0}%"></span></div><small>${row.count} ${row.count === 1 ? 'open ticket' : 'open tickets'}${row.missing ? ` · ${row.missing} stake unavailable` : ''}</small></div>`).join('');
-    return `<div class="portfolio-insight-grid"><section class="portfolio-trend" aria-label="Settled performance"><div class="portfolio-insight-heading"><h2>Settled net</h2><span>Recorded history</span></div>${graph}<p class="portfolio-insight-note">Settlement days use UTC. ${model.dated ? `${model.dated} dated ${model.dated === 1 ? 'result' : 'results'} shown.` : ''}${missing ? ' ' + esc(missing) + ' These are excluded from the line.' : ''}</p></section>
+    return `${renderScorecard(model.scorecard)}<div class="portfolio-insight-grid"><section class="portfolio-trend" aria-label="Settled performance"><div class="portfolio-insight-heading"><h2>Settled net</h2><span>Recorded history</span></div>${graph}<p class="portfolio-insight-note">Settlement days use UTC. ${model.dated ? `${model.dated} dated ${model.dated === 1 ? 'result' : 'results'} shown.` : ''}${missing ? ' ' + esc(missing) + ' These are excluded from the line.' : ''}</p></section>
       <section class="portfolio-exposure" aria-label="Open stake exposure"><div class="portfolio-insight-heading"><h2>Where you’re exposed</h2></div><div class="portfolio-exposure-switch" role="group" aria-label="Group open stake">${[['sport','By sport'],['book','By book']].map(([key, title]) => `<button type="button" data-pf-exposure="${key}" data-pf-insight-control="${key}" aria-pressed="${(state.group || 'sport') === key}">${title}</button>`).join('')}</div>${rows || '<div class="portfolio-insight-empty"><strong>No open tickets</strong><p>Open stakes will appear here as you log bets.</p></div>'}<p class="portfolio-insight-note">${model.open ? `${model.missingStake === model.open ? 'Open stake unavailable' : money(model.risk) + ' in known open stakes'}.${model.missingStake ? ` ${model.missingStake} ${model.missingStake === 1 ? 'stake is' : 'stakes are'} unavailable.` : ''}` : 'Open stakes are grouped from your saved tickets.'}</p></section></div>
       ${points.length ? `<details class="portfolio-insight-data"><summary data-pf-insight-control="table">View settlement data <span>${points.length} ${points.length === 1 ? 'day' : 'days'}</span></summary><div class="portfolio-insight-table"><table><caption>${points.length > 30 ? 'Most recent 30 settlement days; the chart includes all recorded days.' : 'Recorded net by settlement day (UTC).'}</caption><thead><tr><th scope="col">Day</th><th scope="col">Tickets</th><th scope="col">Net</th><th scope="col">Cumulative</th></tr></thead><tbody>${points.slice(-30).reverse().map((p) => `<tr><th scope="row">${esc(insightDay(p.day))}</th><td>${p.count}</td><td>${money(p.net, true)}</td><td>${money(p.cumulative, true)}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
   }
@@ -301,5 +360,5 @@
     refresh(s);
     return true;
   }
-  return { mount, select, summarize, toWin, renderTicket, evidence, insightData, chooseInsightDay, renderInsights };
+  return { mount, select, summarize, toWin, renderTicket, evidence, insightData, chooseInsightDay, renderInsights, scorecardData, renderScorecard };
 });

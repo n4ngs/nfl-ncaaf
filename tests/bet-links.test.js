@@ -101,3 +101,7 @@ test('unresolved Sharp and Owls clicks keep navigation inside the state-validati
   assert.equal(prevented,false);assert.match(anchor.href,/^\/nfl\/api\/bet-links\?state=nv&ref=/);assert.equal(u.calls(),0);
  }
 });
+
+test('shared sportsbook region setter validates and preserves JSON storage for other screens',()=>{
+ const u=ui();assert.equal(u.ctx.BoardHandoff.getState(),'nv');assert.equal(u.ctx.BoardHandoff.setState('NJ'),true);assert.equal(u.ctx.BoardHandoff.getState(),'nj');assert.equal(u.saved.get('board.betting-state'),'"nj"');assert.equal(u.ctx.BoardHandoff.setState('../bad'),false);assert.equal(u.ctx.BoardHandoff.getState(),'nj');assert.equal(u.ctx.BoardHandoff.setState('nv'),true);
+});

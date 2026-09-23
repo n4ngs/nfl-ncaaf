@@ -10,7 +10,7 @@
  * The engines still validate the same cookies themselves (defense in depth) and derive owner vs guest from
  * them, so the whole per-sport model — bet ownership, the Security Center, guest tracking — keeps working.
  *
- * Node 18+. One shared upstream odds socket; SSE is piped, never buffered.
+ * Node 22+. One shared upstream odds socket; SSE is piped, never buffered.
  */
 'use strict';
 const http = require('node:http');
@@ -76,7 +76,16 @@ const LOGO = // a terminal caret — the wordmark's icon, favicon and PWA icon
   + '<path d="M21 21 L33 32 L21 43" fill="none" stroke="#EE3A2E" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>'
   + '<rect x="34" y="38.5" width="15" height="5" rx="2.5" fill="#F5F5F7"/></svg>';
 // The owner's Admin Center: captures every request at the door, owner and guests kept apart (see board.js).
-const Board = require('./board')({ dataDir: DATA_DIR, sports: SPORTS, ownerName: OWNER_NAME, brand: BRAND, logo: LOGO, adminPath: GATED ? ADMIN_PATH : '' });
+const ACCOUNT_ORIGIN = process.env.ACCOUNT_ORIGIN || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`);
+const Accounts = require('./shared/accounts')({ dataDir: DATA_DIR, origin: ACCOUNT_ORIGIN, isSameOrigin, clientIp, onSessionCreated: (req, res, context) => clearAuth(res, context.secure) });
+const { OpportunityService } = require('./shared/opportunities');
+const { BOOK_NAMES } = require('./shared/sharp-books');
+const { NotificationService } = require('./shared/notifications');
+const opportunities = new OpportunityService();
+const opportunityHTTP = require('./shared/opportunity-http')({ service: opportunities, links: betLinks, sameOrigin: isSameOrigin });
+const pushAlerts = new NotificationService({ dataDir: DATA_DIR, origin: ACCOUNT_ORIGIN, allowedBooks: Object.keys(BOOK_NAMES) });
+opportunities.on('update', snapshot => { pushAlerts.publish(snapshot.rows).catch(() => {}); });
+const Board = require('./board')({ dataDir: DATA_DIR, sports: SPORTS, ownerName: OWNER_NAME, brand: BRAND, logo: LOGO, adminPath: GATED ? ADMIN_PATH : '', onRevokeDevice: id => Accounts.revokeDevice(id) });
 const MANIFEST = JSON.stringify({
   name: BRAND, short_name: BRAND, start_url: '/', scope: '/', display: 'standalone',
   background_color: '#0B0B0D', theme_color: '#0B0B0D',
@@ -95,6 +104,7 @@ function childEnv(key) {
   env.OWLS_FEED_IPC = process.env.OWLS_INSIGHT_API_KEY ? '1' : '0';
   delete env.SHARP_API_KEY;
   delete env.SHARPAPI_API_KEY;
+  for (const name of ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_PRICE_ID', 'VAPID_PRIVATE_KEY']) delete env[name];
   env.SHARP_FEED_IPC = process.env.SHARP_API_KEY ? '1' : '0';
   env.PORT = String(s.port);
   env.BASE_PATH = s.base;
@@ -115,13 +125,13 @@ const oddsRelays = {};
 const sharpRelays = {};
 const owlsFeed = createOwlsFeed({
   apiKey: process.env.OWLS_INSIGHT_API_KEY,
-  onUpdate: (sport, frame) => oddsRelays[sport]?.update(frame),
-  onStatus: status => Object.values(oddsRelays).forEach(relay => relay.status(status)),
+  onUpdate: (sport, frame) => { oddsRelays[sport]?.update(frame); opportunities.update('owls', sport, frame); },
+  onStatus: status => { Object.values(oddsRelays).forEach(relay => relay.status(status)); opportunities.status('owls', status); },
 });
 const sharpFeed = createSharpFeed({
   apiKey: process.env.SHARP_API_KEY,
-  onUpdate: (sport, frame) => sharpRelays[sport]?.update(frame),
-  onStatus: status => Object.values(sharpRelays).forEach(relay => relay.status(status)),
+  onUpdate: (sport, frame) => { sharpRelays[sport]?.update(frame); opportunities.update('sharp', sport, frame); },
+  onStatus: status => { Object.values(sharpRelays).forEach(relay => relay.status(status)); opportunities.status('sharp', status); },
 });
 function launch(key) {
   const s = SPORTS[key];
@@ -142,6 +152,8 @@ function cookies(req) {
 }
 const safeEq = (a, b) => { a = String(a || ''); b = String(b || ''); if (!a || a.length !== b.length) return false; try { return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b)); } catch { return false; } };
 function role(req) {
+  const account = Accounts.identity(req);
+  if (account) return account.role;
   if (!GATED) return 'owner';
   const c = cookies(req);
   if (safeEq(c.ps_code, OWNER_HASH) || safeEq(c.hl_code, OWNER_HASH) || (BBL_OWNER && safeEq(c.bbl_access, BBL_OWNER))) return 'owner';
@@ -159,6 +171,9 @@ function setAuth(res, kind, isHttps) {
 function clearAuth(res, isHttps) {
   const gone = `Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isHttps ? '; Secure' : ''}`;
   addCookies(res, ['ps_code=', 'hl_code=', 'ps_guest=', 'hl_guest=', 'bbl_access=', 'bbl_guest='].map((k) => `${k}; ${gone}`));
+  // Older engine installs scoped permanent credentials to a sport; root expiry cannot clear them.
+  const scoped = { nfl: ['ps_code', 'ps_guest'], ncaaf: ['hl_code', 'hl_guest'], mlb: ['bbl_access', 'bbl_guest'] };
+  for (const [sport, names] of Object.entries(scoped)) for (const suffix of ['', '/']) addCookies(res, names.map(name => `${name}=; ${gone.replace('Path=/', `Path=/${sport}${suffix}`)}`));
 }
 // Append, never replace: the board's device cookie may already be on this response.
 function addCookies(res, list) {
@@ -192,6 +207,7 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 <button>${admin ? 'Sign in' : 'Open the board'}</button>
 <div class="e">${wrong ? (admin ? "That code didn't work." : "That didn't work. Try opening the link you were sent in this browser.") : ''}</div>
 </form>
+${admin ? '<div class="f"><a href="/account" style="color:inherit">Sign in with a passkey &rsaquo;</a></div>' : ''}
 <div class="f">${admin ? '<a href="/" style="color:inherit">Just here for the boards? Go to the board &rsaquo;</a>' : 'One board · NFL · NCAAF · MLB · NHL'}</div>
 </div></body></html>`;
   // Forms need a real Origin for CSRF checks; send only the origin, never the private path.
@@ -203,10 +219,12 @@ input:focus{outline:none;border-color:var(--i3)}button{height:52px;border:0;bord
 // Read once at boot; an ETag lets phones revalidate cheaply instead of holding a stale copy.
 const fs = require('node:fs');
 const DESIGN = {};
-for (const f of ['broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js', 'support.css', 'support.js', 'activity.js']) {
+for (const f of ['broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js', 'support.css', 'support.js', 'activity.js', 'accounts.css', 'accounts.js', 'notifications.css', 'notifications.js', 'opportunities.css', 'opportunities.js', 'foundation.css', 'foundation.js']) {
   const body = fs.readFileSync(path.join(__dirname, 'design', f));
   DESIGN[f] = { body, etag: `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"` };
 }
+const passkeyBundle = fs.readFileSync(path.join(__dirname, 'node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js'));
+DESIGN['passkeys.js'] = { body: passkeyBundle, etag: `"${crypto.createHash('sha1').update(passkeyBundle).digest('hex').slice(0, 16)}"` };
 function serveDesign(req, res, name, ext) {
   const d = DESIGN[name];
   const h = { 'content-type': ext === 'css' ? 'text/css; charset=utf-8' : 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', etag: d.etag };
@@ -238,8 +256,8 @@ function buildBundles() {
         raw: body, br: zlib.brotliCompressSync(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }), gz: zlib.gzipSync(body, { level: 9 }) };
     };
     try {
-      const css = pack([...html.matchAll(CSS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)).concat('/_board/feeds.css','/_board/handoff.css'), 'css', '\n');
-      const js = pack(['/_board/handoff.js', ...[...html.matchAll(JS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)).concat('/_board/feeds.js')], 'js', '\n;');
+      const css = pack([...html.matchAll(CSS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)).concat('/_board/feeds.css','/_board/handoff.css','/_board/notifications.css','/_board/foundation.css'), 'css', '\n');
+      const js = pack(['/_board/handoff.js', ...[...html.matchAll(JS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)).concat('/_board/feeds.js','/_board/notifications.js','/_board/foundation.js')], 'js', '\n;');
       BUNDLE[key] = { css, js };
       console.log(`[terminal] ${key} bundle: ${css.list.size} css -> ${Math.round(css.br.length / 1024)}KB br, ${js.list.size} js -> ${Math.round(js.br.length / 1024)}KB br`);
     } catch (e) { console.log(`[terminal] ${key} bundle skipped: ${e.message}`); }   // falls back to the separate files
@@ -275,7 +293,14 @@ const OPEN = /^\/(nfl|ncaaf|mlb|nhl)\/(api\/health|manifest\.webmanifest|sw\.js|
 
 function lastSport(req) { const m = /(?:^|;\s*)sport=(nfl|ncaaf|mlb|nhl)/.exec(req.headers.cookie || ''); return m ? m[1] : 'nfl'; }
 
-const server = http.createServer((req, res) => {
+function watchAccountStream(req, res, upstream) {
+  const sessionId = Accounts.identity(req)?.sessionId;
+  if (!sessionId) return;
+  const check = setInterval(() => { if (Accounts.identity(req)?.sessionId !== sessionId) { upstream?.destroy(); res.end(); } }, 15000);
+  check.unref(); res.once('close', () => clearInterval(check));
+}
+const server = http.createServer(async (req, res) => {
+ try {
   let url;
   try { url = new URL(req.url || '/', 'http://localhost'); } catch { res.writeHead(400); return res.end('Bad request'); }
   // Match the same normalized path as the engines (including encoded dot segments).
@@ -291,8 +316,9 @@ const server = http.createServer((req, res) => {
   // terminal-owned endpoints -------------------------------------------------
   if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify({ ok: true, app: 'nfl.ncaaf', oddsFeed: owlsFeed.status(), feeds: { sharp: sharpFeed.status(), owls: owlsFeed.status() } })); }
   if (pathname === '/icon.svg' || pathname === '/favicon.ico') { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' }); return res.end(LOGO); }
-  const dm = /^\/_board\/((?:broadcast|portfolio|feeds|handoff|support)\.(?:css|js)|(?:portfolio-view|activity)\.js|refined\.css)$/.exec(pathname);
+  const dm = /^\/_board\/((?:broadcast|portfolio|feeds|handoff|support|accounts|notifications|opportunities|foundation)\.(?:css|js)|(?:portfolio-view|activity|passkeys)\.js|refined\.css)$/.exec(pathname);
   if (dm) return serveDesign(req, res, dm[1], dm[1].endsWith('.css') ? 'css' : 'js');
+  if (pathname === '/sw.js' && ['GET', 'HEAD'].includes(req.method)) { const script = fs.readFileSync(path.join(__dirname, 'shared/board-sw.js')); res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', 'service-worker-allowed': '/' }); return res.end(req.method === 'HEAD' ? '' : script); }
   if (pathname === '/manifest.webmanifest') { res.writeHead(200, { 'content-type': 'application/manifest+json; charset=utf-8' }); return res.end(MANIFEST); }
 
   // One device id for the whole board, minted silently on first sight (no prompt, no sign-out).
@@ -303,13 +329,13 @@ const server = http.createServer((req, res) => {
   const verdict = Board.gate(who);
   if (verdict) {
     if (privateRoute) Object.entries(PRIVATE_HEADERS).forEach(([name, value]) => res.setHeader(name, value));
-    clearAuth(res, isHttps(req));
+    clearAuth(res, isHttps(req)); Accounts.signOut(req, res, { secure: isHttps(req) });
     if (/^\/(nfl|ncaaf|mlb|nhl)\/api\//.test(pathname) || (privateRoute && pathname.startsWith(ADMIN_PATH + '/api/'))) { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Sign in"}'); }
     if (verdict === 'signout' && pathname !== '/') { res.writeHead(303, { location: '/', 'cache-control': 'no-store' }); return res.end(); }
     return page(res, 200, {});
   }
 
-  if (pathname === '/logout') { Board.entrance(who, role(req), 'logout'); clearAuth(res, isHttps(req)); res.writeHead(303, { location: '/' }); return res.end(); }
+  if (pathname === '/logout') { Board.entrance(who, role(req), 'logout'); Accounts.signOut(req, res, { secure: isHttps(req) }); clearAuth(res, isHttps(req)); res.writeHead(303, { location: '/' }); return res.end(); }
 
   const ownerLogin = GATED && !!ADMIN_LOGIN && pathname === ADMIN_LOGIN;
   if (ownerLogin && req.method === 'GET') return page(res, 200, { admin: true });
@@ -332,7 +358,8 @@ const server = http.createServer((req, res) => {
       if (!kind) { bad(ip); Board.entrance(who, null, 'wrong'); return page(res, 401, { wrong: true, admin: ownerLogin }); }
       fails.delete(ip);
       Board.entrance(who, kind, kind === 'owner' ? 'code' : 'guest-code');
-      setAuth(res, kind, isHttps(req));
+      if (kind === 'owner') Accounts.startOwnerSession(req, res, { role: 'owner', secure: isHttps(req), deviceId: who.dev });
+      else setAuth(res, kind, isHttps(req));
       res.writeHead(303, { location: kind === 'owner' ? ADMIN_PATH : `/${lastSport(req)}/`, ...PRIVATE_HEADERS });
       res.end();
     });
@@ -348,6 +375,8 @@ const server = http.createServer((req, res) => {
   }
 
   let r = role(req);
+  if (GATED && !OPEN_BOARDS && !r && pathname === '/api/account/signup') { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Use your guest invitation before creating an account."}'); }
+  if (await Accounts.handle(req, res, pathname, { role: GATED ? r : null, secure: isHttps(req), deviceId: who.dev })) return;
   const privileged = /^\/(nfl|ncaaf|mlb|nhl)\/api\/(security|group|invites)(\/|$)/.test(pathname);
   // Peers communicate directly over localhost, never through the public ingress.
   if (/^\/(nfl|ncaaf|mlb|nhl)\/api\/security\/peer(\/|$)/.test(pathname)) return notFound();
@@ -362,6 +391,14 @@ const server = http.createServer((req, res) => {
     req.headers.cookie = `${req.headers.cookie ? req.headers.cookie + '; ' : ''}ps_guest=${GUEST_HASH}; hl_guest=${GUEST_HASH}; bbl_guest=${BBL_GUEST}`;
     r = 'guest';
     Board.entrance(who, 'guest', 'open');
+  }
+  const featureRoute = pathname === '/opportunities' || pathname === '/opportunities/' || pathname.startsWith('/api/opportunities') || pathname === '/api/notifications';
+  if (featureRoute) {
+    if (GATED && !r && !OPEN_BOARDS) { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Sign in"}'); }
+    const account = Accounts.identity(req), ownerId = account ? `account:${account.accountId}` : `device:${who.dev}`;
+    if (pathname === '/api/notifications') return pushAlerts.handle(req, res, { ownerId });
+    if (pathname.startsWith('/api/opportunities')) { if (pathname === '/api/opportunities/stream') watchAccountStream(req, res); if (await opportunityHTTP.handle(req, res, url, { ownerId })) return; }
+    if (pathname === '/opportunities' || pathname === '/opportunities/') { if (!['GET', 'HEAD'].includes(req.method)) return notFound(); const html = fs.readFileSync(path.join(__dirname, 'design/opportunities.html')); res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }); return res.end(req.method === 'HEAD' ? '' : html); }
   }
   // Admin's own way in. Also where a blocked device ends up.
   if (pathname === '/login' && req.method === 'GET') return page(res, 200, {});
@@ -393,8 +430,28 @@ const server = http.createServer((req, res) => {
   const enginePath = m[2] || '/';
   if(enginePath === '/api/bet-links') return betLinks.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(503,{'content-type':'application/json'});res.end('{"error":"Link lookup unavailable"}');});
   if(url.searchParams.has('refresh') && r!=='owner'){res.writeHead(403,{'content-type':'application/json','cache-control':'no-store'});return res.end('{\"error\":\"Only admin can refresh odds.\"}');}
+  const account = Accounts.identity(req);
+  if (account && ['/api/me/link', '/api/me/join'].includes(enginePath)) { res.writeHead(409, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Sign in with your account on the other device to share this log."}'); }
+  // A cached launch URL must never restore owner access after account revocation.
+  // Existing legacy owner-cookie sessions still work; a token alone is no longer an entrance.
+  if (['nfl', 'ncaaf'].includes(sp) && (enginePath === '/' || enginePath === '/index.html') && url.searchParams.has('c') && (account || r !== 'owner')) {
+    url.searchParams.delete('c'); res.writeHead(303, { location: url.pathname + url.search, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }); return res.end();
+  }
+  if (['nfl', 'ncaaf'].includes(sp) && enginePath.startsWith('/m/c/')) {
+    if (!account && r !== 'owner') return notFound();
+    if (account) { res.writeHead(200, { 'content-type': 'application/manifest+json', 'cache-control': 'no-store' }); return res.end(req.method === 'HEAD' ? '' : MANIFEST); }
+  }
   const forwardPath = enginePath + qs;
   const headers = { ...forwardClientIpHeaders(req, PEER_SECRET), host: req.headers.host };
+  if (account) {
+    const forwarded = Object.fromEntries(Accounts.forwardCookie(req, sp).split(';').map(x => x.trim().split('=')));
+    for (const key of ['ps_code', 'hl_code', 'bbl_access', 'ps_guest', 'hl_guest', 'bbl_guest', 'tb_account', 'tb_account_csrf']) delete forwarded[key];
+    if (account.role === 'owner') { forwarded.ps_code = OWNER_HASH; forwarded.hl_code = OWNER_HASH; forwarded.bbl_access = BBL_OWNER; }
+    else { forwarded.ps_guest = GUEST_HASH; forwarded.hl_guest = GUEST_HASH; forwarded.bbl_guest = BBL_GUEST; }
+    headers.cookie = Object.entries(forwarded).map(([key,value]) => `${key}=${value}`).join('; ');
+  }
+  // Account tokens have no purpose in a sport engine, including expired tokens.
+  if (headers.cookie) headers.cookie = headers.cookie.split(';').filter(part => !/^\s*tb_account(?:_csrf)?=/.test(part)).join(';');
   const t0 = Date.now();
   const isStream = enginePath === '/api/stream';
   // The owner's copy of a board page gets an Admin Center link in the sport bar; ask for it uncompressed so
@@ -404,16 +461,22 @@ const server = http.createServer((req, res) => {
   const send = (body) => {
     const pr = http.request({ host: '127.0.0.1', port: s.port, method: req.method, path: forwardPath, headers }, (pres) => {
       const h = { ...pres.headers };
-      const sc = [].concat(res.getHeader('set-cookie') || [], h['set-cookie'] || []);
+      const sc = [].concat(res.getHeader('set-cookie') || [], Accounts.filterEngineCookies(req, h['set-cookie'] || []));
+      if (account) delete h['set-cookie'];
       if ((h['content-type'] || '').includes('text/html')) sc.push(`sport=${sp}; Path=/; Max-Age=31536000; SameSite=Lax${isHttps(req) ? '; Secure' : ''}`);
       if (sc.length) h['set-cookie'] = sc;
       Board.request(who, r, sp, req.method, enginePath, pres.statusCode, Date.now() - t0);
-      if (isStream && pres.statusCode === 200) { Board.streamOpen(who.dev); res.on('close', () => Board.streamClose(who.dev)); }
+      if (isStream && pres.statusCode === 200) { watchAccountStream(req, res, pres); Board.streamOpen(who.dev); res.on('close', () => Board.streamClose(who.dev)); }
       if (isPage && (h['content-type'] || '').includes('text/html') && !h['content-encoding']) {
         const parts = [];
         pres.on('data', (c) => parts.push(c));
         pres.on('end', () => {
           let html = useBundles(sp, Buffer.concat(parts).toString('utf8'));
+          if (account) {
+            html = html.replace(/<link\b[^>]*rel=["']manifest["'][^>]*>/gi, '<link rel="manifest" href="/manifest.webmanifest">')
+              .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, script => /localStorage\.setItem\(["'](?:ps|hl)\.(?:ok|key)["']/.test(script) ? '' : script);
+          }
+          if (account || r !== 'owner') html = html.replace('</head>', '<script>try{localStorage.removeItem("ps.ok");localStorage.removeItem("hl.ok");sessionStorage.removeItem("ps.heal");sessionStorage.removeItem("hl.heal")}catch(e){}</script></head>');
           if (GATED && ADMIN_PATH && r === 'owner') html = html.replace('</nav></div><style>', `</nav>${ADMIN_PILL}</div><style>`);
           h['cache-control'] = 'no-store';
           h.vary = 'accept-encoding, cookie';
@@ -454,6 +517,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   send(null);
+ } catch { if (!res.headersSent) res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' }); if (!res.writableEnded) res.end('{"error":"Service is temporarily unavailable."}'); }
 });
 
 // The owner-only way in, placed at the end of the sport bar. Styled from the board's own tokens.
@@ -473,5 +537,5 @@ server.listen(PORT, () => {
 });
 
 let down = false;
-function shutdown() { if (down) return; down = true; owlsFeed.stop(); sharpFeed.stop(); Object.values(sharpRelays).forEach(relay => relay.close()); Object.values(oddsRelays).forEach(relay => relay.close()); Board.close(); for (const k of Object.keys(children)) { const c = children[k]; if (c) { c.removeAllListeners('exit'); try { c.kill('SIGTERM'); } catch {} } } server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); }
+function shutdown() { if (down) return; down = true; opportunityHTTP.close(); opportunities.close(); owlsFeed.stop(); sharpFeed.stop(); Object.values(sharpRelays).forEach(relay => relay.close()); Object.values(oddsRelays).forEach(relay => relay.close()); Board.close(); for (const k of Object.keys(children)) { const c = children[k]; if (c) { c.removeAllListeners('exit'); try { c.kill('SIGTERM'); } catch {} } } server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); }
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, shutdown);

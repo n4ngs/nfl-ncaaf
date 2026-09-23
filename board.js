@@ -37,7 +37,7 @@ const ENGINE_UID_RE = /^[a-f0-9]{32}$/;
 // Files a page pulls in by itself. Recording them would bury the log in noise without saying anything.
 const STATIC_RE = /\.(js|css|png|svg|ico|woff2?|ttf|webmanifest|map|jpe?g|gif|webp|txt|json)$/i;
 
-module.exports = function createBoard({ dataDir, sports, ownerName = '', brand = 'THE.BOARD', logo = '', adminPath = '' }) {
+module.exports = function createBoard({ dataDir, sports, ownerName = '', brand = 'THE.BOARD', logo = '', adminPath = '', onRevokeDevice = () => {} }) {
   if (adminPath !== '' && (typeof adminPath !== 'string' || !/^\/[a-z0-9][a-z0-9-]{23,79}$/.test(adminPath))) throw new Error('Invalid private admin path');
   const DIR = path.join(dataDir, 'board');
   fs.mkdirSync(DIR, { recursive: true });
@@ -529,6 +529,7 @@ module.exports = function createBoard({ dataDir, sports, ownerName = '', brand =
     else if (a === 'unblock') delete state.blocked[id];
     else if (a === 'signout') state.signout[id] = Date.now();
     else return { error: 'Unknown action' };
+    if (a === 'block' || a === 'signout') onRevokeDevice(id);
     record({ t: Date.now(), dev: id, role: roleOfDev(d), ip: '', sp: '', k: 'enter', how: `owner-${a}` });
     dirty = true; save();
     return true;
