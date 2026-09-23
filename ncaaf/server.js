@@ -329,6 +329,7 @@ function pub(G, W) {
   const books = mergedBooks(G, W);
   const H = W.lines.full(G.id);
   const canonical = resolvedMarkets(G, W, books);
+  const openLine = canonicalLine(canonical, 'open'), vsOpens = W.vs.get(G.id)?.open || null;
   const wx = G.venue?.indoor ? { dome: true } : { ...(G.wx || {}), ...(W.wx.get(G.id) || {}) };
   const { dk, ...base } = G;
   const strip = ({ key, locKey, ...t }) => t;
@@ -341,14 +342,14 @@ function pub(G, W) {
     books,
     live: G.state === 'in' ? mergedLive(G, W) : null,
     mkt: canonicalLine(canonical, 'current'),
-    open: canonicalLine(canonical, 'open'),
+    open: openLine,
     close: canonicalLine(canonical, 'close'),
-    model: (() => { try { return Model.forGame(G, H, books); } catch { return null; } })(),
+    model: (() => { try { return Model.forGame(G, H, books, { opens: vsOpens, open: openLine }); } catch { return null; } })(),
     integrity: { markets: canonical, thresholds: integrityThresholds(), retrospective_status: 'RETROSPECTIVE_MARKET_MOVE' },
     splits: an.splits || null,
     tt: an.tt || null,
     h1: mergedHalf(G, W),
-    opens: W.vs.get(G.id)?.open || null,
+    opens: vsOpens,
     pinLimit: ['owls', 'sharp'].includes(books.pin?.market_sources?.s) ? books.pin.limit ?? null : books.pin?.market_sources?.s === 'pin' ? P.limit ?? null : null,
     // The in-play sharp number and the only thing that makes it usable: how old the price is. UNITS: `age`
     // is MILLISECONDS. Pinnacle's HTTP header is seconds and it is converted here, once, because every

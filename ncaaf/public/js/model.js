@@ -35,7 +35,8 @@ function modelPanel(g) {
 function movePanel(g, mv, spread, team) {
   if (!mv || !Number.isFinite(mv.open)) return '';
   const toward = (pts) => (Math.abs(pts) < 0.05 ? 'no move' : `${Math.abs(pts).toFixed(1)} pt toward ${team(pts > 0 ? 'home' : 'away')}`);
-  const moved = Number.isFinite(mv.actual) ? `Opened ${esc(spread('home', mv.open))}, now ${esc(spread('home', mv.now))}: <b>${esc(toward(mv.actual))}</b>.` : `Opened ${esc(spread('home', mv.open))}.`;
+  const src = mv.openSource ? ` <span class="bt-note">opener: ${esc(mv.openSource)}</span>` : '';
+  const moved = Number.isFinite(mv.actual) ? `Opened ${esc(spread('home', mv.open))}, now ${esc(spread('home', mv.now))}: <b>${esc(toward(mv.actual))}</b>.${src}` : `Opened ${esc(spread('home', mv.open))}.${src}`;
   const rows = mv.parts.filter((p) => Math.abs(p.pts) >= 0.05).sort((a, b) => Math.abs(b.pts) - Math.abs(a.pts))
     .map((p) => `<li><span>${esc(p.label)}</span><b>${esc(toward(p.pts))}</b></li>`).join('');
   const left = Number.isFinite(mv.unexplained) && Math.abs(mv.unexplained) >= 0.25

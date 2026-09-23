@@ -50,7 +50,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
   const pHome = (line, mu) => 1 - phi((-line - mu) / SD);
 
   // G: board game; hist: W.lines.full(G.id) ({b: {book: {s: [[t, spread, homePrice]...], ...}}}); books: merged current lines
-  function forGame(G, hist, books) {
+  function forGame(G, hist, books, published = {}) {
     if (!MODEL) return null;
     if (!state) return { status: 'LOADING', note: 'Model history is loading.' };
     const row = upcoming.get(String(G.id));
@@ -68,7 +68,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
     const f = state.featuresFor(row, { late: {} });
     const x = E.withContext(f, row, { seasonType: row.seasonType, week: row.week, homeP5: row.homeP5, awayP5: row.awayP5 }, MODEL);
     const margin = E.predict(x, MODEL);
-    const move = explain(row, x, margin, cb, books);
+    const move = explain(row, x, margin, openOf(published, cb), books);
     if (!cb || cb.n < 3) return { status: 'OK', note: 'Waiting for at least three books to open.', move };
     const reads = [];
     for (const b of Object.keys(cb.books)) {
@@ -89,11 +89,22 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
   // Why the line moved (model variant E): consensus opener -> consensus now, split into what the model can see.
   // Lead back / receiver status is not published for college football, so each lead player comes back as a
   // "what if he is ruled out" amount instead of being assumed.
-  function explain(row, x, margin, cb, books) {
+  // The opener to measure a move from, best source first: the books' own published openers (VSiN, Nevada books),
+  // the feed's consensus opening line, then the first line this app recorded (later than the true open if the
+  // app was not running when the market opened).
+  function openOf(published, cb) {
+    const vs = median(Object.values((published && published.opens) || {}).map(o => o && o.s));
+    if (vs != null) return { line: vs, source: 'published openers (Nevada books)', n: Object.keys(published.opens).length };
+    const o = published && published.open && published.open.s;
+    if (Number.isFinite(o)) return { line: o, source: 'feed opening line', n: 1 };
+    if (cb && cb.n) return { line: cb.openCons, source: 'first line this app recorded', n: cb.n };
+    return null;
+  }
+  function explain(row, x, margin, op, books) {
     try {
-      if (!cb || !cb.n || !MODEL.stage2 || !MODEL.stage2.E) return null;
+      if (!op || !MODEL.stage2 || !MODEL.stage2.E) return null;
       const nowCons = consensusNow(books);
-      const e = E.explainMove(x, margin, { open: cb.openCons, now: nowCons }, MODEL);
+      const e = E.explainMove(x, margin, { open: op.line, now: nowCons }, MODEL);
       if (!e) return null;
       const lead = (team) => (hist ? Data.leads(hist.games, team, row.season) : { rb: null, wr: null });
       const whatIf = [];
@@ -102,7 +113,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
         for (const k of ['rb', 'wr']) if (L[k]) whatIf.push({ side, role: k === 'rb' ? 'lead back' : 'lead receiver', name: L[k].name, share: L[k].share,
           pts: (side === 'home' ? 1 : -1) * e.perShare[k] * L[k].share });
       }
-      return { open: e.open, now: e.now, actual: e.actual, predicted: e.predicted, unexplained: e.unexplained, books: cb.n, margin,
+      return { open: e.open, now: e.now, actual: e.actual, predicted: e.predicted, unexplained: e.unexplained, books: op.n, openSource: op.source, margin,
         parts: e.parts.map((p) => ({ key: p.key, label: p.label, pts: p.pts })), whatIf };
     } catch { return null; }
   }
@@ -136,7 +147,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
 
   return {
     refresh, summary: () => record.summary(),
-    forGame(G, hist, books) { const out = forGame(G, hist, books); try { refreshMarks(G, books); } catch {} return out; },
+    forGame(G, hist, books, published) { const out = forGame(G, hist, books, published); try { refreshMarks(G, books); } catch {} return out; },
     status: () => ({ model: MODEL && MODEL.version, builtAt, building, history: info, data: data.status(), lastError, tiers: { THIN: 'variant B, proven on holdout, opener timing unverified', WEAK: 'lean' },
       proven: MODEL && MODEL.holdout_report ? provenFor(MODEL.holdout_report) : null }),
   };
