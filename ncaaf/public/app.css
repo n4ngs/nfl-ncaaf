@@ -844,8 +844,8 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
    Mark the lane so the eye finds it among a dozen: an accent rule under the header and a whisper of
    lift down the column. Deliberately not the live-red wash, which means something else here. */
 @media (min-width:1024px){
-  .bt th[data-bk="mgm"]{color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
-  .bt td[data-bk="mgm"]{background:color-mix(in srgb,var(--surface) 94%,var(--ink))}
+  .bt th.mdl-th{color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
+  .bt td.mdl-td{background:color-mix(in srgb,var(--surface) 94%,var(--ink))}
 }
 
 /* ═══════════════════════════════════════════════════════════════════ colour + controls
@@ -876,3 +876,10 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
 .model-read .mr-read{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);margin-bottom:8px}
 .model-read .mr-read p{margin:0;font-size:14px;line-height:1.4}.model-read .mr-read .tag{align-self:flex-start}
 .model-read .mr-why{font-size:12px !important;color:var(--ink-2)}.model-read .mr-quiet{font-size:13px;color:var(--ink-2);margin:0}
+
+/* The model is the lane to find first (owner, 2026-09-23): Model column + chip on the board, accent on the model panels. */
+.mdl-fair{font-weight:700;color:var(--ink)}.bt td.mdl-td{white-space:nowrap}
+.br-mdl{display:inline-flex;gap:6px;align-items:center;margin:2px 0 4px;padding:4px 10px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;font-size:12px;color:var(--ink-2);cursor:pointer;max-width:100%}
+.br-mdl b{color:var(--ink)}
+.gs-sec.model-read{border-left:3px solid var(--accent);padding-left:12px}
+.gs-sec.model-read>.sub-h{box-shadow:inset 0 -2px 0 var(--accent);padding-bottom:4px}

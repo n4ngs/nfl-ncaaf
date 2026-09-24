@@ -77,7 +77,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
     }
     const x = fc.x, margin = fc.margin;
     const move = explain(row, x, margin, openOf(published, cb), books);
-    if (!cb || cb.n < 3) return { status: 'OK', note: 'Waiting for at least three books to open.', move };
+    if (!cb || cb.n < 3) return { status: 'OK', note: 'Waiting for at least three books to open.', move, margin };
     const reads = [];
     for (const b of Object.keys(cb.books)) {
       if (NV.size && !NV.has(b)) continue;                          // Nevada books only
@@ -91,7 +91,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
       track(G, b, sig.side, tier, cb.books[b].open, price, cb.openCons, books);
     }
     reads.sort((a, b) => Math.abs(b.clv) - Math.abs(a.clv));
-    return { status: 'OK', model: MODEL.version, books: cb.n, consensusOpen: cb.openCons, reads, move };
+    return { status: 'OK', model: MODEL.version, books: cb.n, consensusOpen: cb.openCons, reads, move, margin };
   }
 
   // Why the line moved (model variant E): consensus opener -> consensus now, split into what the model can see.

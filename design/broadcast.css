@@ -126,8 +126,13 @@ span.px{cursor:default}
 .integrity-leg{font-size:13px;line-height:1.5}
 .integrity-leg summary{padding:8px 0;min-height:44px}
 .integrity-detail{line-height:1.55}
-.bt th[data-bk="mgm"],.bt th[data-bk="betmgm"]{color:var(--brand-text);box-shadow:inset 0 -2px 0 var(--brand)}
-.bt td[data-bk="mgm"],.bt td[data-bk="betmgm"]{background:var(--brand-wash)}
+.bt:not(.has-model) th[data-bk="mgm"],.bt:not(.has-model) th[data-bk="betmgm"]{color:var(--brand-text);box-shadow:inset 0 -2px 0 var(--brand)}
+.bt:not(.has-model) td[data-bk="mgm"],.bt:not(.has-model) td[data-bk="betmgm"]{background:var(--brand-wash)}
+/* NCAAF: the Model column carries the lane emphasis instead of BetMGM (BetMGM links and slips unchanged) */
+.bt.has-model th.mdl-th{color:var(--brand-text);box-shadow:inset 0 -2px 0 var(--brand)}
+.bt.has-model td.mdl-td{background:var(--brand-wash)}
+.gs-sec.model-read{border-left-color:var(--brand)}.gs-sec.model-read>.sub-h{box-shadow:inset 0 -2px 0 var(--brand)}
+.br-mdl{border-left-color:var(--brand)}
 .tag.sharp{background:var(--brand-wash);color:var(--brand-text);border-color:transparent}
 .tag.hot{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
 .hist .on i{background:var(--brand)}
