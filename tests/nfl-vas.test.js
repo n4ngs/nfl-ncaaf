@@ -269,3 +269,30 @@ test('loader parity: nflverse CSVs -> loader -> engine equals the Python feature
   const s = L.status().sources;
   console.log('# loader cache', Object.fromEntries(Object.entries(s).map(([k, v]) => [k, { rows: v.rows, gzMB: +(v.bytesGz / 1e6).toFixed(2), cacheKB: Math.round(v.cacheBytes / 1024), parseMs: v.parseMs }])));
 });
+
+test('service: a completed game keeps its Model column read, from the pre-day features (no result leakage)', { skip: !fs.existsSync(path.join(__dirname, '../nfl/lib/nfl-vas-model.json')) }, async () => {
+  const Svc = require('../nfl/lib/vas-service');
+  const MODEL = require('../nfl/lib/nfl-vas-model.json');
+  const games = 'game_id,season,game_type,week,gameday,weekday,gametime,away_team,away_score,home_team,home_score,location,div_game,roof\n' +
+    '2025_01_KC_BUF,2025,REG,1,2025-09-07,Sunday,13:00,KC,20,BUF,24,Home,0,outdoors\n' +
+    '2025_02_BUF_KC,2025,REG,2,2025-09-14,Sunday,16:25,BUF,,KC,,Home,1,dome\n';
+  const pbp = 'game_id,posteam,defteam,desc,play_type,epa,success,qb_dropback,special,qb_kneel,qb_spike,passer_id,wp,play_deleted\n' +
+    '2025_01_KC_BUF,BUF,KC,pass,pass,0.52,1,1,0,0,0,00-0034857,0.51,0\n';
+  const snaps = 'game_id,pfr_game_id,season,game_type,week,player,pfr_player_id,position,team,opponent,offense_snaps,offense_pct,defense_snaps,defense_pct,st_snaps,st_pct\n' +
+    '2025_01_KC_BUF,x,2025,REG,1,"Allen, Josh",AlleJo02,QB,BUF,KC,70,1,0,0,0,0\n';
+  const files = { [Dl.URLS.games()]: gz(games), [Dl.URLS.pbp(2025)]: gz(pbp), [Dl.URLS.snaps(2025)]: gz(snaps) };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nflvas-svc-'));
+  const svc = Svc.create({ dir, now: () => Date.UTC(2025, 8, 12), fetchBuffer: async u => { if (!files[u]) throw Error('404'); return files[u]; } });
+  await svc.refresh();
+  const past = { id: '401', state: 'post', start: '2025-09-07T17:00:00Z', seasonType: 2, home: { abbr: 'BUF', score: 24 }, away: { abbr: 'KC', score: 20 } };
+  const read = svc.forGame(past, null, null);
+  assert.equal(read.status, 'OK');
+  // Recompute independently: the history walk's features for that game use only state before its day.
+  const Dl2 = Dl.create({ dir, now: () => Date.UTC(2025, 8, 12), fetchBuffer: async u => files[u] });
+  const st = E.build(await Dl2.history(2025), MODEL.config);
+  const expected = E.predict(st.featured.get('2025_01_KC_BUF'), MODEL);
+  assert.equal(read.fairMargin, expected.margin); assert.equal(read.fairTotal, expected.total);
+  // The upcoming game still reads from today's team state.
+  const next = svc.forGame({ id: '402', state: 'pre', start: '2025-09-14T20:25:00Z', seasonType: 2, home: { abbr: 'KC' }, away: { abbr: 'BUF' } }, null, null);
+  assert.equal(next.status, 'OK');
+});

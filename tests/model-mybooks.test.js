@@ -107,7 +107,7 @@ test('my books: account sync adopts the account list, never wipes device picks, 
 function nflModel() {
   const src = fs.readFileSync(path.join(__dirname, '../nfl/public/js/views.js'), 'utf8');
   const body = src.slice(src.indexOf('function modelMargin(g)'), src.indexOf('function boardRow(g, mkt)'));
-  const c = { isPre: (g) => g.state === 'pre', SIGMA: 13.5, MINUS: '−', BoardFair,
+  const c = { isPre: (g) => g.state === 'pre', isFinal: (g) => g.state === 'post', SIGMA: 13.5, MINUS: '−', BoardFair,
     fmtOdds: (o) => (o == null ? '—' : o > 0 ? `+${o}` : `−${Math.abs(o)}`), ncdf: BoardFair.ncdf };
   vm.createContext(c); vm.runInContext(body + '\nglobalThis.api = { modelSide, modelFair, modelMargin, MODEL_TIP };', c);
   return c.api;
@@ -130,6 +130,8 @@ test('NFL Model column: fair spread, own total, fair moneyline and a derived fir
   assert.match(m.MODEL_TIP.s, /not a pick/);
   // no read, a WAIT read, or a game underway: nothing (the column shows a dash)
   assert.equal(m.modelFair({ ...g, state: 'in' }, 's'), '');
+  // earlier weeks: a finished game keeps the read the model made before its game day
+  assert.equal(m.modelFair({ ...g, state: 'post' }, 's'), 'GB −8.2');
   assert.equal(m.modelFair({ ...g, model: { status: 'WAIT', note: 'x' } }, 's'), '');
   assert.equal(m.modelSide({ ...g, model: null }, 'home', 'ml'), '');
 });

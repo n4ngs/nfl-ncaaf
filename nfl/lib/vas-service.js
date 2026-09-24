@@ -28,7 +28,7 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
     return Buffer.from(await r.arrayBuffer());
   }) });
   const record = Record.create({ file: path.join(dir, 'signals.json'), now });
-  let state = null, upcoming = [], builtAt = null, building = false, lastError = null, info = null;
+  let state = null, upcoming = [], played = [], builtAt = null, building = false, lastError = null, info = null;
   // Stage-1 read per game, computed once per history build (the board reads it on every publish, never recomputes).
   const predCache = new Map();
   // The research scored the FIRST line seen after both teams' previous games were final. That line is this game's
@@ -44,6 +44,9 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
       const h = await data.history(season);
       state = E.build(h, MODEL.config);
       upcoming = await data.upcoming(season);
+      // This season's completed games, so earlier weeks keep their Model column. Their read is the one the engine
+      // computed with the state strictly before that game day (build().featured), never with the result in it.
+      played = h.games.filter(g => g.season === season);
       predCache.clear();
       builtAt = new Date(now()).toISOString(); info = { season, games: h.games.length, complete: h.complete, ...(h.info || {}) }; lastError = null;
     } catch (e) { lastError = String(e.message || e).slice(0, 160); log('[nfl-vas] refresh failed: ' + lastError); }
@@ -53,7 +56,8 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
   function schedRow(G) {
     const h = code(G.home?.abbr), a = code(G.away?.abbr), day = String(G.start || '').slice(0, 10);
     const t = Date.parse(G.start);
-    return upcoming.find(r => r.home === h && r.away === a && Math.abs(Date.parse(r.day + 'T12:00:00Z') - t) < 2.5 * 86400e3) || null;
+    const near = r => r.home === h && r.away === a && Math.abs(Date.parse(r.day + 'T12:00:00Z') - t) < 2.5 * 86400e3;
+    return upcoming.find(near) || played.find(near) || null;
   }
   const marketOf = L => L ? { spread: L.s == null ? null : -L.s, homePrice: L.so?.[0], awayPrice: L.so?.[1], total: L.t, overPrice: L.to?.[0], underPrice: L.to?.[1] } : null;
   // probability the recorded side wins at `line`, push-adjusted so that CLV EV = p * decimal - 1 matches the research
@@ -76,7 +80,11 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
     const pending = upcoming.some(r => r.gid !== row.gid && r.day < row.day && [r.home, r.away].some(t => t === row.home || t === row.away));
     if (pending) return { status: 'WAIT', note: 'Reads start once both teams have played their previous game, the way the model was tested.' };
     let c = predCache.get(row.gid);
-    if (!c) { const f0 = state.featuresFor(row); c = { f: f0, pred: E.predict(f0, MODEL) }; predCache.set(row.gid, c); }
+    if (!c) {
+      // A completed game uses its pre-day features from the history walk; an upcoming one, today's team state.
+      const f0 = state.featured.get(row.gid) || state.featuresFor(row);
+      c = { f: f0, pred: E.predict(f0, MODEL) }; predCache.set(row.gid, c);
+    }
     const f = c.f, pred = c.pred;
     // fairMargin (home minus away) and fairTotal feed the board's Model column; sd is the model's own margin SD,
     // used there for the fair moneyline (normal on the margin).
