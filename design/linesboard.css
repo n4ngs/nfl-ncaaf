@@ -85,3 +85,25 @@ body.lb-lock { overflow: hidden; }
 .tb-fold-x{display:none!important}
 @media (prefers-reduced-motion:reduce){.tb-fold-h::after{transition:none}}
 @media (min-width:1024px){.tb-jump{margin-inline:calc(-1 * var(--s5,32px));padding-inline:var(--s5,32px)}}
+
+/* BoardFX (linesboard.js): frozen Model / Open / Market (NHL: Model / Market / Best) beside Matchup on very wide boards */
+.tb-freeze :is(th,td):nth-child(2){position:sticky;left:var(--fz2,0);z-index:1}
+.tb-freeze :is(th,td):nth-child(3){position:sticky;left:var(--fz3,0);z-index:1}
+.tb-freeze :is(th,td):nth-child(4){position:sticky;left:var(--fz4,0);z-index:1;box-shadow:1px 0 0 var(--line),8px 0 14px -10px rgba(0,0,0,.45)}
+.tb-freeze td:is(:nth-child(2),:nth-child(3),:nth-child(4)){background:var(--surface)}
+.tb-freeze th:is(:nth-child(2),:nth-child(3),:nth-child(4)){z-index:3;background:var(--surface)}
+.tb-freeze th:first-child{z-index:4}
+/* a model number that just changed */
+@keyframes mdl-flash{0%{background:color-mix(in srgb,var(--brand,#EDAA25) 55%,transparent);box-shadow:0 0 0 2px var(--brand,#EDAA25)}100%{background:transparent;box-shadow:0 0 0 0 transparent}}
+.mdl-flash{animation:mdl-flash 1.5s ease-out 1;border-radius:6px}
+@media (prefers-reduced-motion:reduce){.mdl-flash{animation:none;outline:2px solid var(--brand,#EDAA25);outline-offset:1px}}
+
+/* Best price, on every board: every book tied at the best number is marked, in green, so it no longer shares the gold
+   of the model and "my books" (and sharp books are red). */
+:root{--best:#15803D;--best-ink:#FFFFFF}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--best:#2FBF71;--best-ink:#03170B}}
+:root[data-theme="dark"]{--best:#2FBF71;--best-ink:#03170B}
+html .px.best,html button.odds-px.best,html a.odds-px.best,html span.odds-px.best,html .odds-tp.best{background:var(--best);color:var(--best-ink);border-color:var(--best);box-shadow:none}
+html .px.best small,html .odds-px.best small,html .odds-tp.best small,html .px.best .num,html .odds-px.best .num{color:var(--best-ink);opacity:.9}
+html button.px.best:hover,html a.px.best:hover,html button.odds-px.best:hover,html a.odds-px.best:hover{background:color-mix(in srgb,var(--best) 88%,#000)}
+html .px.best *,html .odds-px.best *,html .odds-tp.best *{color:var(--best-ink)!important}

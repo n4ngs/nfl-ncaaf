@@ -55,7 +55,7 @@ function cell(g,book,m,s,best,sub){const q=quoteOf(g,book,m,s);
  const ok=fresh(q);
  // in play a quote that is not fresh is not a price: no number at all, just why (a delayed in-play quote can be minutes old)
  if(g.state==='in'&&!ok)return '<span class="px na" title="'+esc(bookName(book)+': its in-play quote is delayed or paused, so no number is shown.')+'">—<small>'+(q.market_status!=='active'?'Paused':'Delayed')+'</small></span>';
- const isBest=ok&&best&&best.book===book,main=lineMain(m,s,q),odds=american(Number(q.american_odds));
+ const isBest=!!(ok&&best&&(best.book===book||(Number(q.american_odds)===Number(best.q.american_odds)&&(m==='ml'||Number(q.line_value)===Number(best.q.line_value))))),main=lineMain(m,s,q),odds=american(Number(q.american_odds));
  const smalls=(m!=='ml'?odds+' ':'')+(sub||'');const label=bookName(book)+' · '+g.away.abbr+' @ '+g.home.abbr+' · '+selection(g,m,s,q)+' '+odds+(isBest?' · best price':'')+(ok?'':' · reference only');
  const cls='px num'+(isBest?' best':'')+(ok?'':' old')+myBkCls(book);
  if(!ok)return '<span class="'+cls+'" title="'+esc(label+' · '+(q.market_status!=='active'?'Paused':'Delayed or stale'))+'">'+esc(main)+'<small>'+esc((m!=='ml'?odds+' · ':'')+(q.market_status!=='active'?'Paused':'Delayed'))+'</small></span>';

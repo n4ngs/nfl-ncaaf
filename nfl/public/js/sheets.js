@@ -247,7 +247,7 @@ function bookTable(g) {
       return '<span class="px na">—</span>';
     }
     const b = best[`${m}${side}`];
-    const isBest = k !== 'cons' && k !== 'open' && b?.book === k && !isFinal(g);
+    const isBest = k !== 'cons' && k !== 'open' && !!b && !isFinal(g) && (b.book === k || (p.odds === b.odds && (m === 'ml' || p.line === b.line) && quoteCanAct(L, g, m, side)));   // ties count
     const main = m === 'ml' ? fmtOdds(p.odds) : m === 't' ? `${side === 'over' ? 'o' : 'u'}${fmtTot(p.line)}` : fmtPts(p.line);
     const flash = flashAttr(g.id, live ? 'live' : 'pre', k, m);
     const old = isOld(L);
@@ -264,10 +264,20 @@ function bookTable(g) {
     const age = L?.m ? `typed ${ago(L.at)}` : live && !L && k !== 'cons' && g.books?.[k] ? 'no live feed · last pregame shown' : !L && k !== 'cons' && k !== 'open' ? 'no price posted' : L?.src === 'vsin' ? 'via VSiN' : L?.src === 'pin' ? 'Pinnacle feed' : k === 'open' && g.open?.at ? dayLabel(new Date(g.open.at).toISOString()) : '';
     const op = g.opens?.[k]?.s != null && !live ? `opened ${fmtPts(favSide(g) === 'away' ? -g.opens[k].s : g.opens[k].s)}` : '';
     return `<tr class="${k === 'cons' ? 'cons' : ''}${myBkCls(k)}"><td><div class="bk">${myBkStar(k)}${esc(bookName(k))}${b?.sharp ? '<span class="tag sharp">Sharp</span>' : ''}</div><small class="faint" style="font-size:11px">${esc([age, op].filter(Boolean).join(' · ') || (b && !b.feed && !L ? 'counter only' : ''))}</small></td>
-      <td class="c-s">${cell(k, 's', 'away')}</td><td class="c-s">${cell(k, 's', 'home')}</td><td class="c-t">${cell(k, 't', 'over')}</td><td class="c-t">${cell(k, 't', 'under')}</td><td class="c-ml">${cell(k, 'ml', 'away')}</td><td class="c-ml">${cell(k, 'ml', 'home')}</td></tr>`;
+      <td class="c-s">${cell(k, 's', 'away')}</td><td class="c-s">${cell(k, 's', 'home')}</td><td class="c-t">${cell(k, 't', 'over')}</td><td class="c-t">${cell(k, 't', 'under')}</td><td class="c-ml">${cell(k, 'ml', 'away')}</td><td class="c-ml">${cell(k, 'ml', 'home')}</td></tr>`
+      + (k === 'cons' ? modelBookRow(g) : '');
   }).join('');
   return `<div class="card" style="overflow-x:auto;padding-top:14px"><table class="btable m-${S.sheet.tableMkt || 's'}"><thead><tr><th>${live ? 'Live' : 'Book'}</th><th class="c-s">${esc(g.away.abbr)}</th><th class="c-s">${esc(g.home.abbr)}</th><th class="c-t">Over</th><th class="c-t">Under</th><th class="c-ml">${esc(g.away.abbr)} ML</th><th class="c-ml">${esc(g.home.abbr)} ML</th></tr></thead><tbody>${rows}</tbody></table>
     ${isFinal(g) ? '' : `<button class="addnum" type="button" data-counter="${g.id}">${ICON.plus} Add a number from the counter</button>`}</div>`;
+}
+
+// The model's own numbers as a row of the every-book table, right under Market, in its own color so it reads as a
+// comparison, not a price: fair spread, its total, and its no-vig moneyline (views.js modelSide). Never a bet button.
+function modelBookRow(g) {
+  if (typeof modelSide !== 'function' || typeof modelMargin !== 'function' || modelMargin(g) == null) return '';
+  const v = (side, mkt) => { const t = modelSide(g, side, mkt); return t ? `<span class="px num mdl-x" title="The model's fair number. An estimate, not a price you can bet.">${esc(t)}</span>` : '<span class="px na">—</span>'; };
+  return `<tr class="mdl-row"><td><div class="bk">Model <span class="tag mdl-tag">Mine</span></div><small class="faint" style="font-size:11px">fair numbers, no vig · an estimate</small></td>
+      <td class="c-s">${v('away', 's')}</td><td class="c-s">${v('home', 's')}</td><td class="c-t">${v('over', 't')}</td><td class="c-t">${v('under', 't')}</td><td class="c-ml">${v('away', 'ml')}</td><td class="c-ml">${v('home', 'ml')}</td></tr>`;
 }
 
 function numbersPanel(g) {

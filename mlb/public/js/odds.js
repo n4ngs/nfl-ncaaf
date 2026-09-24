@@ -146,7 +146,7 @@ function oddsLiveCell(g, O, mkt, side, book, best = null, actionable = true) {
   if (!p) return '<span class="odds-px na">—<small>Live unavailable</small></span>';
   const { main, sub } = oddsTwoLine(mkt, side, p);
   const state = p.feedOnly ? 'Feed quote' : p.actionable ? 'Live' : p.freshness.charAt(0) + p.freshness.slice(1).toLowerCase();
-  const isBest = p.actionable && best?.book === book;
+  const isBest = !!(p.actionable && best && (best.book === book || (p.odds === best.odds && (mkt === 'ml' || p.line === best.line))));
   const label = `${oddsBookFull(book)}, ${oddsWho(g, mkt, side)} ${oddsSpokenPrice(mkt, side, p)}, live ${state.toLowerCase()}`;
   const inner = `<span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small>${esc(state)}${isBest ? ' · Best' : ''}</small>`;
   if (!actionable || !p.actionable || ODDS_NOT_BETTABLE.has(book)) return oddsHandoff(g,O?.live?.[book],mkt,side,book,label,`<span class="odds-px na${p.actionable ? '' : ' old'}" aria-label="${esc(label)}">${inner}</span>`);
@@ -650,7 +650,7 @@ function oddsBookCell(g, O, mkt, side, book, best, pre) {
   if (!p || p.odds == null) return '<span class="odds-px na" aria-hidden="true">—</span>';
   const { main, sub } = oddsTwoLine(base, side, p);
   const q = oddsQuote(L, base, side), canAct = pre && q?.actionable && !ODDS_NOT_BETTABLE.has(book);
-  const isBest = canAct && best && best.book === book;
+  const isBest = !!(canAct && best && (best.book === book || (p.odds === best.odds && (base === 'ml' || p.line === best.line))));   // ties count
   const old = !q?.actionable;
   const fl = oddsFlash(g.pk, `k|${book}|${mkt}|${side}`);
   const label = `${oddsBookFull(book)}, ${oddsWho(g, base, side)} ${oddsSpokenPrice(base, side, p)}${isBest ? ', best price' : ''}${L.m ? `, typed in ${oddsAgo(L.seen)}` : old ? `, last seen ${oddsAgo(L.seen)}` : ''}.${fl.label}${canAct ? ' Opens a bet slip.' : ''} ${pre ? oddsQuoteNote(q) : 'Recorded pregame price.'}`;
@@ -1030,7 +1030,7 @@ function oddsFiveHTML(pk) {
     if (!p || p.odds == null) return '<span class="odds-px na" aria-hidden="true">—</span>';
     const { main, sub } = oddsTwoLine(m, side, p);
     const b = best(m, side);
-    const isBest = oddsIsPre(g) && k !== 'cons' && b?.book === k;
+    const isBest = oddsIsPre(g) && k !== 'cons' && !!b && (b.book === k || (p.odds === b.odds && (m === 'ml' || p.line === b.line)) && !!oddsQuote(f5[k], m, side)?.actionable);
     const who = m === 't' ? (side === 'over' ? 'Over' : 'Under') : oddsTeam(g, side).name;
     const label = `${oddsBookFull(k)}, first five innings, ${who} ${oddsSpokenPrice(m, side, p)}${isBest ? ', best price' : ''}. Opens a bet slip.`;
     const q = oddsQuote(f5[k], m, side);
@@ -1229,7 +1229,7 @@ function oddsTableHTML(pk) {
     if (!p || p.odds == null) return '<span class="odds-tp na" aria-label="No price">—</span>';
     const txt = mkt === 'ml' ? oddsFmt(p.odds) : mkt === 'rl' ? `${oddsFmtLine(p.line)} ${oddsFmt(p.odds)}` : `${side === 'over' ? 'o' : 'u'}${oddsTrim(p.line)} ${oddsFmt(p.odds)}`;
     const b = best[`${mkt}|${side}`];
-    const isBest = b && b.book === k;
+    const isBest = !!b && (b.book === k || (k !== 'cons' && k !== 'open' && p.odds === b.odds && (mkt === 'ml' || p.line === b.line) && !!oddsQuote(L, mkt, side)?.actionable));
     const who = mkt === 't' ? (side === 'over' ? 'Over' : 'Under') : (side === 'home' ? home : away).abbr;
     const fl = oddsFlash(pk, `k|${k}|${mkt}|${side}`);
     const spoken = `${oddsBookFull(k)}, ${who} ${ODDS_MKT_WORD[mkt]} ${oddsSpokenPrice(mkt, side, p)}${isBest ? ', best price' : ''}.${fl.label}`;

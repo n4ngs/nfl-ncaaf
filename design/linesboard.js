@@ -299,3 +299,69 @@
     if (h && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(h); }
   });
 })(typeof window !== 'undefined' ? window : globalThis);
+
+/* BoardFX, on all four boards:
+   1. Frozen columns. When a wide board (NFL/NCAAF .bt, MLB .odds-bt, NHL .nb-table) runs past FREEZE_AT pixels, the
+      columns right after Matchup (Model, Open, Market; on NHL Model, Market, Best) freeze beside it, so the model and
+      the market stay in view while you scroll across the books. Offsets come from the live column widths (a column
+      focus mode hides counts as zero), re-measured whenever the board repaints or the window resizes.
+   2. Model flash. When the model's number for a game changes (a new read, a line the model now prices), that number
+      flashes once. Changing market, day or week is not a change; neither is a number appearing for the first time. */
+(function (root) {
+  const FREEZE_AT = 3000, FROZEN = 3;   // columns 2..4
+  const TABLES = '.bt, .odds-bt, .nb-table';
+  const MODEL = '.bt .px.mdl, .odds-bt .odds-px.mdl, .nb-table .px.mdl, .mdl-b b';
+  const isNum = (t) => (/\d/.test(t) || /\bPK\b/.test(t)) && !/^[—–-]+$/.test(t.trim());   // PK (a pick'em) is a number too
+  const api = { FREEZE_AT, FROZEN, isNum };
+  root.BoardFX = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports.BoardFX = api;
+  if (!root.document || !root.MutationObserver) return;
+  const doc = root.document;
+
+  function freeze() {
+    for (const t of doc.querySelectorAll(TABLES)) {
+      const head = t.tHead && t.tHead.rows[0];
+      if (!head) continue;
+      const on = t.scrollWidth > FREEZE_AT && head.cells.length > FROZEN + 2;
+      if (t.classList.contains('tb-freeze') !== on) t.classList.toggle('tb-freeze', on);
+      if (!on) continue;
+      let left = 0;
+      for (let i = 0; i <= FROZEN; i++) {
+        const c = head.cells[i];
+        if (i > 0) { const v = `${Math.round(left)}px`; if (t.style.getPropertyValue(`--fz${i + 1}`) !== v) t.style.setProperty(`--fz${i + 1}`, v); }
+        left += c ? c.getBoundingClientRect().width : 0;
+      }
+    }
+  }
+
+  const seen = new Map();
+  let primed = false;
+  function flash() {
+    const now = new Map();
+    for (const el of doc.querySelectorAll(MODEL)) {
+      const row = el.closest('[data-open],[data-odds-open],[data-game-row],[data-game-id],tr');
+      if (!row) continue;
+      const id = row.getAttribute('data-open') || row.getAttribute('data-odds-open') || row.getAttribute('data-game-row') || row.getAttribute('data-game-id') || row.querySelector('[data-open],[data-odds-open],[data-game]')?.getAttribute('data-open') || row.querySelector('[data-odds-open]')?.getAttribute('data-odds-open') || row.querySelector('[data-game]')?.getAttribute('data-game');
+      if (!id) continue;
+      const tbl = el.closest('table'), card = el.closest('.brd,.odds-brd,.card');
+      const ctx = tbl ? tbl.querySelector('th.mdl-th')?.title || '' : (card && card.firstElementChild ? card.firstElementChild.textContent : '') + (el.closest('[title]')?.title || '');
+      const idx = [...row.querySelectorAll(MODEL)].indexOf(el);
+      const key = `${location.pathname}|${tbl ? 't' : 'p'}|${ctx}|${id}|${idx}`, text = el.textContent.trim();
+      now.set(key, text);
+      const was = seen.get(key);
+      if (primed && was !== undefined && was !== text && isNum(was) && isNum(text)) {
+        el.classList.remove('mdl-flash'); void el.offsetWidth; el.classList.add('mdl-flash');
+        setTimeout(() => el.classList.remove('mdl-flash'), 1600);
+      }
+    }
+    for (const [k, v] of now) seen.set(k, v);
+    if (seen.size > 4000) { for (const k of [...seen.keys()].slice(0, seen.size - 3000)) seen.delete(k); }
+    primed = true;
+  }
+
+  let queued = false;
+  const run = () => { queued = false; try { freeze(); } catch { /* layout only */ } try { flash(); } catch { /* cosmetic */ } };
+  const later = () => { if (queued) return; queued = true; (root.requestAnimationFrame || setTimeout)(run); };
+  const start = () => { new root.MutationObserver(later).observe(doc.body, { childList: true, subtree: true, characterData: true }); root.addEventListener('resize', later); later(); };
+  if (doc.body) start(); else doc.addEventListener('DOMContentLoaded', start, { once: true });
+})(typeof window !== 'undefined' ? window : globalThis);

@@ -3,8 +3,9 @@ const {attachLink}=require('../../shared/bet-links');
 // A quote's clock belongs to its provider; a successful HTTP fetch is a different observation.
 const SIDES = { ml: ['home', 'away'], rl: ['home', 'away'], t: ['over', 'under'] };
 const requestedMax = Number(process.env.MLB_PREGAME_MAX_AGE_MS), requestedFresh = Number(process.env.MLB_PREGAME_FRESH_MS);
-const MAX_AGE_MS = Number.isFinite(requestedMax) && requestedMax > 0 ? requestedMax : 15 * 60e3;
-const FRESH_FOR_MS = Math.min(MAX_AGE_MS, Number.isFinite(requestedFresh) && requestedFresh > 0 ? requestedFresh : 2 * 60e3);
+// Same pregame windows as every board (shared/clv-integrity.js): Fresh under 5 minutes, Aging 5-10, Stale past 10.
+const MAX_AGE_MS = Number.isFinite(requestedMax) && requestedMax > 0 ? requestedMax : 10 * 60e3;
+const FRESH_FOR_MS = Math.min(MAX_AGE_MS, Number.isFinite(requestedFresh) && requestedFresh > 0 ? requestedFresh : 5 * 60e3);
 function sourceTime(value) {
   if (value == null || value === '') return null;
   const numeric = typeof value === 'number' || (typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value));

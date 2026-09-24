@@ -8,6 +8,8 @@
   --ink:#101B2F; --ink-2:#4F5C73; --ink-3:#606D83;
   --line:rgba(24,43,73,.12); --fill:rgba(24,43,73,.05); --edge:rgba(24,43,73,.12);
   --brand:#EDAA25; --brand-ink:#231800; --brand-text:#875400; --brand-wash:rgba(213,144,0,.10);
+  --sharp:#B42318; --sharp-wash:rgba(196,40,28,.10); --sharp-line:rgba(196,40,28,.45);
+  --model-c:#1D5FD1; --model-wash:rgba(29,95,209,.08);
   --glass:rgba(255,255,255,.94); --focus:#875400;
   --lift:none; --sheen:none; --lift-2:0 12px 40px rgba(24,43,73,.14);
 }
@@ -17,6 +19,8 @@
     --ink:#F2F5FA; --ink-2:#B1BDD0; --ink-3:#92A1BA;
     --line:rgba(169,191,225,.16); --fill:rgba(169,191,225,.07); --edge:rgba(169,191,225,.14);
     --brand:#FFB020; --brand-ink:#1B1200; --brand-text:#FFBF45; --brand-wash:rgba(255,176,32,.12);
+    --sharp:#FF7A6E; --sharp-wash:rgba(255,99,85,.14); --sharp-line:rgba(255,122,110,.55);
+    --model-c:#7FB2FF; --model-wash:rgba(127,178,255,.10);
     --glass:rgba(12,20,33,.96); --scrim:rgba(2,5,12,.66); --focus:#FFBF45;
     --lift:none; --lift-2:0 16px 48px rgba(0,0,0,.35);
     --sheen:none;
@@ -27,6 +31,8 @@
   --ink:#F2F5FA; --ink-2:#B1BDD0; --ink-3:#92A1BA;
   --line:rgba(169,191,225,.16); --fill:rgba(169,191,225,.07); --edge:rgba(169,191,225,.14);
   --brand:#FFB020; --brand-ink:#1B1200; --brand-text:#FFBF45; --brand-wash:rgba(255,176,32,.12);
+    --sharp:#FF7A6E; --sharp-wash:rgba(255,99,85,.14); --sharp-line:rgba(255,122,110,.55);
+    --model-c:#7FB2FF; --model-wash:rgba(127,178,255,.10);
   --glass:rgba(12,20,33,.96); --scrim:rgba(2,5,12,.66); --focus:#FFBF45;
   --lift:none; --lift-2:0 16px 48px rgba(0,0,0,.35);
   --sheen:none;
@@ -133,7 +139,11 @@ span.px{cursor:default}
 .bt.has-model .px.mdl,.odds-bt.has-model .odds-px.mdl{color:var(--brand-text);font-weight:700}
 .br-f .mdl-b i,.odds-br-f .mdl-b i{color:var(--brand-text)}
 .gs-sec.model-read{border-left-color:var(--brand)}.gs-sec.model-read>.sub-h{box-shadow:inset 0 -2px 0 var(--brand)}
-.tag.sharp{background:var(--brand-wash);color:var(--brand-text);border-color:transparent}
+/* Sharp books (Pinnacle, Circa, ...) wear red, not the brand gold: they are the price the others are measured
+   against, so they read apart from the model's gold and from "my books". */
+html .tag.sharp,html .bets-tag.sharp{background:var(--sharp-wash);color:var(--sharp);border-color:transparent;box-shadow:inset 0 0 0 1px var(--sharp-line)}
+html .odds-sharp{color:var(--sharp);box-shadow:inset 0 0 0 1px var(--sharp-line);font-weight:700}
+html .bt th:has(> .tag.sharp),html .odds-bt th:has(.odds-sharp),html .btable td .bk:has(> .tag.sharp){color:var(--sharp)}
 .tag.hot{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
 .hist .on i{background:var(--brand)}
 .hist .on span{color:var(--brand-text)}
@@ -254,3 +264,9 @@ details.wx .wx-list{margin-top:0}
   *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
   .btn:active,.chip:active,.pbtn:active,.seg button:active,.card button:active,.gm:active,.grp-p:active{transform:none}
 }
+
+/* The model's row in a game's every-book table: its own blue, so it reads as a comparison against the books */
+.btable tr.mdl-row td{background:var(--model-wash)}
+.btable tr.mdl-row td:first-child{box-shadow:inset 3px 0 0 var(--model-c)}
+.btable tr.mdl-row .bk,.btable tr.mdl-row .mdl-x{color:var(--model-c);font-weight:700}
+.tag.mdl-tag{background:transparent;color:var(--model-c);box-shadow:inset 0 0 0 1px var(--model-c);border-color:transparent}

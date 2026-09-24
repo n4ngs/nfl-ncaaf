@@ -491,8 +491,9 @@ function pxCell(g, mkt, side, book, best, opts = {}) {
     }
     return `<span class="px na" aria-hidden="true">—</span>`;
   }
-  const isBest = best && best.book === book && !isFinal(g);
   const L = mkt === 'h1' ? g.h1?.[book] : isLive(g) ? g.live?.[book] : g.books?.[book];
+  // Best price: every book tied at the best number and price is marked, not only the first one found.
+  const isBest = !!best && !isFinal(g) && (best.book === book || (book !== 'cons' && book !== 'open' && p.odds === best.odds && (m === 'ml' || p.line === best.line) && quoteCanAct(L, g, m, side)));
   const flash = flashAttr(g.id, mkt === 'h1' ? 'h1' : isLive(g) ? 'live' : 'pre', book, m);
   const main = m === 'ml' ? fmtOdds(p.odds) : mkt === 't' ? `${side === 'over' ? 'o' : 'u'}${fmtTot(p.line)}` : fmtPts(p.line);
   const sub = opts.sub ?? (m === 'ml' ? '' : fmtOdds(p.odds));
