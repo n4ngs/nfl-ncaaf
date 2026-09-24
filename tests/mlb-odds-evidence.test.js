@@ -104,13 +104,21 @@ test('same-value rechecks and price changes without a newer source clock do not 
   assert.deepEqual(D.ingest(123, 'an', { cons: sourceLine(-150, NOW - 1000) }, NOW + 2000, NOW + 2000).moves, []);
   assert.equal(JSON.stringify(D.games[123].b), before);
 });
-test('valid newer provider quotes record the source clock and permit genuine multi-book steam', () => {
+test('valid newer provider quotes record the source clock and permit genuine multi-book steam across feeds', () => {
   const D = day(), books = ['czr', 'mgm', 'dk'];
   D.ingest(123, 'an', Object.fromEntries(books.map((book) => [book, sourceLine(-110, NOW - 20000)])), NOW - 1000, NOW - 1000);
-  const result = D.ingest(123, 'an', Object.fromEntries(books.map((book) => [book, sourceLine(-140, NOW - 10000)])), NOW, NOW);
-  const steam = result.moves.find((move) => move.kind === 'steam');
-  assert.ok(steam); assert.equal(steam.t, NOW - 10000); assert.equal(steam.dir, 'home');
+  // one feed refreshing three books at once is that feed catching up, not steam
+  const one = D.ingest(123, 'an', Object.fromEntries(books.map((book) => [book, sourceLine(-140, NOW - 10000)])), NOW, NOW);
+  assert.equal(one.moves.find((move) => move.kind === 'steam'), undefined);
   assert.deepEqual(D.games[123].b.mgm.ml.map((row) => row[0]), [NOW - 20000, NOW - 10000]);
+  // the same move arriving from two independent feeds is steam
+  const E = day();
+  E.ingest(123, 'an', { czr: sourceLine(-110, NOW - 20000), mgm: sourceLine(-110, NOW - 20000) }, NOW - 1000, NOW - 1000);
+  E.ingest(123, 'vsin', { circa: sourceLine(-110, NOW - 20000) }, NOW - 1000, NOW - 1000);
+  E.ingest(123, 'an', { czr: sourceLine(-140, NOW - 10000), mgm: sourceLine(-140, NOW - 10000) }, NOW - 500, NOW - 500);
+  const two = E.ingest(123, 'vsin', { circa: sourceLine(-140, NOW - 9000) }, NOW, NOW);
+  const steam = two.moves.find((move) => move.kind === 'steam');
+  assert.ok(steam); assert.equal(steam.dir, 'home');
 });
 test('provider failover cannot masquerade as three sportsbooks moving together', () => {
   const D = day(), books = ['czr', 'mgm', 'dk'];

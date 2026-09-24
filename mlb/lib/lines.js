@@ -207,10 +207,10 @@ class OddsDay {
     const out = [];
     const ml = advancedEvidence(prev, L, 'ml', now);
     if (ml && prev.ml[0] !== L.ml[0]) out.push({ book: k, mkt: 'ml', from: prev.ml[0], to: L.ml[0], fromMl: prev.ml, toMl: L.ml,
-      d: cents(L.ml[0]) - cents(prev.ml[0]), t: ml.at, fresh: true });
+      d: cents(L.ml[0]) - cents(prev.ml[0]), t: ml.at, fresh: true, src: L.src || L.source || null });
     const total = advancedEvidence(prev, L, 't', now);
     if (total && prev.t.line !== L.t.line) out.push({ book: k, mkt: 't', from: prev.t.line, to: L.t.line,
-      d: L.t.line - prev.t.line, t: total.at, fresh: true });
+      d: L.t.line - prev.t.line, t: total.at, fresh: true, src: L.src || L.source || null });
     return out;
   }
 
@@ -232,6 +232,9 @@ class OddsDay {
       const up = [...net].filter(([, n]) => n.d >= min), down = [...net].filter(([, n]) => n.d <= -min);
       for (const [set, sign] of [[up, 1], [down, -1]]) {
         if (set.length < STEAM_BOOKS) continue;
+        // Steam only across two or more independent feeds: several books arriving in one aggregator's refresh is the
+        // feed catching up, not the market moving (the owner found that callout misleading).
+        if (new Set(set.map(([k, n]) => n.last.src || k)).size < 2) continue;
         const dir = mkt === 'ml' ? (sign > 0 ? 'home' : 'away') : sign > 0 ? 'over' : 'under';
         if (flagged('steam', mkt, dir, 30 * 60e3)) continue;
         const firsts = set.map(([, n]) => n.first).sort((a, b) => a.t - b.t);

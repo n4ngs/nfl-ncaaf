@@ -176,18 +176,18 @@ function glanceNumbers(games) {
 function renderMoveCards() {
   const seen = new Set();
   const fresh = S.moves.filter((m) => serverNow() - m.t < 20 * 60e3 && gameById(m.gid) && isPre(gameById(m.gid)))
-    .sort((a, b) => (b.kind === 'steam') - (a.kind === 'steam') || b.t - a.t)
+    .sort((a, b) => isSteam(b) - isSteam(a) || b.t - a.t)
     .filter((m) => { const k = `${m.gid}|${m.mkt}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 2);
   $('#moveSlot').innerHTML = fresh.map((m) => {
     const g = gameById(m.gid);
     const tx = moveText(m, g);
-    const kicker = m.kind === 'steam' ? `Steam · ${m.books?.length || 3} books${m.secs != null ? ` in ${Math.max(1, Math.round(m.secs / 60))} min` : ''}` : moveWord[m.kind];
+    const kicker = moveKicker(m), now = moveNow(m, g);
     const t = m.dir === 'over' || m.dir === 'under' ? null : g[m.dir];
-    return `<button class="card mv" type="button" data-open="${g.id}">
+    return `<button class="card mv${isSteam(m) ? ' is-steam' : ' is-move'}" type="button" data-open="${g.id}">
       <div class="mv-top"><span class="lab"><span class="dot pulse"></span>${esc(kicker)}</span><span class="muted">${esc(ago(m.t))}</span></div>
       <div class="mv-main">${t ? logo(t, 'logo') : ''}<div class="who"><b>${esc(tx.title)}</b><span>${esc(g.away.short)} @ ${esc(g.home.short)} · ${esc(dayLabel(g.start))} ${esc(timeLabel(g.start))}</span></div>
         <div class="mv-num num"><s>${esc(tx.from.replace(/^[A-Z&]+ /, ''))}</s>${esc(tx.to.replace(/^[A-Z&]+ /, ''))}</div></div>
-      <div class="mv-foot"><span>${m.books?.length ? `${esc(m.books.map(bookName).join(', '))}` : 'Market consensus'}</span><span>${esc(m.mkt === 't' ? 'Total' : 'Spread')} ${ICON.chev}</span></div>
+      <div class="mv-foot"><span>${m.books?.length ? `Moved: ${esc(m.books.map(bookName).join(', '))}` : 'Market consensus'}${now ? `<br><span class="mv-now${now.holds ? '' : ' is-split'}">${esc(now.text)}</span>` : ''}</span><span>${esc(m.mkt === 't' ? 'Total' : 'Spread')} ${ICON.chev}</span></div>
       <div class="wait"></div></button>`;
   }).join('');
 }
@@ -289,7 +289,7 @@ function renderHeroSide() {
     <section><div class="sec-h" style="margin-bottom:12px"><h2 style="font-size:17px">Line moves</h2><span class="more" style="font-size:13px">${moves.length ? 'Newest first' : ''}</span></div>
       <div class="card list">${moves.length ? moves.map((m) => {
         const g = gameById(m.gid), tx = moveText(m, g);
-        return `<div class="li" data-open="${g.id}">${m.kind === 'steam' ? '<span class="tag hot">Steam</span>' : `<span class="tag">${esc(m.kind === 'key' ? `Key ${m.key}` : m.kind === 'flip' ? 'Flip' : 'Move')}</span>`}<div><div>${esc(tx.title)}</div><div class="m">${esc(g.away.abbr)} @ ${esc(g.home.abbr)} · ${esc(ago(m.t))}</div></div><div class="v num">${esc(tx.to)}</div></div>`;
+        return `<div class="li" data-open="${g.id}">${isSteam(m) ? '<span class="tag hot">Steam</span>' : `<span class="tag">${esc(m.kind === 'key' ? `Key ${m.key}` : m.kind === 'flip' ? 'Flip' : 'Move')}</span>`}<div><div>${esc(tx.title)}</div><div class="m">${esc(g.away.abbr)} @ ${esc(g.home.abbr)} · ${esc(ago(m.t))}</div></div><div class="v num">${esc(tx.to)}</div></div>`;
       }).join('') : '<div class="empty" style="padding:24px 16px;font-size:13px"><b style="font-size:15px">Quiet so far</b>Steam, key-number crossings and big moves show up here the moment they happen.</div>'}</div></section>
     ${sigs.length ? `<section><div class="sec-h" style="margin-bottom:12px"><h2 style="font-size:17px">Sharp signals</h2><span class="more" style="font-size:13px">Splits vs movement</span></div>
       <div class="card list">${sigs.map(({ g, s }) => `<div class="li" data-open="${g.id}" style="grid-template-columns:1fr auto"><div><div style="font-weight:600">${esc(g.away.abbr)} @ ${esc(g.home.abbr)} <span class="m">· ${esc(dayLabel(g.start))} ${esc(timeLabel(g.start))}</span></div><div class="m" style="margin-top:2px">${s[0].text.replace(/<[^>]+>/g, '')}</div></div><div class="v num">${esc(favLine(g))}</div></div>`).join('')}</div></section>` : ''}`;
@@ -594,7 +594,7 @@ function boardRow(g, mkt) {
   else if (moved) bits.push(`Opened ${mkt === 't' ? fmtTot(g.open.t) : fmtPts(g.open.s)} <b>${moved > 0 ? '▲' : '▼'}${trim(Math.abs(moved))}</b>`);
   if (sp?.tix != null && isPre(g)) bits.push(mkt === 't' ? `${sp.tix}% on over` : `${Math.max(sp.tix, 100 - sp.tix)}% on ${esc(g[sp.tix >= 50 ? 'home' : 'away'].abbr)}`);
   if (g.wx?.wind >= 12 && isPre(g)) bits.push(`<span class="${g.wx.wind >= 18 ? 'hot' : ''}">Wind ${g.wx.wind}</span>`);
-  if ((g.moves || []).some((m) => m.kind === 'steam' && serverNow() - m.t < 3 * 3600e3)) bits.push('<span class="hot">Steam</span>');
+  if ((g.moves || []).some((m) => isSteam(m) && serverNow() - m.t < 3 * 3600e3)) bits.push('<span class="hot">Steam</span>');
   if (S.bets.some((b) => b.status === 'open' && b.legs.some((l) => l.gid === g.id))) bits.push('<b>Your bet</b>');
   const spark = mkt === 't' ? g.spark?.t : g.spark?.s;
   return `<div class="br" data-open="${g.id}">${row(g.away, 'away', s1)}${row(g.home, 'home', s2)}<button type="button" class="br-f" data-open="${g.id}" aria-label="${esc(`${g.away.short} at ${g.home.short}: open the game`)}">${bits.join('<span class="sep"></span>')}<span class="spk">${isPre(g) ? sparkSVG(spark) : ''}</span></button></div>`;

@@ -161,3 +161,12 @@ html .px.best,html button.odds-px.best,html a.odds-px.best,html span.odds-px.bes
 html .px.best *,html .odds-px.best *,html .odds-tp.best *{color:var(--ink)!important}
 html .px.best small,html .odds-px.best small,html .odds-tp.best small{color:var(--ink-2)!important;opacity:1}
 html button.px.best:hover,html a.px.best:hover,html button.odds-px.best:hover,html a.odds-px.best:hover{background:color-mix(in srgb,var(--best) 30%,var(--surface))!important}
+
+/* a line-move card says where the market is now (views.js moveNow); a move most books have not followed says so */
+.mv-now{display:inline-block;margin-top:4px;font-size:12px;color:var(--ink-2)}
+.mv-now.is-split{color:var(--ink)}
+.mv-now.is-split::before{content:"Split: ";font-weight:700}
+/* only a verified steam move wears the alarm red; an ordinary line move is plain */
+.mv.is-move .lab{color:var(--ink)}
+.mv.is-move .lab .dot{background:var(--ink-3)}
+.mv.is-move .wait{display:none}

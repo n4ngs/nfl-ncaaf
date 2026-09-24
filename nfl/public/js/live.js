@@ -237,7 +237,7 @@ function announceMove(m) {
   if (!cares(m.gid) || m.t < serverNow() - 5 * 60e3) return;
   const g = gameById(m.gid);
   const tx = moveText(m, g);
-  const kicker = m.kind === 'steam' ? `Steam · ${m.books?.length || 3} books` : moveWord[m.kind];
+  const kicker = moveKicker(m);
   toast({ logoUrl: g?.[m.dir === 'home' || m.dir === 'away' ? m.dir : 'home']?.logo, kicker, title: tx.title, line: `${tx.from} → ${tx.to} · ${m.matchup || ''}`, open: m.gid });
   chime(false);
   notify(`${kicker}: ${tx.title}`, `${tx.from} → ${tx.to} · ${m.matchup || ''}`, m.id);

@@ -386,6 +386,22 @@ function sparkSVG(pts, w = 64, h = 22) {
 }
 
 const moveWord = { steam: 'Steam', key: 'Key number', flip: 'Favorite flipped', move: 'Big move' };
+// "Steam" only for a move the server confirmed across two independent feeds (lib/lines.js); older records and a
+// single feed refreshing several books at once read as a plain line move.
+const isSteam = (m) => m?.kind === 'steam' && m.verified === true;
+const moveKicker = (m) => (isSteam(m) ? `Steam · ${m.books?.length || 3} books, ${m.sources?.length || 2} feeds` : m?.kind === 'steam' ? `Line move · ${m.books?.length || 3} books` : moveWord[m?.kind] || 'Line move');
+// Where that market is now, across the books: how many sit at the moved-to number, and where the sharp books are.
+function moveNow(m, g) {
+  if (!g || !g.books || (m.mkt !== 's' && m.mkt !== 't')) return null;
+  const vals = Object.entries(g.books).filter(([k, L]) => k !== 'cons' && k !== 'open' && L && L[m.mkt] != null && quoteCanAct(L, g, m.mkt, m.mkt === 't' ? 'over' : 'home')).map(([k, L]) => [k, L[m.mkt]]);
+  if (!vals.length) return null;
+  const at = vals.filter(([, v]) => v === m.to).length;
+  const sharp = ['pin', 'circa'].map((k) => vals.find(([b]) => b === k)).filter(Boolean);
+  const fmt = (v) => (m.mkt === 't' ? fmtTot(v) : fmtPts(v));
+  const counts = new Map(); for (const [, v] of vals) counts.set(v, (counts.get(v) || 0) + 1);
+  const common = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+  return { at, of: vals.length, holds: at * 2 >= vals.length, common, text: `Now ${fmt(m.to)} at ${at} of ${vals.length} books${common !== m.to ? ` · most at ${fmt(common)}` : ''}${sharp.length ? ` · ${sharp.map(([k, v]) => `${bookName(k)} ${fmt(v)}`).join(', ')}` : ''}` };
+}
 function moveText(m, g) {
   const abbr = (side) => (g ? g[side].abbr : side === 'home' ? m.home : m.away);
   if (m.mkt === 't') return { title: `Total ${m.dir === 'over' ? 'up' : 'down'} to ${fmtTot(m.to)}`, from: fmtTot(m.from), to: fmtTot(m.to) };

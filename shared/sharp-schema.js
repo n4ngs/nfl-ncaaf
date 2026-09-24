@@ -12,7 +12,10 @@ function normalizeBoard(payload, sport) {
   const drawMarkets=new Set(sport==='nhl'?rows.filter(r=>r.market_type==='moneyline'&&r.selection_type==='draw').map(r=>r.sportsbook+':'+r.event_id):[]);
   for (const row of rows) {
     if (!row || row.league !== sport || !row.id || !row.event_id) continue;
-    if(sport==='nhl'&&(drawMarkets.has(row.sportsbook+':'+row.event_id)||/regulation|60.?minute|3.?way/i.test(row.market_name||'')))continue;
+    // A book whose moneyline is three-way (regulation, with a draw) has no two-way moneyline to show, but its puck
+    // line and total are still good: drop only that book's moneyline rows, not the whole game (that hid nearly every
+    // NHL book).
+    if(sport==='nhl'&&((row.market_type==='moneyline'&&drawMarkets.has(row.sportsbook+':'+row.event_id))||/regulation|60.?minute|3.?way/i.test(row.market_name||'')))continue;
     const market = MARKETS[row.market_type], book = BOOK_KEYS[row.sportsbook];
     if (!market || !book || row.is_main_line !== true || row.is_alternate_line === true || row.is_player_prop === true) continue;
     if (row.market_segment && row.market_segment !== 'full_game') continue;

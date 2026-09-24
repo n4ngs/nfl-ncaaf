@@ -34,11 +34,11 @@ class Week {
     const push = (arr, pt) => { arr.push(pt); if (arr.length > MAX_POINTS) arr.splice(1, 1); this.dirty = true; };
     const lastS = H.s.at(-1), lastT = H.t.at(-1), lastM = H.ml.at(-1);
     if (L.s != null && (!lastS || !same(lastS[1], L.s) || Math.abs((lastS[2] ?? 0) - (L.so?.[0] ?? 0)) >= 5)) {
-      if (lastS && !same(lastS[1], L.s)) changes.push({ mkt: 's', book, from: lastS[1], to: L.s, t });
+      if (lastS && !same(lastS[1], L.s)) changes.push({ mkt: 's', book, from: lastS[1], to: L.s, t, src: L.src || null });
       push(H.s, [t, L.s, L.so?.[0] ?? null]);
     }
     if (L.t != null && (!lastT || !same(lastT[1], L.t) || Math.abs((lastT[2] ?? 0) - (L.to?.[0] ?? 0)) >= 5)) {
-      if (lastT && !same(lastT[1], L.t)) changes.push({ mkt: 't', book, from: lastT[1], to: L.t, t });
+      if (lastT && !same(lastT[1], L.t)) changes.push({ mkt: 't', book, from: lastT[1], to: L.t, t, src: L.src || null });
       push(H.t, [t, L.t, L.to?.[0] ?? null]);
     }
     if (L.ml?.[0] != null && (!lastM || !same(lastM[1], L.ml[0]) || !same(lastM[2], L.ml[1]))) {
@@ -89,11 +89,17 @@ class Week {
       for (const [dirBooks, sign] of [[up, 1], [down, -1]]) {
         if (dirBooks.size >= STEAM_BOOKS && !flagged('steam', mkt, 30 * 60e3)) {
           const rs = recent.filter((c) => dirBooks.has(c.book) && Math.sign(c.to - c.from) === sign).sort((a, b) => a.t - b.t);
+          /* Steam only when it is the market moving, not one feed refreshing: the moves must arrive from at least two
+             independent feeds (Owls, VSiN, Pinnacle, Action Network...). Several books landing in one poll of the same
+             aggregator is that aggregator catching up, and calling it steam was misleading. Big market moves are still
+             called out below from the consensus. */
+          if (new Set(rs.map((c) => c.src || c.book)).size < 2) continue;
           // Report where the moving books went; the consensus often lags them by a poll or two.
           if (rs[0].from === rs.at(-1).to) continue;
           out.push({
             kind: 'steam', mkt, from: rs[0].from, to: rs.at(-1).to, books: [...dirBooks], t: now,
             dir: mkt === 's' ? (sign < 0 ? 'home' : 'away') : sign > 0 ? 'over' : 'under', secs: Math.round((rs.at(-1).t - rs[0].t) / 1000),
+            sources: [...new Set(rs.map((c) => c.src).filter(Boolean))], verified: true,
           });
         }
       }

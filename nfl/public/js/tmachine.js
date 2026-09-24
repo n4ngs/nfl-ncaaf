@@ -115,7 +115,7 @@ function tmLeader(M, t, dir, only) {
 
 function tmEvents(M) {
   const ev = [];
-  const word = { steam: 'Steam', key: 'Key number', flip: 'Favorite flipped', move: 'Big move' };
+  const word = { steam: 'Line move', key: 'Key number', flip: 'Favorite flipped', move: 'Big move' };
   if (M.open?.t) ev.push({ t: M.open.t, kind: 'open', label: 'Opened', text: tmLine(M, M.open.v) });
   for (const m of M.moves) {
     const from = M.conv(m.from), to = M.conv(m.to);
@@ -127,7 +127,7 @@ function tmEvents(M) {
       const secs = m.secs || 0;
       text = `${plural(n, 'book')} to ${tmLine(M, to)}${secs >= 60 ? ` in ${Math.round(secs / 60)} min` : secs > 0 ? ` in ${secs} sec` : ''}`;
     } else if (m.kind === 'key') text = `${m.onto ? 'Onto' : 'Through'} ${m.key}: ${text}`;
-    ev.push({ t: m.t, kind: m.kind, label: word[m.kind] || 'Move', text, lead });
+    ev.push({ t: m.t, kind: m.kind, label: (m.kind === 'steam' && m.verified === true ? 'Steam' : word[m.kind]) || 'Move', text, lead });
   }
   // Market (consensus) changes the server didn't call out, so the log still shows how the number walked.
   const mk = (M.cons?.mv || []).filter((c) => !M.moves.some((m) => Math.abs(m.t - c.t) < 5 * 60e3)).slice(-40);
