@@ -168,3 +168,24 @@ test('reference observations enter the integrity ledger: a months-old opener is 
   // Before the close was received it does not exist (no look-ahead).
   assert.equal(store.resolve({ ...event, quote_source: 'sharp_close' }, 's', 'home', 'dk', kick + 60e3).close, null);
 });
+
+test('line history: the home/over side of each opener read is saved (changes only), refreshed once after kickoff, readable by the engine', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'refhist-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const hist = [{ timestamp: '2026-05-14T20:08:22Z', price: -110, point: '-7.5' }, { timestamp: '2026-05-15T20:08:22Z', price: -110, point: '-7.5' },
+    { timestamp: '2026-09-21T20:00:00Z', price: -112, point: '-6.5' }, { timestamp: '2026-09-25T00:20:00Z', price: -300, point: '-3.5' }];
+  const h = harness(async (url) => res({ success: true, data: { openingLine: { price: -110, point: '-7.5', timestamp: '2026-05-14T20:08:22Z' }, history: hist } }), { histDir: dir });
+  h.svc.start(); h.svc.observe('owls', 'nfl', [{ ...owlsEvent, books: { dk: {} } }]); h.svc.sweep(); await settle();
+  const key = 'nfl:atlantafalcons@greenbaypackers:2026-09-25T00:15';
+  const saved = R.readHistory(dir, 'nfl', key);
+  assert.deepEqual(saved.dk.s.map(p => p[1]), [-7.5, -6.5, -3.5], 'consecutive duplicates dropped');
+  const calls0 = h.calls.length;
+  h.set(Date.parse(START) + 6 * 60e3); h.svc.sweep(); await settle();
+  assert.equal(h.calls.length - calls0, 3, 'one history read per book/market after kickoff');
+  assert.deepEqual(R.readHistory(dir, 'nfl', key).dk.s.map(p => p[1]), [-7.5, -6.5], 'the post-kickoff read keeps pregame points only');
+  h.svc.sweep(); await settle(); assert.equal(h.calls.length - calls0, 3, 'never twice');
+  const peer = new EventEmitter(); peer.send = () => {}; peer.env = { REFERENCE_HISTORY_DIR: dir };
+  const sub = R.subscribe('nfl', null, peer);
+  peer.emit('message', { type: 'ref:update', sport: 'nfl', games: { [key]: { open: {}, close: null } } });
+  assert.deepEqual(sub.history('Atlanta Falcons', 'Green Bay Packers', START).dk.s.length, 2);
+  h.svc.stop(); sub.close();
+});

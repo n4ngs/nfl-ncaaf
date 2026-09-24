@@ -855,7 +855,7 @@ function refLinesPanel(g) {
   };
   const rows = (m) => keys.map((k) => ({ key: k, name: bookName(k), open: q(R.open?.[k]?.[m]), now: now(cur[k], m), close: q(R.close?.[k]?.[m]) }))
     .filter((r) => r.open || r.close);
-  return LinesBoard.html(`g${g.id}`, { home: g.home.abbr, away: g.away.abbr,
+  return LinesBoard.html(`g${g.id}`, { home: g.home.abbr, away: g.away.abbr, history: R.history || null, start: Date.parse(g.start),
     markets: { s: { label: 'Spread', rows: rows('s') }, t: { label: 'Total', rows: rows('t') }, ml: { label: 'Moneyline', rows: rows('ml') } } });
 }
 

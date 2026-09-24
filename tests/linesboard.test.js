@@ -53,3 +53,20 @@ test('nice ticks cover the range with round steps', () => {
   assert.deepEqual(LB.niceTicks(-8, -4, 5), [-8, -7, -6, -5, -4]);
   assert.deepEqual(LB.niceTicks(67.1, 76.2, 5), [68, 70, 72, 74, 76]);
 });
+
+test('timeline view: step lines per book, the market median, a chosen book, and a time range', () => {
+  LB._state.market = 's'; LB._state.view = 'time'; LB._state.range = 0; LB._state.book = 'dk';
+  const d = data();
+  const T = Date.parse('2026-09-20T00:00:00Z');
+  d.start = T + 4 * 86400e3;
+  d.history = { dk: { s: [[T, -7.5, -110], [T + 86400e3, -6.5, -110], [T + 2 * 86400e3, -5.5, -105]] }, pin: { s: [[T, -7.5, 104], [T + 3 * 86400e3, -4.5, -110]] } };
+  const html = LB.html('t1', d);
+  assert.match(html, /data-lb-v="time" aria-pressed="true"/);
+  assert.match(html, /class="lb-tl-med"/);
+  assert.match(html, /class="lb-tl-pick"/);
+  assert.equal((html.match(/class="lb-tl-ctx"/g) || []).length, 4, 'the other book in three chart sizes, plus its legend swatch');
+  assert.match(html, /data-lb-b="dk" aria-pressed="true"/);
+  delete d.history;
+  assert.doesNotMatch(LB.html('t2', d), /Over time/, 'no history: no timeline tab');
+  LB._state.view = 'books'; LB._state.book = null; LB._state.range = 7;
+});

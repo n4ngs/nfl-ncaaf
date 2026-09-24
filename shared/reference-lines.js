@@ -87,6 +87,22 @@ function parseClosing(payload, sport) {
   return Object.keys(out).length ? out : null;
 }
 
+// Line history for one book/market (home side, or over for totals): changes only, oldest first, capped.
+function compactHistory(payload) {
+  const out = [];
+  for (const h of payload?.data?.history || []) {
+    const t = Date.parse(h.timestamp), price = num(h.price), point = num(h.point);
+    if (!Number.isFinite(t) || price === null || Math.abs(price) < 100) continue;
+    const last = out[out.length - 1];
+    if (last && last[1] === point && last[2] === price) continue;
+    out.push([t, point, price]);
+  }
+  return out.slice(-500);
+}
+const safeName = k => String(k).replace(/[^a-z0-9@._-]/gi, '_');
+function historyPath(dir, sport, key) { return path.join(dir, sport, safeName(key) + '.json'); }
+function readHistory(dir, sport, key) { try { return JSON.parse(fs.readFileSync(historyPath(dir, sport, key), 'utf8')); } catch { return null; } }
+
 function parseHistory(payload) {
   const o = payload?.data?.openingLine;
   const at = iso(o?.timestamp), price = num(o?.price);
@@ -114,6 +130,7 @@ function createReferenceLines(options = {}) {
   const now = options.now || Date.now;
   const later = options.setTimeout || setTimeout, cancel = options.clearTimeout || clearTimeout;
   const file = options.file || null;
+  const histDir = options.histDir || null;
   const log = options.log || (() => {});
   const owlsGapMs = options.owlsGapMs ?? 400;          // ~2.5 history calls/s; the MVP plan allows 3 concurrent
   const closeDelayMs = options.closeDelayMs ?? 5 * 60e3; // Sharp captures at the pre->live transition
@@ -176,7 +193,9 @@ function createReferenceLines(options = {}) {
     if (r.status === 401 || r.status === 403) { status.owls.blockedUntil = now() + 3600e3; throw new Error(`owls_${r.status}`); }
     g.openTried ||= {}; g.openTried[`${book}:${market}:${side}`] = now();
     if (!r.ok) { if (r.status >= 500) throw Object.assign(new Error('owls_5xx'), { retry: true }); return; }
-    const opening = parseHistory(await r.json());
+    const body = await r.json();
+    if (OWLS_MARKETS[market][1].indexOf(side) === 0) { saveHistory(sport, key, book, market, compactHistory(body)); (g.histDone ||= {})[`open:${book}:${market}`] = now(); }
+    const opening = parseHistory(body);
     if (!opening) return;
     const L = ((g.open ||= {})[book] ||= {});
     const M = (L[market] ||= { prices: [null, null], observed_at: [null, null], source: 'owls_history' });
@@ -184,6 +203,29 @@ function createReferenceLines(options = {}) {
     M.prices[i] = opening.price; M.observed_at[i] = opening.observed_at;
     if (market !== 'ml' && i === 0) M.line = opening.point;
     changed(sport);
+  }
+
+  function saveHistory(sport, key, book, market, rows) {
+    if (!histDir || !rows.length) return;
+    try {
+      const f = historyPath(histDir, sport, key), H = readHistory(histDir, sport, key) || {};
+      (H[book] ||= {})[market] = rows;
+      fs.mkdirSync(path.dirname(f), { recursive: true }); const tmp = f + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(H)); fs.renameSync(tmp, f);
+    } catch (e) { log('reference history', e.message); }
+  }
+  // After kickoff: one more history read per book/market so the saved timeline runs from the opener to the close.
+  async function fetchHist(sport, key, book, market, phase = 'final') {
+    const g = store[sport][key]; if (!g?.owlsId) return;
+    const [owlsMarket, sides] = OWLS_MARKETS[market];
+    const q = new URLSearchParams({ eventId: g.owlsId, book: OWLS_BOOKS[book], market: owlsMarket, side: sides[0] });
+    status.owls.requests++; status.owls.lastAt = now();
+    const r = await get(`${OWLS_ORIGIN}/api/odds/history?${q}`, { Authorization: `Bearer ${owlsKey}` });
+    if (r.status === 429) { const s = Number(r.headers?.get?.('retry-after')); status.owls.blockedUntil = now() + (Number.isFinite(s) && s > 0 ? s * 1000 : 60000); throw Object.assign(new Error('owls_429'), { retry: true }); }
+    (g.histDone ||= {})[`${phase}:${book}:${market}`] = now();
+    if (!r.ok) return;
+    const start = Date.parse(g.start);
+    saveHistory(sport, key, book, market, compactHistory(await r.json()).filter(p => p[0] < start));
+    persist();
   }
 
   async function fetchClose(sport, key) {
@@ -202,21 +244,21 @@ function createReferenceLines(options = {}) {
   }
 
   // Openers and closes drain independently, so a long opener backlog never delays a close.
-  const queues = { open: [], close: [] }, draining = { open: false, close: false };
+  const queues = { open: [], close: [], hist: [] }, draining = { open: false, close: false, hist: false };
   function enqueue(job) { if (queued.has(job.id)) return; queued.add(job.id); queues[job.kind].push(job); }
   async function drain(kind) {
-    if (!kind) return Promise.all([drain('open'), drain('close')]);
+    if (!kind) return Promise.all([drain('open'), drain('close'), drain('hist')]);
     if (draining[kind] || !running) return; draining[kind] = true;
-    const queue = queues[kind], limits = kind === 'open' ? status.owls : status.sharp;
+    const queue = queues[kind], limits = kind === 'close' ? status.sharp : status.owls;
     try {
       while (queue.length && running) {
         if (now() < limits.blockedUntil) break;
         const job = queue.shift();
         let retry = false;
-        try { await (kind === 'open' ? fetchOpen(...job.args) : fetchClose(...job.args)); }
+        try { await (kind === 'open' ? fetchOpen(...job.args) : kind === 'hist' ? fetchHist(...job.args) : fetchClose(...job.args)); }
         catch (e) { limits.errors++; if (e.retry) { retry = true; queue.push(job); } else log('reference', e.message); }
         finally { if (!retry) queued.delete(job.id); }
-        if (kind === 'open') await new Promise(res => { const t = later(res, owlsGapMs); t?.unref?.(); });
+        if (kind !== 'close') await new Promise(res => { const t = later(res, owlsGapMs); t?.unref?.(); });
       }
     } finally { draining[kind] = false; }
   }
@@ -256,6 +298,15 @@ function createReferenceLines(options = {}) {
           }
         }
       }
+      // Line history: once after kickoff (opener to close), and for games inside three days that were read before
+      // history was kept, one read now so the timeline is there before kickoff.
+      if (owlsKey && histDir && g.owlsId && g.open) {
+        const phase = t - start > closeDelayMs && t - start < closeGiveUpMs ? 'final' : start > t && start - t < 3 * 86400e3 ? 'seed' : null;
+        if (phase) for (const [book, L] of Object.entries(g.open)) for (const market of Object.keys(L || {})) {
+          const done = g.histDone?.[`${phase}:${book}:${market}`] || (phase === 'seed' && g.histDone?.[`open:${book}:${market}`]);
+          if (!done) enqueue({ id: `h|${phase}|${sport}|${key}|${book}|${market}`, kind: 'hist', args: [sport, key, book, market, phase] });
+        }
+      }
       if (sharpKey && g.sharpId && !g.close && t - start > closeDelayMs && t - start < closeGiveUpMs && (!g.closeTried || t - g.closeTried > 10 * 60e3)) {
         enqueue({ id: `c|${sport}|${key}`, kind: 'close', args: [sport, key] });
       }
@@ -265,9 +316,9 @@ function createReferenceLines(options = {}) {
 
   return {
     start() { if (running || !status.enabled) return; running = true; const loop = () => { sweep(); timer = later(loop, options.sweepMs ?? 60000); timer?.unref?.(); }; timer = later(loop, options.firstSweepMs ?? 15000); timer?.unref?.(); },
-    stop() { running = false; if (timer) cancel(timer); if (saveTimer) cancel(saveTimer); queues.open.length = 0; queues.close.length = 0; queued.clear(); },
+    stop() { running = false; if (timer) cancel(timer); if (saveTimer) cancel(saveTimer); queues.open.length = 0; queues.close.length = 0; queues.hist.length = 0; queued.clear(); },
     observe, sweep, snapshot,
-    status: () => ({ ...status, owls: { ...status.owls }, sharp: { ...status.sharp }, queued: { open: queues.open.length, close: queues.close.length } }),
+    status: () => ({ ...status, owls: { ...status.owls }, sharp: { ...status.sharp }, queued: { open: queues.open.length, close: queues.close.length, hist: queues.hist.length } }),
     _store: store, _drain: drain,
   };
 }
@@ -283,19 +334,25 @@ function subscribe(sport, callback, peer = process) {
   return {
     // Exact canonical key first; otherwise the same start minute with team names that contain one another
     // (providers spell college teams differently: "Miami (OH) RedHawks" vs "Miami OH").
-    lookup(away, home, start) {
+    lookup(away, home, start) { const k = keyFor(away, home, start); return k ? games[k] : null; },
+    // The saved line history (terminal writes it under REFERENCE_HISTORY_DIR): {book: {s|t|ml: [[t, point, price]...]}}.
+    history(away, home, start) {
+      const dir = peer.env?.REFERENCE_HISTORY_DIR, k = keyFor(away, home, start);
+      return dir && k ? readHistory(dir, sport, k) : null;
+    },
+    all: () => games,
+    close() { peer.removeListener?.('message', listener); },
+  };
+  function keyFor(away, home, start) {
       const k = gameKey(sport, away, home, start); if (!k) return null;
-      if (games[k]) return games[k];
+      if (games[k]) return k;
       const minute = k.slice(k.lastIndexOf(':', k.length - 4) + 1), a = norm(away), h = norm(home);
       const near = (x, y) => x && y && (x.includes(y) || y.includes(x));
       const hits = Object.entries(games).filter(([key]) => key.endsWith(minute)).filter(([key]) => {
         const [teams] = key.slice(sport.length + 1).split(':'); const [ka, kh] = teams.split('@'); return near(ka, a) && near(kh, h);
       });
-      return hits.length === 1 ? hits[0][1] : null;
-    },
-    all: () => games,
-    close() { peer.removeListener?.('message', listener); },
-  };
+      return hits.length === 1 ? hits[0][0] : null;
+  }
 }
 
 // Terminal side: forward the latest snapshot to one engine; one in flight, the newest waiting.
@@ -314,4 +371,4 @@ function relayToChild(child, sport, service) {
   return { update, close() { closed = true; pending = null; child.removeListener('message', ready); } };
 }
 
-module.exports = { createReferenceLines, subscribe, relayToChild, parseClosing, parseHistory, mainPair, gameKey, owlsEventId, SPORTS };
+module.exports = { createReferenceLines, subscribe, relayToChild, parseClosing, parseHistory, compactHistory, readHistory, historyPath, mainPair, gameKey, owlsEventId, SPORTS };

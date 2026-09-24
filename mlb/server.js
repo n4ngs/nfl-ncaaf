@@ -1362,7 +1362,7 @@ async function oddsRoutes(req, res, url, uid) {
   if (om && M === 'GET') {
     const o = Odds.game(Number(om[1]));
     let reference = null;
-    try { const G = gameOf(Number(om[1])); const nm = t => String(t?.full || t?.name || t?.short || '').trim(); if (G) reference = Reference.lookup(nm(G.away), nm(G.home), G.start); } catch {}
+    try { const G = gameOf(Number(om[1])); const nm = t => String(t?.full || t?.name || t?.short || '').trim(); if (G) { reference = Reference.lookup(nm(G.away), nm(G.home), G.start); if (reference) reference = { ...reference, history: Reference.history(nm(G.away), nm(G.home), G.start) }; } } catch {}
     let injuryReport = null; try { const G = gameOf(Number(om[1])); const nm = t => String(t?.full || t?.name || t?.short || '').trim(); if (G) injuryReport = Injuries.forTeams(nm(G.away), nm(G.home)); } catch {}
     // A day with no board prices yet (tomorrow) still has openers and the injury report.
     if (!o && !reference && !injuryReport) sendJSON(res, 404, { error: 'No odds for that game.' }); else sendJSON(res, 200, { ...(o || { odds: null, hist: null }), reference, injuryReport });

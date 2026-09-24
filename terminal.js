@@ -123,6 +123,7 @@ function childEnv(key) {
   env.PORT = String(s.port);
   env.BASE_PATH = s.base;
   env.DATA_DIR = path.join(DATA_DIR, s.dir);
+  env.REFERENCE_HISTORY_DIR = path.join(DATA_DIR, 'reference-history');
   env.APP_ID = s.appId;
   if (ODDS_SPORT[key]) env.ODDS_SPORT_KEY = ODDS_SPORT[key];
   env.TELEMETRY_PEER_SECRET = PEER_SECRET;
@@ -145,7 +146,7 @@ const injuryRelays = {};
 const injuries = createInjuries({ log: (...a) => console.log('[injuries]', ...a), onUpdate: (sport, view) => injuryRelays[sport]?.update(view) });
 const referenceLines = createReferenceLines({
   owlsKey: process.env.OWLS_INSIGHT_API_KEY, sharpKey: process.env.SHARP_API_KEY,
-  file: path.join(DATA_DIR, 'reference-lines.json'),
+  file: path.join(DATA_DIR, 'reference-lines.json'), histDir: path.join(DATA_DIR, 'reference-history'),
   log: (...a) => console.log('[reference]', ...a),
   onUpdate: (sport, snap) => referenceRelays[sport]?.update(snap),
 });

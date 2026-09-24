@@ -180,4 +180,4 @@ function refSection(g){const F=g.reference;if(!F||typeof LinesBoard==='undefined
  const now=(k,m)=>{if(!pre)return null;const I=g.books?.[k]?.integrity?.[m];if(!I)return null;const a=Number(I[m==='t'?'over':'home']?.american_odds),b=Number(I[m==='t'?'under':'away']?.american_odds);if(!Number.isFinite(a))return null;
   if(m==='ml'){const p=LinesBoard.noVig([a,b]);return p==null?null:{price:a,pHome:p};}const v=Number(I[m==='t'?'over':'home']?.line_value);return Number.isFinite(v)?{line:v,price:a}:null;};
  const rows=m=>keys.map(k=>({key:k,name:k.toUpperCase(),open:q(F.open?.[k]?.[m]),now:now(k,m),close:q(F.close?.[k]?.[m])})).filter(r=>r.open||r.close);
- return LinesBoard.html('h'+g.id,{home:g.home.abbr,away:g.away.abbr,markets:{ml:{label:'Moneyline',rows:rows('ml')},s:{label:'Puck line',rows:rows('s')},t:{label:'Total',rows:rows('t')}}});}
+ return LinesBoard.html('h'+g.id,{home:g.home.abbr,away:g.away.abbr,history:F.history||null,start:Date.parse(g.start),markets:{ml:{label:'Moneyline',rows:rows('ml')},s:{label:'Puck line',rows:rows('s')},t:{label:'Total',rows:rows('t')}}});}

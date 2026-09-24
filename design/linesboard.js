@@ -14,7 +14,7 @@
    Classic script; also exports for node tests. */
 (function (root) {
   const MINUS = '−';
-  const state = { market: null, wide: false };
+  const state = { market: null, wide: false, view: 'books', range: 7, book: null };
   // Readable names when a board has not loaded its book list yet.
   const NAMES = { pin: 'Pinnacle', ps3838: 'PS3838', dk: 'DraftKings', fd: 'FanDuel', mgm: 'BetMGM', czr: 'Caesars', circa: 'Circa', sp: 'South Point',
     wg: 'Westgate', wynn: 'Wynn', stn: 'Station', bovada: 'Bovada', betonline: 'BetOnline', betrivers: 'BetRivers', fanatics: 'Fanatics', hardrock: 'Hard Rock', thescore: 'theScore' };
@@ -85,6 +85,60 @@
   }
   const stripTags = (h) => String(h).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 
+  // Timeline: every book's number over time as a step line (neutral), the market median (ink) and one chosen book
+  // (amber). Values: the home spread, the total, or the home moneyline's implied win chance (vig included).
+  function series(m, d, rows) {
+    const H = d.history || {}, out = [];
+    for (const r of rows) {
+      const pts = (H[r.key] && H[r.key][m]) || [];
+      const v = (p) => (m === 'ml' ? (Math.abs(p[2]) >= 100 ? prob(p[2]) * 100 : null) : p[1]);
+      const list = pts.map((p) => [p[0], v(p)]).filter((p) => Number.isFinite(p[1]));
+      if (list.length) out.push({ key: r.key, name: r.name, pts: list });
+    }
+    return out;
+  }
+  function timeline(m, d, rows, W, cls) {
+    const S = series(m, d, rows); if (!S.length) return '';
+    const end = Math.min(Date.now(), Number.isFinite(d.start) ? d.start : Infinity);
+    const first = Math.min(...S.map((x) => x.pts[0][0]));
+    const from = state.range ? Math.max(first, end - state.range * 86400e3) : first;
+    if (!(end > from)) return '';
+    // value of a series at time t (last change at or before t)
+    const at = (x, t) => { let v = null; for (const p of x.pts) { if (p[0] <= t) v = p[1]; else break; } return v; };
+    const clip = (x) => { const inside = x.pts.filter((p) => p[0] > from && p[0] <= end); const v0 = at(x, from); return (v0 == null ? inside : [[from, v0], ...inside]).concat([[end, at(x, end)]]).filter((p) => p[1] != null); };
+    const lines = S.map((x) => ({ ...x, c: clip(x) })).filter((x) => x.c.length);
+    // The median on an even grid (240 steps), so quick back-and-forth juice flips at one book do not draw as noise.
+    const times = Array.from({ length: 241 }, (_, i) => from + (end - from) * i / 240);
+    const med = times.map((t) => [t, median(lines.map((x) => at({ pts: x.c }, t)))]).filter((p) => p[1] != null)
+      .filter((p, i, a) => i === 0 || i === a.length - 1 || p[1] !== a[i - 1][1]);
+    const vals = lines.flatMap((x) => x.c.map((p) => p[1])); let lo = Math.min(...vals), hi = Math.max(...vals);
+    const pad = Math.max((hi - lo) * 0.1, m === 'ml' ? 1 : 0.5); lo -= pad; hi += pad;
+    const H = W < 500 ? 220 : W > 1000 ? 380 : 280, L = W < 500 ? 40 : 56, R = 16, T = 14, B = 26;
+    const x = (t) => L + (t - from) / (end - from) * (W - L - R), y = (v) => T + (hi - v) / (hi - lo) * (H - T - B);
+    const step = (c) => c.map((p, i) => (i ? `H${x(p[0]).toFixed(1)}V${y(p[1]).toFixed(1)}` : `M${x(p[0]).toFixed(1)} ${y(p[1]).toFixed(1)}`)).join('');
+    const fmt = (v) => (m === 'ml' ? `${v}%` : m === 's' ? pts(v) : String(v));
+    const yt = niceTicks(lo, hi, 4).map((v) => `<line class="lb-grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="lb-tick" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${esc(fmt(v))}</text>`).join('');
+    const span = end - from, dayMs = 86400e3, stepDays = span > 60 * dayMs ? 14 : span > 20 * dayMs ? 7 : span > 6 * dayMs ? 2 : 1;
+    const xt = []; for (let t = Math.ceil(from / dayMs) * dayMs; t <= end; t += stepDays * dayMs) xt.push(t);
+    const xl = xt.slice(0, W < 500 ? 4 : 10).map((t) => `<text class="lb-tick" x="${x(t)}" y="${H - 6}" text-anchor="middle">${esc(new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</text>`).join('');
+    const pick = lines.find((z) => z.key === state.book) || null;
+    const ctx = lines.filter((z) => z !== pick).map((z) => `<path class="lb-tl-ctx" d="${step(z.c)}"><title>${esc(z.name)}</title></path>`).join('');
+    const mline = med.length > 1 ? `<path class="lb-tl-med" d="${step(med)}"><title>Market median</title></path>` : '';
+    const sel = pick ? `<path class="lb-tl-pick" d="${step(pick.c)}"><title>${esc(pick.name)}</title></path>${pick.c.filter((p, i, a) => i > 0 && i < a.length - 1 && p[1] !== a[i - 1][1]).map((p) => `<circle class="lb-tl-dot" cx="${x(p[0])}" cy="${y(p[1])}" r="3"><title>${esc(pick.name)} ${esc(fmt(Math.round(p[1] * 10) / 10))} · ${esc(when(new Date(p[0]).toISOString()))}</title></circle>`).join('')}` : '';
+    const label = m === 'ml' ? `${esc(d.home)} win chance (implied, with vig)` : m === 's' ? `${esc(d.home)} spread` : 'Total points';
+    return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${label} over time for every book">${yt}${xl}${ctx}${mline}${sel}</svg>`;
+  }
+  function timelineBlock(m, d, rows) {
+    const S = series(m, d, rows);
+    if (!S.length) return '<p class="lb-empty">No line history saved for this game yet. It fills in as the books are read.</p>';
+    if (state.book && !S.some((x) => x.key === state.book)) state.book = null;
+    const chips = S.map((x) => `<button type="button" class="lb-chip" data-lb-b="${esc(x.key)}" aria-pressed="${x.key === state.book}">${esc(x.name)}</button>`).join('');
+    const ranges = [[1, '24 h'], [3, '3 days'], [7, '7 days'], [0, 'All']].map(([v, l]) => `<button type="button" class="lb-tab" data-lb-r="${v}" aria-pressed="${state.range === v}">${l}</button>`).join('');
+    const legend = `<div class="lb-legend"><span><svg width="18" height="10" aria-hidden="true"><line class="lb-tl-med" x1="1" x2="17" y1="5" y2="5"/></svg>Market median</span>${state.book ? `<span><svg width="18" height="10" aria-hidden="true"><line class="lb-tl-pick" x1="1" x2="17" y1="5" y2="5"/></svg>${esc(S.find((x) => x.key === state.book)?.name || '')}</span>` : ''}<span><svg width="18" height="10" aria-hidden="true"><line class="lb-tl-ctx" x1="1" x2="17" y1="5" y2="5"/></svg>Each book</span></div>`;
+    return `<div class="lb-tlctl"><div class="lb-tabs" role="group" aria-label="Time range">${ranges}</div><div class="lb-chips" role="group" aria-label="Highlight a book">${chips}</div></div>${legend}` +
+      `<div class="lb-chart">${timeline(m, d, rows, 720, 'lb-svg')}${timeline(m, d, rows, 360, 'lb-svg lb-svg-n')}${timeline(m, d, rows, 1200, 'lb-svg lb-svg-w')}</div>`;
+  }
+
   function tiles(m, rows, home, away) {
     const med = (k) => median(rows.map((r) => axisValue(m, r[k])));
     const o = med('open'), n = med('now'), c = med('close');
@@ -113,10 +167,13 @@
     const m = keys.includes(state.market) ? state.market : keys[0];
     const rows = d.markets[m].rows.slice().sort((a, b) => (axisValue(m, a.open) ?? Infinity) - (axisValue(m, b.open) ?? Infinity));
     const tabs = keys.map((k) => `<button type="button" class="lb-tab" data-lb-m="${k}" aria-pressed="${k === m}">${esc(d.markets[k].label)}</button>`).join('');
+    const hasHist = !!(d.history && Object.keys(d.history).length);
+    if (!hasHist) state.view = 'books';
+    const views = hasHist ? `<div class="lb-tabs" role="group" aria-label="View"><button type="button" class="lb-tab" data-lb-v="books" aria-pressed="${state.view === 'books'}">By book</button><button type="button" class="lb-tab" data-lb-v="time" aria-pressed="${state.view === 'time'}">Over time</button></div>` : '';
     const legend = `<div class="lb-legend"><span><svg width="14" height="14" aria-hidden="true"><circle class="lb-open" cx="7" cy="7" r="5"/></svg>Opened</span><span><svg width="14" height="14" aria-hidden="true"><circle class="lb-now" cx="7" cy="7" r="5.5"/></svg>Now</span><span><svg width="14" height="14" aria-hidden="true"><rect class="lb-close" x="2" y="2" width="10" height="10" rx="1.5" transform="rotate(45 7 7)"/></svg>Closed (last price before kickoff)</span></div>`;
     return `<div class="lb-head"><div><h3 class="lb-title">Openers and closes <span>${rows.length} books</span></h3><p class="lb-sub">Where every book opened, when it posted, and where it is now or closed.</p></div>` +
-      `<div class="lb-ctl"><div class="lb-tabs" role="group" aria-label="Market">${tabs}</div><button type="button" class="lb-wide" data-lb-wide aria-pressed="${state.wide}">${state.wide ? 'Close' : 'Expand'}</button></div></div>` +
-      `${tiles(m, rows, d.home, d.away)}${legend}<div class="lb-chart">${chart(m, rows, d.home, d.away)}${chart(m, rows, d.home, d.away, 360, 78, 'lb-svg lb-svg-n')}${chart(m, rows, d.home, d.away, 1200, 150, 'lb-svg lb-svg-w')}</div>${table(m, rows, d.home, d.away)}`;
+      `<div class="lb-ctl">${views}<div class="lb-tabs" role="group" aria-label="Market">${tabs}</div><button type="button" class="lb-wide" data-lb-wide aria-pressed="${state.wide}">${state.wide ? 'Close' : 'Expand'}</button></div></div>` +
+      `${tiles(m, rows, d.home, d.away)}${state.view === 'time' ? timelineBlock(m, d, rows) + table(m, rows, d.home, d.away) : `${legend}<div class="lb-chart">${chart(m, rows, d.home, d.away)}${chart(m, rows, d.home, d.away, 360, 78, 'lb-svg lb-svg-n')}${chart(m, rows, d.home, d.away, 1200, 150, 'lb-svg lb-svg-w')}</div>${table(m, rows, d.home, d.away)}`}`;
   }
 
   function html(id, data) {
@@ -128,9 +185,13 @@
   function repaint(el) { const id = el.getAttribute('data-lb'); el.classList.toggle('is-wide', state.wide); el.innerHTML = inner(id); document.body.classList.toggle('lb-lock', state.wide); }
   if (typeof document !== 'undefined') {
     document.addEventListener('click', (e) => {
-      const t = e.target.closest && e.target.closest('[data-lb-m],[data-lb-wide]'); if (!t) return;
+      const t = e.target.closest && e.target.closest('[data-lb-m],[data-lb-wide],[data-lb-v],[data-lb-r],[data-lb-b]'); if (!t) return;
       const el = t.closest('[data-lb]'); if (!el) return;
-      if (t.hasAttribute('data-lb-wide')) state.wide = !state.wide; else state.market = t.getAttribute('data-lb-m');
+      if (t.hasAttribute('data-lb-wide')) state.wide = !state.wide;
+      else if (t.hasAttribute('data-lb-v')) state.view = t.getAttribute('data-lb-v');
+      else if (t.hasAttribute('data-lb-r')) state.range = Number(t.getAttribute('data-lb-r'));
+      else if (t.hasAttribute('data-lb-b')) { const b = t.getAttribute('data-lb-b'); state.book = state.book === b ? null : b; }
+      else state.market = t.getAttribute('data-lb-m');
       repaint(el);
     });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.wide) { state.wide = false; document.querySelectorAll('[data-lb]').forEach(repaint); } });

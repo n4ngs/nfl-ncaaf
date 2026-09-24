@@ -1122,7 +1122,7 @@ function oddsExtraHTML(pk) {
       const p = LinesBoard.noVig(L.ml); return p == null ? null : { price: L.ml[0], pHome: p };
     };
     const rows = (m) => keys.map((k) => ({ key: k, name: oddsBookFull(k), open: q(F.open?.[k]?.[m]), now: now(cur[k], m), close: q(F.close?.[k]?.[m]) })).filter((r) => r.open || r.close);
-    parts.push(LinesBoard.html(`m${pk}`, { home: home.abbr || home.name, away: away.abbr || away.name,
+    parts.push(LinesBoard.html(`m${pk}`, { home: home.abbr || home.name, away: away.abbr || away.name, history: F.history || null, start: Date.parse(g?.start),
       markets: { ml: { label: 'Moneyline', rows: rows('ml') }, s: { label: 'Run line', rows: rows('s') }, t: { label: 'Total', rows: rows('t') } } }));
   }
   return parts.join('');

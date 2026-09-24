@@ -1513,7 +1513,7 @@ const server = http.createServer(async (req, res) => {
         if (!G) continue;
         const s = await summary(G);
         if (s?.fpi && G.state === 'pre') W.fpi.set(G.id, { home: s.fpi.home, at: Date.now() });
-        let reference = null; try { reference = Reference.lookup(G.away?.name, G.home?.name, G.start); } catch {}
+        let reference = null; try { reference = Reference.lookup(G.away?.name, G.home?.name, G.start); if (reference) reference = { ...reference, history: Reference.history(G.away?.name, G.home?.name, G.start) }; } catch {}
         return sendJSON(res, 200, { now: Date.now(), game: pub(G, W), hist: integrityHistory(G, W), summary: s, reference });
       }
       return sendJSON(res, 404, { error: 'That game is not loaded. Open its week first.' });
