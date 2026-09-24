@@ -113,7 +113,7 @@ function betsQuote(pk, book, mkt, side) {
 }
 function betsPrice(pk, book, mkt, side) {
   const p = betsQuote(pk, book, mkt, side);
-  return p?.actionable && p.freshness === 'FRESH' ? p : null;
+  return p?.actionable && (p.freshness === 'FRESH' || p.freshness === 'AGING') ? p : null;
 }
 function betsLegLabel(g, l) {
   const who = l.side === 'home' || l.side === 'away' ? (g ? g[l.side].abbr : l.side === 'home' ? 'Home' : 'Away') : null;
@@ -276,7 +276,7 @@ function betsSlipBooksHTML(l, sel) {
   for (const b of betsBookList()) {
     const L = books[b.key], p = betsQuote(l.pk, b.key, l.mkt, l.side);
     if (!p || p.odds == null || (base !== 'ml' && p.line == null)) continue;
-    const enabled = p.actionable && p.freshness === 'FRESH';
+    const enabled = p.actionable && (p.freshness === 'FRESH' || p.freshness === 'AGING');
     rows.push({ k: b.key, p, typed: !live && !!L?.m, old: !enabled, enabled,
       state: live ? enabled ? 'Live' : p.freshness : typeof oddsStateLabel === 'function' ? oddsStateLabel(p) : p.freshness });
   }

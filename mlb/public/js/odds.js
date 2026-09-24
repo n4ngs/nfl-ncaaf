@@ -172,7 +172,7 @@ function oddsQuote(L, mkt, side) {
   else if (serverNow() - at > q.max_age_ms || q.freshness === 'STALE') freshness = 'STALE';
   else if (q.freshness === 'AGING' || (Number.isFinite(q.fresh_for_ms) && q.fresh_for_ms > 0 && serverNow() - at > q.fresh_for_ms)) freshness = 'AGING';
   else if (q.freshness !== 'FRESH' || q.actionable !== true) freshness = 'UNVERIFIED';
-  return { ...p, freshness, actionable: freshness === 'FRESH', seen: Number.isFinite(at) ? at : null,
+  return { ...p, freshness, actionable: freshness === 'FRESH' || freshness === 'AGING', seen: Number.isFinite(at) ? at : null,   // Aging is usable, labelled, as on NFL/NCAAF
     source: q?.source || q?.src || L?.market_sources?.[mkt] || L?.src || null,
     provider_received_at:q?.provider_received_at || null, feedOnly:freshness==='UNVERIFIED' && (q?.source || q?.src)==='sharp' && q?.timestamp_kind==='FEED_DELIVERY' && q?.market_status==='active' && q?.is_live===false && q?.reason_code==='MISSING_SOURCE_TIMESTAMP',
     source_observed_at: q?.source_observed_at || null, reason_code: q?.reason_code || (Number.isFinite(at) ? freshness : 'SOURCE_TIME_UNAVAILABLE') };
@@ -385,7 +385,7 @@ function oddsViewHTML() {
       ${done.length ? `<details class="odds-done" id="oddsDone"${wasOpen || (!live.length && !soon.length) ? ' open' : ''}><summary class="odds-grp"><h2>Final & off board</h2><span>${done.length} · recorded prices ${ICON.chev}</span></summary>${block(done)}</details>` : ''}
       ${!shown.length ? `<div class="card empty"><b>No matching games</b>${ODDS.query ? `No team matches “${esc(ODDS.query)}”.` : 'This filter has no games on this day.'}<button type="button" class="lbtn" data-odds-reset>Clear filters</button></div>` : ''}
     </div></div>
-    <p class="odds-board-guide">${mkt === 'f5' ? 'First five innings moneyline. ' : ''}Fresh book prices open a ticket. Aging, stale and unverified prices are reference only.<span class="odds-wide-guide"> Scroll across for every book →</span></p>
+    <p class="odds-board-guide">${mkt === 'f5' ? 'First five innings moneyline. ' : ''}Fresh and aging book prices open a ticket (aging ones are labelled). Stale and unverified prices are reference only.<span class="odds-wide-guide"> Scroll across for every book →</span></p>
     ${oddsSourceStatus()}<details class="odds-context" id="oddsContext"${contextOpen ? ' open' : ''}><summary>Market analysis <span>Recorded moves · price comparisons ${ICON.chev}</span></summary><div>${S.isToday ? oddsEdgeEntry() : ''}${oddsMovesHTML(games)}<button type="button" class="odds-link" data-bets-books>Sportsbook links ↗</button></div></details>`;
 }
 const ODDS_FILTERS = [['all', 'All games'], ['moving', 'Moving'], ['public', 'Public heavy'], ['mine', 'My bets']];

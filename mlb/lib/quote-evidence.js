@@ -65,7 +65,8 @@ function quoteView(q, market, now, maxAgeMs = MAX_AGE_MS) {
   else if (!Number.isFinite(q.american_odds) || Math.abs(q.american_odds) < 100 || (market !== 'ml' && !Number.isFinite(q.line_value))) { freshness = 'UNVERIFIED'; reason_code = 'INVALID_PRICE'; }
   else if (age > maxAgeMs) { freshness = 'STALE'; reason_code = 'SOURCE_QUOTE_STALE'; }
   else if (age > FRESH_FOR_MS) { freshness = 'AGING'; reason_code = 'SOURCE_QUOTE_AGING'; }
-  return { ...q, freshness, reason_code, age_ms: age, fresh_for_ms: FRESH_FOR_MS, max_age_ms: maxAgeMs, actionable: freshness === 'FRESH' };
+  // One rule on every board (shared/clv-integrity.js): Fresh and Aging prices can be acted on, Aging with its label.
+  return { ...q, freshness, reason_code, age_ms: age, fresh_for_ms: FRESH_FOR_MS, max_age_ms: maxAgeMs, actionable: freshness === 'FRESH' || freshness === 'AGING' };
 }
 function summarize(L, now = Date.now()) {
   const rows = Object.values(L.quote_meta || {}).flatMap(Object.values);

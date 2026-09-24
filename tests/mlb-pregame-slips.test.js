@@ -45,10 +45,10 @@ const tile = (html, name) => html.split('<button').find((s) => s.includes(`aria-
 
 test('pregame prefills require current source evidence for the exact selection', () => {
   const variants = [
-    { source_observed_at: iso(NOW - 120001) }, { source_observed_at: iso(NOW - 900001) },
+    { source_observed_at: iso(NOW - 900001) },
     { source_observed_at: null }, { source_observed_at: '2026-09-22T19:59:59' }, { received_at: null },
     { source_observed_at: iso(NOW + 1) }, { received_at: iso(NOW - 2000) },
-    { freshness: 'AGING' }, { freshness: 'STALE' }, { freshness: 'UNVERIFIED' }, { freshness: 'CONFLICTED' },
+    { freshness: 'STALE' }, { freshness: 'UNVERIFIED' }, { freshness: 'CONFLICTED' },
     { actionable: false }, { market_status: 'suspended' }, { market_status: 'removed' },
     { is_live: true }, { american_odds: -125 },
   ];
@@ -58,6 +58,9 @@ test('pregame prefills require current source evidence for the exact selection',
     assert.equal(f.run("betsPrice(1,'mgm','ml','away').odds"), 100, 'opposite fresh selection remains available');
     assert.equal(f.O.books.mgm.seen, NOW, 'recent receipt cannot rescue source evidence');
   }
+  // an aging price (past 2 minutes, inside 15) is usable, labelled, as on every board
+  const a = fixture(); a.O.books.mgm.quote_meta.ml.home.source_observed_at = iso(NOW - 120001);
+  assert.equal(a.run("betsPrice(1,'mgm','ml','home').freshness"), 'AGING');
   const f = fixture(); delete f.O.books.mgm.quote_meta;
   assert.equal(f.run("betsPrice(1,'mgm','ml','home')"), null);
   assert.equal(f.run("betsQuote(1,'mgm','ml','home').freshness"), 'UNVERIFIED');
@@ -109,7 +112,7 @@ test('F5 quoted handoff re-reads current data and rejects an expired source cloc
   f.run("betsOpenSlip({pk:1,mkt:'f5t',side:'over',book:'mgm',line:99,odds:900})");
   assert.equal(f.run('BETS.slip.legs[0].line'), 4.5);
   assert.equal(f.run('BETS.slip.legs[0].odds'), -105);
-  f.advance(120000);
+  f.advance(900000);
   f.run("betsOpenSlip({pk:1,mkt:'f5t',side:'over',book:'mgm',line:4.5,odds:-105})");
   assert.equal(f.opened.length, 1); assert.match(f.notices.at(-1), /unavailable/);
 });
@@ -152,12 +155,12 @@ test('F5 total comparisons normalize the market and rank lower totals for over, 
   assert.doesNotMatch(tile(f.run("betsSlipBooksHTML({pk:1,mkt:'f5ml',side:'home'},'')"), 'BetMGM'), /PK|−?170 −?170/);
 });
 
-test('click-time source aging preserves typed values and selected book without adopting stale price', () => {
+test('click-time source expiry preserves typed values and selected book without adopting a stale price', () => {
   const f = fixture();
   f.run("betsOpenSlip({pk:1,mkt:'rl',side:'away',book:'dk'})");
   assert.match(f.run("betsSlipBooksHTML(BETS.slip.legs[0],'dk')"), /data-bets-book="mgm"/);
   f.fields.set('#betsLine', { value: '+2.5' }); f.fields.set('#betsOdds', { value: '+125' });
-  f.fields.set('#betsBook', { value: 'dk' }); f.advance(120000);
+  f.fields.set('#betsBook', { value: 'dk' }); f.advance(900000);
   f.clickBook('mgm');
   assert.equal(f.run('BETS.slip.book'), 'dk'); assert.equal(f.run('BETS.slip.legs[0].book'), 'dk');
   assert.equal(f.run('BETS.slip.legs[0].line'), 2.5); assert.equal(f.run('BETS.slip.legs[0].odds'), 125);

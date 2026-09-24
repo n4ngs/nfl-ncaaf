@@ -127,12 +127,12 @@ test('manual refresh deduplicates pending requests and makes failure visible', a
 });
 
 
-test('source clock naturally transitions into Aging and remains non-actionable', () => {
+test('source clock naturally transitions into Aging, which stays usable with its label (one rule on every board)', () => {
   const { c } = harness(), L = book({ age: 20000 });
   L.quote_meta.ml.home.fresh_for_ms = 10000;
   assert.equal(c.oddsQuote(L, 'ml', 'home').freshness, 'AGING');
-  assert.equal(c.oddsQuote(L, 'ml', 'home').actionable, false);
-  L.quote_meta.ml.home.freshness = 'AGING'; L.quote_meta.ml.home.actionable = false;
+  assert.equal(c.oddsQuote(L, 'ml', 'home').actionable, true);
+  L.quote_meta.ml.home.freshness = 'AGING'; L.quote_meta.ml.home.actionable = true;
   assert.match(c.oddsQuoteNote(c.oddsQuote(L, 'ml', 'home')), /^Aging/);
 });
 test('source status events are stored per day and distinguish receipt from source time', () => {
@@ -157,7 +157,7 @@ test('F5 zero run lines stay run lines, are visible and retain the fresh-only ga
   assert.match(c.oddsFiveHTML(1), /SD RL/);
   assert.match(c.oddsFiveHTML(1), /data-odds-bet="1\|f5rl\|home\|pin"/);
   assert.doesNotMatch(c.oddsFiveHTML(1), /data-odds-bet="1\|f5ml/);
-  L.quote_meta.rl.home.freshness = 'AGING'; L.quote_meta.rl.home.actionable = false;
+  L.quote_meta.rl.home.freshness = 'STALE'; L.quote_meta.rl.home.actionable = false;
   assert.equal(c.oddsPriceAt(1, 'f5rl', 'home', 'pin'), null);
   assert.doesNotMatch(c.oddsFiveHTML(1), /data-odds-bet="1\|f5rl\|home\|pin"/);
 });

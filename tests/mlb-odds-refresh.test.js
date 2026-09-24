@@ -82,7 +82,7 @@ test('fresh, aging and stale use the unchanged provider clock, never a later fet
   const raw = evidence.captureLine(quoteLine(NOW - 1000), 'vsin', NOW);
   assert.equal(evidence.decorateLine(raw, 'vsin', NOW, NOW).freshness, 'FRESH');
   const aging = evidence.decorateLine(raw, 'vsin', NOW, NOW + evidence.FRESH_FOR_MS);
-  assert.equal(aging.freshness, 'AGING'); assert.equal(aging.actionable, false);
+  assert.equal(aging.freshness, 'AGING'); assert.equal(aging.actionable, true, 'aging is usable, labelled, on every board');
   const stale = evidence.decorateLine(raw, 'vsin', NOW, NOW + evidence.MAX_AGE_MS);
   assert.equal(stale.freshness, 'STALE'); assert.equal(stale.actionable, false);
   const checkedAgain = evidence.captureLine(raw, 'vsin', NOW + evidence.MAX_AGE_MS);
