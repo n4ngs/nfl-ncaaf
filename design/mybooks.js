@@ -54,6 +54,12 @@
         touched = true; write(api.list()); notify(); push();
         return set.has(k);
       },
+      // Un-star every book at once (the picker's Clear button). Saves, repaints and syncs like toggle.
+      clear() {
+        if (!set.size) return false;
+        set = new Set(); touched = true; write([]); notify(); push();
+        return true;
+      },
       subscribe(fn) { if (typeof fn === 'function') subs.push(fn); return () => { const i = subs.indexOf(fn); if (i >= 0) subs.splice(i, 1); }; },
       // Signed in (design/foundation.js): the account's saved list wins unless you changed books on this page
       // first; an empty account list picks up this device's books instead of wiping them.
@@ -72,7 +78,8 @@
       pickerHTML(books, { label = 'My books', note = 'Star the books you bet at. Their columns and prices are highlighted on every board, on this device and your account.' } = {}) {
         const e = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         const chips = (books || []).filter((b) => b && valid(b.key)).map((b) => api.chipHTML(b.key, b.short || b.name || b.key, b.name || b.short || b.key, e)).join('');
-        return `<div class="mybk"><div class="mybk-h"><b>${e(label)}</b><span>${e(note)}</span></div><div class="mybk-chips" role="group" aria-label="${e(label)}">${chips}</div></div>`;
+        const clear = `<button type="button" class="mybk-clear" data-mybook-clear${set.size ? '' : ' disabled'} aria-label="Clear my books: un-star every book">Clear</button>`;
+        return `<div class="mybk"><div class="mybk-top"><div class="mybk-h"><b>${e(label)}</b><span>${e(note)}</span></div>${clear}</div><div class="mybk-chips" role="group" aria-label="${e(label)}">${chips}</div></div>`;
       },
       chipHTML(k, short, full, e = (v) => String(v)) {
         const on = set.has(k);
@@ -99,8 +106,12 @@
       const lbl = b.getAttribute('aria-label'); if (lbl) b.setAttribute('aria-label', lbl.replace(/: (not )?one of my books$/, on ? ': one of my books' : ': not one of my books'));
     }
   };
+  const syncClear = () => { for (const c of doc.querySelectorAll('[data-mybook-clear]')) c.disabled = !MyBooks.size(); };
   MyBooks.subscribe(syncChips);
+  MyBooks.subscribe(syncClear);
   doc.addEventListener('click', (ev) => {
+    const c = ev.target && ev.target.closest && ev.target.closest('[data-mybook-clear]');
+    if (c) { ev.preventDefault(); ev.stopPropagation(); MyBooks.clear(); return; }
     const b = ev.target && ev.target.closest && ev.target.closest('[data-mybook]');
     if (!b) return;
     ev.preventDefault(); ev.stopPropagation();

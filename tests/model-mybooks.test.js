@@ -78,6 +78,23 @@ test('my books: picker chips reflect the selection and escape names', () => {
   assert.ok(!html.includes("Boomer's"));
 });
 
+test('my books: Clear un-stars every book, saves, repaints and syncs; disabled when nothing is starred', () => {
+  const storage = memStorage({ [KEY]: '["mgm","dk"]' }), ev = [];
+  const mb = create({ storage, emit: (n, d) => ev.push([n, d]) });
+  let paints = 0; mb.subscribe(() => paints++);
+  const books = [{ key: 'mgm', name: 'BetMGM' }, { key: 'dk', name: 'DraftKings' }];
+  assert.match(mb.pickerHTML(books), /<button type="button" class="mybk-clear" data-mybook-clear aria-label/);
+  assert.equal(mb.clear(), true);
+  assert.deepEqual(mb.list(), []);
+  assert.deepEqual(JSON.parse(storage.getItem(KEY)), []);
+  assert.equal(paints, 1);
+  assert.deepEqual(ev.at(-1), ['board:my-books', { books: [] }]);
+  assert.match(mb.pickerHTML(books), /data-mybook-clear disabled/);
+  assert.equal(mb.clear(), false, 'nothing to clear: no repaint, no sync');
+  assert.equal(paints, 1); assert.equal(ev.length, 1);
+  assert.equal(create({ storage }).size(), 0, 'stays cleared on the next page load');
+});
+
 test('my books: account sync adopts the account list, never wipes device picks, and keeps a fresh change', () => {
   // signed in with a saved list, nothing changed on this page yet: the account's list wins
   let s = memStorage({ [KEY]: '["dk"]' }), ev = [];
