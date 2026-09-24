@@ -1,0 +1,12 @@
+{
+  "about": "Owner-editable availability report for the NCAAF model's move breakdown. College football has no official injury feed, so entries are added by hand. One row per player per game (gid = ESPN game id, team = ESPN team id). status: out | suspended | dismissed (all = out), doubtful (0.75 out), questionable | gtd (0.5), limited (0.25), probable (0.1), active (0). RB / WR / TE rows are valued as P(out) x his share of carries / catches over the last 3 games, using the tested lead back / receiver coefficients; other positions are listed but not valued. Off-field items count only for availability: an arrest with no suspension is 'active' (no effect). A file with the same shape at <DATA_DIR>/ncaaf/ncaaf-vas/player-status.json (on the volume) overrides rows here.",
+  "players": [
+    { "gid": 401856699, "team": 145, "name": "Kewan Lacy", "pos": "RB", "status": "gtd", "note": "Starter, shoulder. Game-time decision; MRI better than expected.", "source": "HottyToddy / Golding press conference", "asOf": "2026-09-21" },
+    { "gid": 401856699, "team": 145, "name": "Makhi Frazier", "pos": "RB", "status": "limited", "note": "RB2, banged up and limited. J.T. Lindsey is next.", "source": "HottyToddy / Golding press conference", "asOf": "2026-09-21" },
+    { "gid": 401856699, "team": 145, "name": "Jalyn Crawford", "pos": "CB", "status": "questionable", "note": "Starting corner, turf toe, day-to-day.", "source": "HottyToddy / Golding press conference", "asOf": "2026-09-21" },
+    { "gid": 401856699, "team": 145, "name": "Antonio Kite", "pos": "DB", "status": "probable", "note": "Returned vs LSU; banged up late.", "source": "HottyToddy / Golding press conference", "asOf": "2026-09-21" },
+    { "gid": 401856699, "team": 145, "name": "Sharif Denson", "pos": "CB", "status": "active", "note": "Back and healthy.", "source": "HottyToddy / Golding press conference", "asOf": "2026-09-21" },
+    { "gid": 401856699, "team": 145, "name": "Carius Curne", "pos": "OT", "status": "active", "note": "Off-field: April 2026 arrest in Arkansas (fleeing, reckless driving, speeding; drug charges dropped). Fines paid, no suspension reported: no availability effect.", "source": "HottyToddy", "asOf": "2026-09-21" },
+    { "gid": 401856699, "team": 145, "name": "Carmelow Reed", "pos": "DE", "status": "active", "note": "Off-field: summer arrest (possession, speeding). No suspension reported: no availability effect.", "source": "HottyToddy", "asOf": "2026-09-21" }
+  ]
+}

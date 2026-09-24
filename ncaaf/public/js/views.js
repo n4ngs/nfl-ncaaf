@@ -452,7 +452,7 @@ function renderBoard(loading = false) {
   const head = `<div class="br-hd"><span>${esc(mkt === 't' ? 'Over / under' : mkt === 'ml' ? 'Moneyline' : mkt === 'h1' ? '1st-half spread' : 'Spread')}</span><span>${esc(colName)}</span><span>Best</span></div>`;
   const block = (games) => `<div class="card brd m">${head}${games.map((g) => boardRow(g, mkt)).join('')}</div>${boardTable(games, mkt, cols)}`;
   const wasOpen = $('#doneGroup')?.open;
-  $('#boardBody').innerHTML = groups.map((grp) => `
+  $('#boardBody').innerHTML = (typeof featuredLeans === 'function' ? featuredLeans(shown) : '') + groups.map((grp) => `
     <div class="win-h"><h3>${esc(grp.day)} · ${esc(grp.win)}</h3><span>${plural(grp.games.length, 'game')}</span></div>${block(grp.games)}`).join('')
     + (done.length ? `<details class="done" id="doneGroup"${wasOpen || !groups.length ? ' open' : ''}><summary class="win-h"><h3>Final</h3><span>${plural(done.length, 'game')} · closing lines and results ${ICON.chev}</span></summary>${block(done.sort((a, b) => Date.parse(b.start) - Date.parse(a.start)))}</details>` : '');
 }
@@ -526,12 +526,12 @@ function boardRow(g, mkt) {
   if ((g.moves || []).some((m) => m.kind === 'steam' && serverNow() - m.t < 3 * 3600e3)) bits.push('<span class="hot">Steam</span>');
   if (S.bets.some((b) => b.status === 'open' && b.legs.some((l) => l.gid === g.id))) bits.push('<b>Your bet</b>');
   const spark = mkt === 't' ? g.spark?.t : g.spark?.s;
-  return `<div class="br" data-open="${g.id}">${row(g.away, 'away', s1)}${row(g.home, 'home', s2)}<button type="button" class="br-f" data-open="${g.id}" aria-label="${esc(`${g.away.short} at ${g.home.short}: open the game`)}">${bits.join('<span class="sep"></span>')}<span class="spk">${isPre(g) ? sparkSVG(spark) : ''}</span></button></div>`;
+  return `<div class="br" data-open="${g.id}">${row(g.away, 'away', s1)}${row(g.home, 'home', s2)}${typeof modelChip === 'function' ? modelChip(g) : ''}<button type="button" class="br-f" data-open="${g.id}" aria-label="${esc(`${g.away.short} at ${g.home.short}: open the game`)}">${bits.join('<span class="sep"></span>')}<span class="spk">${isPre(g) ? sparkSVG(spark) : ''}</span></button></div>`;
 }
 
 function boardTable(games, mkt, books = visibleBooks()) {
   const [s1, s2] = sideKeys(mkt);
-  const head = `<thead><tr><th class="l stk">Matchup</th><th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}" title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}">${b.color ? `<i class="bkdot" style="background:${esc(b.color)}"></i>` : ''}${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
+  const head = `<thead><tr><th class="l stk">Matchup</th><th class="mdl-th">Model <button type="button" class="linkish" data-leans title="Model: the research model's own line and win chance. A lean shows when its win chance beats the market's no-vig chance by 6+ points. Fundamentals only; not advice. Opens the model's public record." aria-label="Model leans: record">ⓘ</button></th><th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}" title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}">${b.color ? `<i class="bkdot" style="background:${esc(b.color)}"></i>` : ''}${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
   const rows = games.map((g, i) => {
     const lead = (g.home.score ?? 0) > (g.away.score ?? 0) ? 'home' : 'away';
     const trail = !isPre(g) && g.home.score !== g.away.score ? (lead === 'home' ? 'trail0' : 'trail1') : '';
@@ -557,6 +557,7 @@ function boardTable(games, mkt, books = visibleBooks()) {
     return `<tr class="${i ? '' : 'g0'}" data-open="${g.id}">
       <td class="l stk"><div class="mu"><div class="meta">${status}${esc(g.tv || '')}${r ? `<br><span class="w">${esc(mkt === 't' ? r.t : r.s)}</span>` : ''}${wind ? `<br>${wind}` : ''}</div>
         <div class="tm2 ${trail}"><div><span class="rt">${rotOf(g, 'away') ?? ''}</span>${logo(g.away)}<span class="nm">${rankTag(g.away)}${esc(teamName(g.away))}<small>${esc(g.away.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : g.away.score ?? ''}</span></div><div><span class="rt">${rotOf(g, 'home') ?? ''}</span>${logo(g.home)}<span class="nm">${rankTag(g.home)}${esc(teamName(g.home))}<small>${esc(g.home.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : g.home.score ?? ''}</span></div></div></div></td>
+      <td class="mdl-td">${typeof modelCell === 'function' ? modelCell(g) : ''}</td>
       <td><div class="st2">${open(s1)}${open(s2)}</div></td>
       <td><div class="st2">${mk ? pxCell(g, mkt, s1, mk, null) : '<span class="px na">—</span>'}${mk ? pxCell(g, mkt, s2, mk, null) : '<span class="px na">—</span>'}</div></td>
       <td><div class="meta mvc">${isPre(g) ? sparkSVG(mkt === 't' ? g.spark?.t : g.spark?.s, 48, 18) : ''}${moved ? `<span>${moved > 0 ? '▲' : '▼'} ${trim(Math.abs(moved))}</span>` : isPre(g) ? '<span class="faint">steady</span>' : ''}</div></td>
@@ -564,7 +565,7 @@ function boardTable(games, mkt, books = visibleBooks()) {
       <td><div class="spl">${a != null ? `<div class="bar2" title="Tickets: ${esc(aw)} ${a}% / ${esc(hm)} ${100 - a}%"><i style="width:${Math.max(a, 18)}%">${a}%</i><i>${100 - a}%</i></div>` : ''}${am != null ? `<div class="bar2 m" style="margin-top:4px" title="Money: ${esc(aw)} ${am}% / ${esc(hm)} ${100 - am}%"><i style="width:${Math.max(am, 18)}%">${am}%</i><i>${100 - am}%</i></div>` : ''}${a == null ? '<span class="faint">—</span>' : ''}</div></td>
     </tr>`;
   }).join('');
-  return `<div class="bt-wrap" tabindex="0" role="region" aria-label="Sportsbook odds comparison. Scroll horizontally for all books."><table class="bt">${head}<tbody>${rows}</tbody></table></div>`;
+  return `<div class="bt-wrap" tabindex="0" role="region" aria-label="Sportsbook odds comparison. Scroll horizontally for all books."><table class="bt has-model">${head}<tbody>${rows}</tbody></table></div>`;
 }
 
 // "Lines checked 12s ago": how fresh the board is, updated every tick without redrawing it.

@@ -19,7 +19,8 @@ F = load()
 F['tier_g5'] = (F.tier == 'G5').astype(int); F['tier_fcs'] = (F.tier == 'FCS').astype(int)
 F['x_open'] = F.bet_line; F['x_open_abs'] = F.bet_line.abs(); F['x_open_vs_cons'] = (F.bet_line - F.open).fillna(0.0)
 F['clv_home'] = F.bet_line - F.close
-S1 = sum(GROUPS.values(), [])
+LD = ['ld_away_road', 'ld_home', 'd_last_bad']   # letdown / bounce-back (why_line.py: improves holdout stage 1 + move R2)
+S1 = sum(GROUPS.values(), []) + LD
 SD = float((F.margin + F.close)[F.season < HOLDOUT[0]].std()); TSD = float((F.total - F.tclose)[F.season < HOLDOUT[0]].std())
 CTX2 = ['x_open', 'x_open_abs', 'early', 'home', 'min_n', 'tier_g5', 'tier_fcs', 'conf_game', 'd_mkt', 'd_talent', 'd_qb_pepa', 'd_qb_starts']
 # key skill players (late news): lead back / lead receiver absent, weighted by his share (keyplayers.py)
@@ -32,7 +33,7 @@ F['L_d_wr_out'] = F.home_wr_out * F.home_wr_share - F.away_wr_out * F.away_wr_sh
 REC = ['d_last_ats', 'd_last_upset', 'd_last_blowout']
 KEY = ['L_d_rb_out', 'L_d_wr_out']
 # E = "explain the move": everything known by kickoff (recency + QB + key players). Explanation model, late news.
-S2 = {'A': ['x_gap'] + CTX2, 'B': ['x_gap'] + CTX2 + ['x_open_vs_cons'], 'C': ['x_gap'] + CTX2 + LATE, 'E': ['x_gap'] + CTX2 + REC + LATE + KEY}
+S2 = {'A': ['x_gap'] + CTX2, 'B': ['x_gap'] + CTX2 + ['x_open_vs_cons'], 'C': ['x_gap'] + CTX2 + LATE, 'E': ['x_gap'] + CTX2 + REC + LATE + KEY + LD}
 TOT1 = ['t_pts', 't_plays', 'early', 'min_n', 'neutral', 'home_fbs', 'away_fbs']
 TOT2 = {'A': ['tx_gap', 'tx_open', 'early', 'min_n', 'tier_g5', 'tier_fcs', 'x_open_abs'], 'B': ['tx_gap', 'tx_open', 'early', 'min_n', 'tier_g5', 'tier_fcs', 'x_open_abs', 'tx_open_vs_cons']}
 
@@ -55,6 +56,7 @@ proof = json.load(open('data/cache/proof.json'))
 # conservative: every rule ever scored on the holdout during this research, including two earlier exploratory proof.py
 # runs (20 + 32 rules) made while the pipeline was being built, + ablate.py (10 configs x 2 thresholds)
 n_prior = proof.get('n_rules_spread', 0) + proof.get('n_rules_totals', 0) + 20 + 52 + 10   # + move.py (5 variants x 2)
+n_prior += 10 + json.load(open('data/cache/why_line.json'))['bonferroni_factor'] - 136   # move.py (10) + why_line.py rules
 THR = (0.5, 1.0, 1.5)
 n_here = len(S2) * len(THR) + len(TOT2) * len(THR)
 BONF = n_prior + n_here
@@ -108,7 +110,13 @@ model = {
              'on the holdout but its real-time availability is NOT verified -> forward-test before trusting.',
         'C': 'late news: needs the confirmed starting QB (first snap) before the books adjust; only actionable on early QB news.',
         'E': 'explains the open->close move with everything known by kickoff: model gap, last-week result vs the spread (recency), '
-             'starting-QB change, lead back / lead receiver out (share-weighted). Used to EXPLAIN a move; late news, not a bet by itself.'},
+             'letdown / bounce-back spot, starting-QB change, lead back / lead receiver out (share-weighted). Used to EXPLAIN a move; late news, not a bet by itself.'},
+    # first-year head coach per season (Wikipedia coaching-change tables, fetch_context.py): the walk regresses these
+    # teams' market rating harder (carry_m_nc) and updates it faster in season (lr_m_nc)
+    'new_coach': {str(int(S)): sorted(int(t) for t in g.team) for S, g in pd.read_parquet('data/cache/coaches.parquet').groupby('season') if S >= 2020},
+    'win_prob': {'sigma': 16.0, 'note': 'P(win) = Phi(stage-1 margin / sigma). sigma 16 (the app constant): pre-holdout log loss picks 16.5, '
+                 'the 2023-25 holdout prefers 16 over 16.5 (see why_line.json); informational, fundamentals-only.'},
+    'why_line': {k: json.load(open('data/cache/why_line.json'))[k] for k in ('stage1', 'move', 'base_rate', 'win_prob', 'new_coach_grid', 'bonferroni_factor')},
     'preseason': {'season': 2026, 'talent_z': pre.get('2026', {}), 'non_fbs_talent_z': -2.0,
                   'ret_off': {str(int(t)): float(o) for t, o in zip(rp.team_id, rp.off_returning) if pd.notna(o)},
                   'ret_def': {str(int(t)): float(d) for t, d in zip(rp.team_id, rp.def_returning) if pd.notna(d)}, 'ret_missing': 0.5},

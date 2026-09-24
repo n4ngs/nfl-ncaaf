@@ -88,6 +88,7 @@ function gameSheet() {
     <div class="gs-h">${tm(g.away, 'away')}<div class="gs-mid"><b>${isLive(g) ? '<span class="dot pulse"></span>' : ''}${esc(clockLabel(g))}</b>${esc(isPre(g) ? dayLabel(g.start, true) : g.detail || '')}</div>${tm(g.home, 'home')}</div>
     <div class="gs-meta">${meta.map((m) => `<span class="tag">${esc(m)}</span>`).join('')}${follow(g.away)}${follow(g.home)}</div>
     ${isLive(g) ? `<div class="gs-sec">${fieldSVG(g, true)}<div class="situ"><span>${g.sit?.text ? `<b>${esc(g.sit.text)}</b>` : ''}${g.last ? ` ${esc(g.last.slice(0, 120))}` : ''}</span>${g.sit?.rz ? '<span class="rz">Red zone</span>' : ''}</div></div>` : ''}
+    ${typeof leanBanner === 'function' ? leanBanner(g) : ''}
     ${typeof vasPanel === 'function' ? vasPanel(g) : ''}
     ${typeof modelPanel === 'function' ? modelPanel(g) : ''}
     <div class="gs-grid gs-sec">

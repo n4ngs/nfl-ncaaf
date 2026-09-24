@@ -58,6 +58,18 @@ class Week {
     if (G.l.t.length > MAX_POINTS) G.l.t.splice(0, G.l.t.length - MAX_POINTS);
   }
 
+  // Public betting splits (Action Network: % of tickets / % of money on the HOME side, spread + moneyline), recorded
+  // whenever they change, pregame only. No free feed has historical splits, so reverse-line-move research starts
+  // from this record (forward-only). Point: [t, spread tickets, spread money, ml tickets, ml money, consensus spread].
+  recordSplits(gid, sp, cons, t = Date.now()) {
+    if (!sp || (!sp.s && !sp.ml)) return;
+    const G = this.g(gid);
+    const pt = [t, sp.s?.tix ?? null, sp.s?.money ?? null, sp.ml?.tix ?? null, sp.ml?.money ?? null, cons ?? null];
+    const last = (G.sp ||= []).at(-1);
+    if (last && pt.slice(1).every((v, i) => v === last[i + 1])) return;
+    G.sp.push(pt); if (G.sp.length > MAX_POINTS) G.sp.splice(1, 1); this.dirty = true;
+  }
+
   setOpen(gid, open) {
     const G = this.g(gid);
     if (!open || (G.open && G.open.s === open.s && G.open.t === open.t && G.open.at === open.at)) return;

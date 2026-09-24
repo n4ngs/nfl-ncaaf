@@ -15,7 +15,11 @@ Everything a game's features use is known before that day's games start (the pro
 import math
 
 STATS = ['pts', 'epa', 'repa', 'pepa', 'fdr', 'expl', 'ypp', 'st', 'plays']
-CFG = dict(hl=9.0, k_shrink=1.0, carry=0.7, rest_cap=28, lr_m=0.4, hfa_m=2.0, carry_m=0.95, k_qb=2.0, fcs_m=-20.0)   # chosen by tune.py on 2017-2022 only
+CFG = dict(hl=9.0, k_shrink=1.0, carry=0.7, rest_cap=28, lr_m=0.4, hfa_m=2.0, carry_m=0.95, k_qb=2.0, fcs_m=-20.0,   # chosen by tune.py on 2017-2022 only
+           # why_line.py (2026-09): new-staff carry / learning rate (defaults = no change), venue home-edge decay + shrink
+           # new-staff market prior 0.8 / learning rate 0.55: picked on 2017-2022 only (grid in why_line.py), holdout 2023-25
+           # stage-1 RMSE 15.671 -> 15.645 (better every season); carry_nc (box-score carry) stayed 0.7
+           carry_nc=0.7, carry_m_nc=0.8, lr_m_nc=0.55, dec_v=0.96, k_v=8.0)
 
 def day_of(start):
     return start[:10]
@@ -34,7 +38,11 @@ class Walk:
         self.M = {}        # market rating
         self.qb_last = {}  # team -> qb id of last game
         self.qb = {}       # (team, qb) -> [starts, pepa_sum]
-        self.recent = {}   # team -> [season, last-game ATS margin (clipped), won as underdog, won by 21+]
+        self.recent = {}   # team -> [season, last-game ATS margin (clipped), won as underdog, won by 21+, emotional win, lost as favourite]
+        self.newc = {}     # (team, season) -> 1 if it is the team's first season under a new head coach
+        self.V = {}        # team -> [home sum, home w, away sum, away w] of market residuals (venue home edge, market view)
+        self.R = {}        # team -> same, of result residuals (venue home edge, results view)
+        self.A = {}        # team -> [sum log attendance, w] over its past home games
 
     def _st(self, t):
         s = self.S.get(t)
@@ -54,12 +62,19 @@ class Walk:
 
     def _carry(self, t, season):
         if t in self.season_of and self.season_of[t] != season:
+            nc = self.newc.get((t, season), 0)
             s = self._st(t)
             for key in list(s.keys()):
-                s[key] = s[key] * self.c['carry']
+                s[key] = s[key] * (self.c['carry_nc'] if nc else self.c['carry'])
             if t in self.M:
-                self.M[t] = self.M[t] * self.c['carry_m']
+                self.M[t] = self.M[t] * (self.c['carry_m_nc'] if nc else self.c['carry_m'])
             self.season_of[t] = season
+
+    def _vdev(self, D, t):
+        v = D.get(t)
+        if v is None: return 0.0
+        k = self.c['k_v']
+        return v[0] / (v[1] + k) - v[2] / (v[3] + k)
 
     def side(self, t, season, day, fbs):
         """features of one team before a game on `day` (applies the season carry-over once, like the Python walk)."""
@@ -83,11 +98,30 @@ class Walk:
         r['last_ats'] = L[1] if same else 0.0
         r['last_upset'] = L[2] if same else 0
         r['last_blowout'] = L[3] if same else 0
+        r['last_emo'] = L[4] if same else 0
+        r['last_bad'] = L[5] if same else 0
+        r['newc'] = self.newc.get((t, season), 0)
+        r['venue_m'] = self._vdev(self.V, t); r['venue_r'] = self._vdev(self.R, t)
+        a = self.A.get(t); lm = self._mean('all:att')
+        r['att'] = ((a[0] + 3.0 * lm) / (a[1] + 3.0) - lm) if a else 0.0
         return r
+
+    def _vadd(self, D, h, a, x):
+        d = self.c['dec_v']
+        for t, i, y in ((h, 0, x), (a, 2, -x)):
+            v = D.get(t)
+            if v is None:
+                v = [0.0, 0.0, 0.0, 0.0]
+                D[t] = v
+            v[i] = v[i] * d + y; v[i + 1] = v[i + 1] * d + 1.0
 
     def update_day(self, games):
         """games: list of dicts completed on one day. Pre-day ratings are used for every adjustment."""
         adj = []
+        pre = {}
+        for g in games:
+            h, a = g['home_id'], g['away_id']
+            pre[g['gid']] = (self.rating(h, 'o', 'pts') - self.rating(h, 'd', 'pts')) - (self.rating(a, 'o', 'pts') - self.rating(a, 'd', 'pts'))
         for g in games:
             for side, other in (('home', 'away'), ('away', 'home')):
                 t, o = g[side + '_id'], g[other + '_id']
@@ -115,6 +149,21 @@ class Walk:
                     v[0] += raw; v[1] += 1
         for g in games:
             d = day_of(g['start'])
+            if not g['neutral']:
+                h, a = g['home_id'], g['away_id']
+                self._vadd(self.R, h, a, float(g['home_pts'] - g['away_pts']) - pre[g['gid']])
+                att = g.get('attendance')
+                if att is not None and att == att and att > 0:
+                    la = math.log(att); v = self.A.get(h)
+                    if v is None:
+                        v = [0.0, 0.0]
+                        self.A[h] = v
+                    v[0] += la; v[1] += 1.0
+                    w = self.league.get('all:att')
+                    if w is None:
+                        w = [0.0, 0]
+                        self.league['all:att'] = w
+                    w[0] += la; w[1] += 1
             for side in ('home', 'away'):
                 t = g[side + '_id']
                 self.season_of[t] = g['season']; self.last_day[t] = d; self.fbs[t] = g[side + '_fbs']
@@ -138,11 +187,19 @@ class Walk:
                 h, a = g['home_id'], g['away_id']
                 mh = self.M.get(h, 0.0 if g['home_fbs'] else self.c['fcs_m']); ma = self.M.get(a, 0.0 if g['away_fbs'] else self.c['fcs_m'])
                 err = -c - (mh - ma + self.c['hfa_m'] * (1 - g['neutral']))
-                self.M[h] = mh + self.c['lr_m'] * err; self.M[a] = ma - self.c['lr_m'] * err
+                lh = self.c['lr_m_nc'] if self.newc.get((h, g['season']), 0) else self.c['lr_m']
+                la_ = self.c['lr_m_nc'] if self.newc.get((a, g['season']), 0) else self.c['lr_m']
+                self.M[h] = mh + lh * err; self.M[a] = ma - la_ * err
+                if not g['neutral']:
+                    self._vadd(self.V, h, a, float(err))
                 # recency (open-safe): last game against its own closing spread, from each team's side
                 m = g['home_pts'] - g['away_pts']
-                self.recent[h] = [g['season'], max(-28.0, min(28.0, float(m + c))), int(m > 0 and c > 0), int(m > 21)]
-                self.recent[a] = [g['season'], max(-28.0, min(28.0, float(-m - c))), int(m < 0 and c < 0), int(-m > 21)]
+                hr, ar = g.get('home_rank') or 99, g.get('away_rank') or 99
+                # emotional win = beat a ranked team or won as an underdog; bad loss = lost as the favourite
+                self.recent[h] = [g['season'], max(-28.0, min(28.0, float(m + c))), int(m > 0 and c > 0), int(m > 21),
+                                  int(m > 0 and (ar <= 25 or c > 0)), int(m < 0 and c < 0)]
+                self.recent[a] = [g['season'], max(-28.0, min(28.0, float(-m - c))), int(m < 0 and c < 0), int(-m > 21),
+                                  int(m < 0 and (hr <= 25 or c < 0)), int(m > 0 and c > 0)]
 
 def combine(h, a, g):
     f = {}
@@ -156,6 +213,11 @@ def combine(h, a, g):
     f['d_qb_starts'] = h['qb_starts'] - a['qb_starts']; f['d_qb_pepa'] = h['qb_pepa'] - a['qb_pepa']
     f['d_last_ats'] = h['last_ats'] - a['last_ats']; f['d_last_upset'] = h['last_upset'] - a['last_upset']
     f['d_last_blowout'] = h['last_blowout'] - a['last_blowout']
+    road = 1 - g['neutral']
+    # letdown: the AWAY team comes off an emotional win and is on the road; the home team off one (it hosts); bounce-back diff
+    f['ld_away_road'] = a['last_emo'] * road; f['ld_home'] = h['last_emo']; f['d_last_bad'] = h['last_bad'] - a['last_bad']
+    f['d_newc'] = h['newc'] - a['newc']
+    f['x_venue_m'] = h['venue_m'] * road; f['x_venue_r'] = h['venue_r'] * road; f['x_att'] = h['att'] * road
     f['neutral'] = g['neutral']; f['conf_game'] = g['conf_game']
     f['home_fbs'] = g['home_fbs']; f['away_fbs'] = g['away_fbs']
     return f
@@ -172,6 +234,8 @@ def walk(games, cfg=CFG, keep_sides=False, late=False):
     by_day = {}
     for g in games:
         by_day.setdefault(day_of(g['start']), []).append(g)
+        for side in ('home', 'away'):
+            if g.get(side + '_newc'): W.newc[(g[side + '_id'], g['season'])] = 1
     for d in sorted(by_day):
         dg = sorted(by_day[d], key=lambda g: (g['start'], g['gid']))
         for g in dg:

@@ -840,12 +840,12 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
   .bt tbody tr:hover td{background:color-mix(in srgb,var(--surface) 90%,var(--ink))}
 }
 
-/* BetMGM is the one column you can act on — a tap there puts the bet in your slip at the book.
-   Mark the lane so the eye finds it among a dozen: an accent rule under the header and a whisper of
-   lift down the column. Deliberately not the live-red wash, which means something else here. */
+/* The Model column is the lane the eye should find first (owner, 2026-09-23): an accent rule under the header and a
+   whisper of lift down the column. BetMGM keeps its links and one-tap slip, without the column highlight.
+   Deliberately not the live-red wash, which means something else here. */
 @media (min-width:1024px){
-  .bt th[data-bk="mgm"]{color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
-  .bt td[data-bk="mgm"]{background:color-mix(in srgb,var(--surface) 94%,var(--ink))}
+  .bt th.mdl-th{color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
+  .bt td.mdl-td{background:color-mix(in srgb,var(--surface) 94%,var(--ink))}
 }
 
 /* ═══════════════════════════════════════════════════════════════════ colour + controls
@@ -876,3 +876,24 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
 .model-read .mr-read{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--surface);margin-bottom:8px}
 .model-read .mr-read p{margin:0;font-size:14px;line-height:1.4}.model-read .mr-read .tag{align-self:flex-start}
 .model-read .mr-why{font-size:12px !important;color:var(--ink-2)}.model-read .mr-quiet{font-size:13px;color:var(--ink-2);margin:0}
+.model-read .mr-lean{padding:12px 14px;border:1px solid var(--ink-2,rgba(127,127,127,.5));border-radius:var(--r-lg);background:var(--surface);margin:0 0 10px}
+.model-read .mr-lean p{margin:0 0 4px;font-size:15px;line-height:1.4}.model-read .mr-lean .mr-why{margin:0}
+.mv-list li small{display:block;color:var(--ink-2);font-size:11px;margin-top:2px}
+
+/* model number, lean prominence and the public lean record (js/model.js). Team colour via --lc, never green. */
+.lean-top{display:flex;gap:12px;align-items:flex-start;padding:14px;border:1px solid var(--line);border-left:4px solid var(--lc,var(--ink));border-radius:var(--r-lg);background:var(--surface)}
+.lean-top p{margin:0 0 6px;font-size:14px;line-height:1.4}.lean-h{font-size:18px !important;font-weight:700;color:var(--lc,var(--ink))}
+.lean-logo{width:40px;height:40px;flex:none}.linkish{background:none;border:0;padding:0;color:var(--ink);text-decoration:underline;font:inherit;cursor:pointer}
+.wbars{display:grid;gap:6px;margin:8px 0}.wb-row{display:grid;grid-template-columns:56px 1fr auto;gap:8px;align-items:center;font-size:12px;color:var(--ink-2)}
+.wb{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--fill,rgba(127,127,127,.2))}.wb i{display:block;height:100%}.wb i:last-child{flex:1;opacity:.55}
+.lean-feat{padding:14px;margin:0 0 16px;display:grid;gap:14px}.lean-feat .lf{border-left:4px solid var(--lc,var(--ink));padding-left:12px}
+.lf-h{display:flex;gap:10px;align-items:center}.lf-h small{color:var(--ink-2);font-size:12px}.lf-h p{margin:2px 0 0}.lf-a{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.lean-feat .mr-why{font-size:12px;color:var(--ink-2);margin:4px 0 8px}
+.mdl{display:grid;gap:2px;justify-items:start;font-size:12px;min-width:118px}.mdl-line{color:var(--ink-2)}.mdl-lean{display:flex;gap:5px;align-items:center;font-weight:700;color:var(--lc,var(--ink))}
+.mdl-logo{width:16px;height:16px}.mdl-n{color:var(--ink)}.mdl-q{font-size:12px;color:var(--ink-2)}.mdl-th .linkish{text-decoration:none;margin-left:2px}
+.br-mdl{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:2px 0 4px;padding:6px 10px;border:1px solid var(--line);border-left:3px solid var(--lc,var(--ink));border-radius:10px;font-size:12px;cursor:pointer}
+.br-mdl b{color:var(--lc,var(--ink))}.br-mdl.q{border-left-color:var(--line);color:var(--ink-2);padding:3px 10px}
+.lr-tot{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:10px 0}.lr-tot div{padding:10px;border:1px solid var(--line);border-radius:10px}.lr-tot b{display:block;font-size:20px}.lr-tot small{color:var(--ink-2)}
+.bt.lr td,.bt.lr th{font-size:12px;white-space:nowrap}
+.pin-tag{background:transparent;border:1px solid var(--ink-2);color:var(--ink)}.pin-model{font-size:14px}.pin-ctl{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.lean-feat .pin-card{border:0;border-left:4px solid var(--lc,var(--ink));border-radius:0;padding:0 0 0 12px;background:transparent}

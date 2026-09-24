@@ -346,7 +346,7 @@ function pub(G, W) {
     mkt: canonicalLine(canonical, 'current'),
     open: openLine,
     close: canonicalLine(canonical, 'close'),
-    model: (() => { try { return Model.forGame(G, H, books, { opens: vsOpens, open: openLine }); } catch { return null; } })(),
+    model: (() => { try { return Model.forGame(G, H, books, { opens: vsOpens, open: openLine, splits: an.splits || null }); } catch { return null; } })(),
     integrity: { markets: canonical, thresholds: integrityThresholds(), retrospective_status: 'RETROSPECTIVE_MARKET_MOVE' },
     splits: an.splits || null,
     tt: an.tt || null,
@@ -507,7 +507,7 @@ async function pollAn(W) {
       patch.tt[team] = { ...totals, integrity: line.integrity, snapshot_ids: line.snapshot_ids };
     }
     W.an.set(gid, patch);
-    if (G.state === 'pre') recordBooks(W, G, now);
+    if (G.state === 'pre') { recordBooks(W, G, now); W.lines.recordSplits(gid, patch.splits, patch.books?.cons?.s, now); }
     if (G.state === 'in' && patch.live?.cons) W.lines.recordLive(gid, patch.live.cons, now);
     const o = patch.books.open;
     if (o) W.lines.setOpen(gid, { s: o.s, t: o.t, ml: o.ml, at: W.a1.get(gid)?.openAt || W.lines.full(gid)?.open?.at || null });
@@ -1827,6 +1827,16 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/edges') {
       if (role !== 'owner') return ownerOnly();
       return sendJSON(res, 200, require('../shared/edges-feed').football({ weeks: tracked(), view: pubCached }));
+    }
+    // Public (guests too): every model lean the board showed, recorded when it first appeared, with its close and result.
+    if (p === '/api/model/leans') return sendJSON(res, 200, Model.leanBook());
+    // Owner only: pin a team on a game ({gid, side: 'home'|'away'|null}). Shown with a "Pinned" tag, kept out of the model record.
+    if (p === '/api/model/pin' && M === 'POST') {
+      if (role !== 'owner') return ownerOnly();
+      const body = await readBody(req), G = gameById(String(body.gid || ''));
+      if (!G) return sendJSON(res, 404, { error: 'unknown game' });
+      try { const pin = Model.setPin(G, body.side === 'home' || body.side === 'away' ? body.side : null); for (const W of weeks.values()) W.pubCache?.delete(G.id); return sendJSON(res, 200, { ok: true, pin }); }
+      catch (e) { return sendJSON(res, 400, { error: e.message }); }
     }
     if (p === '/api/vas/record') {
       if (role !== 'owner') return ownerOnly();

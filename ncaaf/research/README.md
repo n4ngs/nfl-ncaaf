@@ -224,3 +224,31 @@ lead receiver ~ -0.94 x his catch share, a covered-by-14 last week ~ +0.2 pt tow
 weather, large bets). The app shows, per game, the actual move, the part each input explains, the unexplained
 remainder, and for each team's lead back / receiver what a ruled-out report would add (college football has no
 official injury feed, so availability is never assumed). Variant E is exported for explanation; it is late news.
+
+## Why did the line move? The bookmakers' factors, tested (`fetch_context.py`, `why_line.py`, 2026-09-23)
+Prompt: #4 Ole Miss +3.5 at #21 Florida (2026 week 4, game 401856699). Books cited a letdown spot, the Swamp's home edge, a
+first-year coach, one-way action and an injured back. Each factor was built walk-forward (open-safe), tested on the
+2023-25 holdout exactly like the rest of this file, and Bonferroni-counted (now **170** rules on this holdout).
+Baseline reproduced: stage-1 RMSE 15.671, RMSE vs the close 4.610, move R² 8.15 %.
+
+| factor | stage-1 RMSE (margin) | RMSE vs close | move R² (E) | beats the close? |
+|---|---|---|---|---|
+| letdown / bounce-back (beat a ranked team or won as a dog last week, now on the road; lost as a favourite) | 15.669 | 4.586 | 8.31 % | no (open-safe A ≥1.0: +0.99 %, p_bonf 1; "fade the road letdown team at the open": 291 bets, −5.0 %) |
+| venue home edge, market view (closing-line residuals home vs away, shrunk) | 15.672 | 4.611 | 8.15 % | no |
+| venue home edge, results view | 15.692 | 4.636 | 8.12 % | no |
+| home attendance (log, shrunk) | 15.675 | 4.610 | 8.15 % | no |
+| new head coach flag (+ × early) | 15.675 | 4.625 | 8.22 % | no |
+| **new-staff walk**: market prior carry 0.95 → 0.8 and in-season learning rate 0.4 → 0.55 for first-year staffs (picked on 2017-22) | **15.645** (every season better) | **4.570** | 8.24 % | no |
+| **shipped: new-staff walk + letdown** | **15.642** (15.555 / 15.958 / 15.412) | **4.545** | **8.40 %** | open-safe A: no (≥1.0: 133 bets +0.96 %, p_bonf 1). E ≥1.5 stays proven (80 bets +6.4 %, p_bonf 0.005) but that is the late-news QB/key-player signal it already had |
+| reverse line movement | — | — | — | untestable: no free feed has historical splits (Action Network returns null % for past dates). The app now records splits per game (forward-only) |
+| injury severity (probability-weighted) | — | — | — | untestable: no college injury-status history (ESPN's endpoints are empty). Live: P(out) × share × the tested coefficient, from an owner-edited status file |
+
+What the data says about the story: in results, road teams coming off an emotional win did slightly **better** than their
+ratings (−0.19 pt, no letdown), and teams that lost as favourites did 0.87 pt worse (no bounce-back); in line moves the
+market leans the narrative way (+0.15 pt against the road letdown team, +0.21 pt bounce-back). Florida's home edge: the
+closing lines have priced it at ~2.2 pts (league ~2.6, rank 96 of 133) over its last ~24 home games; results say ~6 ± 4
+(noise). Base rate (context only): top-5 teams as road underdogs to a lower-ranked or unranked host, 2014-25: 4-10 SU,
+5-9 ATS (14 games). Coaching changes come from Wikipedia's per-season FBS tables (ESPN's coach endpoints ignore the
+season). Win probability: Φ(margin / 16); pre-holdout log loss picks σ 16.5, the holdout prefers 16 (0.4824 vs 0.4833)
+and 14.5 at best, so the app keeps 16. A "model lean" (model win % ≥ 6 points over the no-vig market) is informational,
+always a Weak read, and scored in its own record. Parity: engine + loader to 1e-8 (loader max |diff| 3.6e-15).

@@ -12,7 +12,7 @@
 //   ESPN core odds, per completed game: consensus CLOSING home spread = median of the top-level `spread` over real
 //     books (no "... Live Odds" provider = in-game prices; no model/consensus feeds). The top-level `spread` is used
 //     because some rows carry the juice in close.pointSpread. Cached per game forever; backfilled a slice per call.
-//   ESPN scoreboard (upcoming games).
+//   ESPN scoreboard (upcoming games; and each week's poll ranks, curatedRank, 99 = unranked, for the letdown read).
 // The caller supplies fetchBuffer(url) -> Buffer (following redirects) and fetchJSON(url) -> object, with no custom UA.
 const fs = require('node:fs'), path = require('node:path'), zlib = require('node:zlib');
 
@@ -33,7 +33,7 @@ const P5 = new Set(['SEC', 'Big Ten', 'Big 12', 'ACC', 'Pac-12']);
 const NOTRE_DAME = 87;
 const NOT_BOOKS = new Set(['numberfire', 'teamrankings', 'accuscore', 'consensus', 'SportsInsights', 'Opening']);
 const CURRENT_TTL = 12 * 3600e3, RETRY = 3600e3;
-const CACHE_V = 2;   // bump when the compact season format changes: older season caches are rebuilt once
+const CACHE_V = 3;   // bump when the compact season format changes: older season caches are rebuilt once (3: attendance)
 
 function splitCsv(line) {
   if (line.indexOf('"') < 0) return line.split(',');
@@ -96,7 +96,7 @@ function compactSeason(season, { schedule, gamelog, teams, playerBox }) {
     if (!hf && !af) continue;
     const g = { gid, season, start: r.game_date, neutral: bool(r.neutral_site), conf_game: bool(r.conference_competition),
       home_id: h, away_id: a, home_pts: num(r.home_score), away_pts: num(r.away_score), home_fbs: hf, away_fbs: af,
-      week: num(r.week), stype: num(r.season_type) };
+      week: num(r.week), stype: num(r.season_type), attendance: num(r.attendance) };
     for (const [side, t] of [['home', h], ['away', a]]) {
       const s = stats.get(gid + ':' + t);
       for (const key of Object.keys(STAT)) g[side + '_' + key] = s ? s[key] : null;
@@ -235,6 +235,34 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, s
     return out;
   }
 
+  // Poll rank at kickoff per game (ESPN scoreboard curatedRank), one request per week, cached per season
+  // (ranks_{S}.json): past seasons once, the current season every 12 h. A failed week keeps what was cached.
+  async function ranks(s, current) {
+    const f = path.join(dir, `ranks_${s}.json`);
+    let c = null; try { c = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { c = null; }
+    if (c && (!current || now() - (c.fetchedAt || 0) <= CURRENT_TTL)) return c.r;
+    const r = (c && c.r) || {}; let okN = 0;
+    const jobs = []; for (let w = 1; w <= 16; w++) jobs.push([2, w]); jobs.push([3, 1]);
+    let i = 0;
+    await Promise.all(Array.from({ length: 4 }, async () => {
+      while (i < jobs.length) {
+        const [type, week] = jobs[i++], url = URLS.scoreboard(s, type, week);
+        const last = tried.get(url); if (last && now() - last < RETRY) continue;
+        try {
+          const j = await fetchJSON(url); okN++; tried.delete(url);
+          for (const e of (j && j.events) || []) {
+            const cc = e.competitions && e.competitions[0]; if (!cc) continue;
+            const side = Object.fromEntries((cc.competitors || []).map((x) => [x.homeAway, x]));
+            const rk = (x) => { const v = x && x.curatedRank && x.curatedRank.current; return Number.isFinite(v) && v > 0 ? v : 99; };
+            if (side.home && side.away) r[String(e.id)] = [rk(side.home), rk(side.away)];
+          }
+        } catch (e) { tried.set(url, now()); status.lastError = `ranks ${s}: ${String(e.message || e).slice(0, 120)}`; }
+      }
+    }));
+    if (okN) writeAtomic(f, JSON.stringify({ fetchedAt: now(), r }));
+    return r;
+  }
+
   // The engine's history for `current` season: seasons current-2 .. current (walk warm-up = 2 full seasons).
   // Missing closes are backfilled newest-first, maxCloses per call; complete = every season + every close present.
   async function history(current, { maxCloses = 150, warmup = 2 } = {}) {
@@ -242,11 +270,13 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, s
     const data = [];
     for (const s of seasons) { const d = await season(s, s === current); if (d) data.push(d); }
     const games = data.flatMap((d) => d.games);
+    const RK = {}; for (const d of data) Object.assign(RK, await ranks(d.season, d.season === current));
     const C = loadCloses();
     const missing = games.filter((g) => !(String(g.gid) in C)).sort((a, b) => (a.start < b.start ? 1 : -1)).map((g) => g.gid);
     if (missing.length && maxCloses > 0) await closeSpreads(missing, { max: maxCloses });
     let noClose = 0;
-    const out = games.map((g) => { const k = String(g.gid); if (!(k in C)) noClose++; return { ...g, close: k in C ? C[k] : null }; });
+    const out = games.map((g) => { const k = String(g.gid); if (!(k in C)) noClose++; const rk = RK[k] || [99, 99];
+      return { ...g, close: k in C ? C[k] : null, home_rank: rk[0], away_rank: rk[1] }; });
     status.closes = { cached: Object.keys(C).length, missing: noClose };
     status.lastRefresh = new Date(now()).toISOString();
     const complete = data.length === seasons.length && noClose === 0;
