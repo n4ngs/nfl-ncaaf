@@ -78,3 +78,51 @@ test('a near-market alt rung is dropped by its price shape; a stale line priced 
   dropOutliers(near);
   assert.equal(near.mgm.t, 46.5);
 });
+
+test('a 0 spread survives only as a genuine PK: near-even moneyline and a market near 0', () => {
+  const peers = (s) => ({ circa: line(s, 52), dk: line(s, 52), fd: line(s, 52), pin: line(s, 52) });
+  // SDSU @ Toledo: 0 while the book's own moneyline has a -150 favorite.
+  const byMl = { ...peers(-3), mgm: line(0, 52, { ml: [-150, 125] }) };
+  dropOutliers(byMl);
+  assert.equal(byMl.mgm.s, null);
+  assert.equal(byMl.mgm.outliers.s.reason, 'pk_vs_moneyline');
+  assert.equal(byMl.mgm.t, 52);                      // one bad market leaves the rest of the row
+  // 0 with an even moneyline, but every other book is at -3.
+  const byMarket = { ...peers(-3), mgm: line(0, 52, { ml: [-115, -105] }) };
+  dropOutliers(byMarket);
+  assert.equal(byMarket.mgm.outliers.s.reason, 'pk_vs_market');
+  // A genuine PK: moneyline near even and the market within a point and a half of 0.
+  const pk = { ...peers(-1.5), mgm: line(0, 52, { ml: [-125, 105] }) };
+  dropOutliers(pk);
+  assert.equal(pk.mgm.s, 0);
+  assert.equal(pk.mgm.outliers, undefined);
+});
+
+test('a row quoting a different event is quarantined whole', () => {
+  // IND @ WSH: every book has WSH +4.5 and a +170 dog; BetMGM has 0, 49.5 and WSH a -120 favorite.
+  const peer = () => line(4.5, 46.5, { ml: [170, -205] });
+  const books = { circa: peer(), dk: peer(), fd: peer(), pin: peer(), mgm: line(0, 49.5, { ml: [-120, 100] }) };
+  dropOutliers(books);
+  assert.equal(books.mgm.quarantined, true);
+  assert.equal(books.mgm.s, null);
+  assert.equal(books.mgm.t, null);
+  assert.deepEqual(books.mgm.ml, [null, null]);
+  assert.equal(books.mgm.outliers.ml.reason, 'ml_flip');
+  assert.equal(books.mgm.outliers.t.reason, 'row_mismatch');
+  assert.equal(books.mgm.outliers.t.line, 49.5);
+  assert.deepEqual(books.dk.ml, [170, -205]);
+  // A favorite that merely differs in size, same team, is not a mismatch.
+  const shade = { circa: peer(), dk: peer(), fd: peer(), pin: peer(), mgm: line(4.5, 46.5, { ml: [150, -180] }) };
+  dropOutliers(shade);
+  assert.equal(shade.mgm.quarantined, undefined);
+  assert.deepEqual(shade.mgm.ml, [150, -180]);
+});
+
+test('two bad markets on one row quarantine it', () => {
+  const peer = () => line(-3, 58.5, { ml: [-150, 125] });
+  const books = { circa: peer(), dk: peer(), fd: peer(), pin: peer(), mgm: line(-14, 45.5, { ml: [-150, 125] }) };
+  dropOutliers(books);
+  assert.equal(books.mgm.quarantined, true);
+  assert.deepEqual(books.mgm.ml, [null, null]);
+  assert.equal(books.mgm.outliers.ml.reason, 'row_mismatch');
+});
