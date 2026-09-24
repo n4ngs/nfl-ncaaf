@@ -14,13 +14,29 @@ const stable = (x) => JSON.stringify(sort(x));
 function sort(x) { return Array.isArray(x) ? x.map(sort) : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x).sort().filter((k) => x[k] !== undefined).map((k) => [k, sort(x[k])])) : x; }
 const hash = (x) => crypto.createHash('sha256').update(stable(x)).digest('hex');
 const immutable = (x) => { if (x && typeof x === 'object' && !Object.isFrozen(x)) { for (const v of Object.values(x)) immutable(v); Object.freeze(x); } return x; };
-function utc(value) {
+function utcSlow(value) {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'string' && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) return null;
   const t = typeof value === 'number' ? value : value instanceof Date ? value.getTime() : Date.parse(value);
   return Number.isFinite(t) && Math.abs(t) <= 8640000000000000 ? new Date(t).toISOString() : null;
 }
-const ms = (x) => { const u = utc(x); return u ? Date.parse(u) : null; };
+// utc()/ms() run hundreds of thousands of times per board build (every market of every book of every game), and were
+// the top CPU cost of the NCAAF engine. Same results, memoized for strings and computed directly for numbers.
+const UTC_MEMO = new Map();
+function utc(value) {
+  if (typeof value !== 'string') return utcSlow(value);
+  let v = UTC_MEMO.get(value);
+  if (v === undefined) {
+    v = utcSlow(value);
+    if (UTC_MEMO.size >= 20000) UTC_MEMO.clear();
+    UTC_MEMO.set(value, v);
+  }
+  return v;
+}
+const ms = (x) => {
+  if (typeof x === 'number') return Number.isFinite(x) && Math.abs(x) <= 8640000000000000 ? new Date(x).getTime() : null;
+  const u = utc(x); return u ? Date.parse(u) : null;
+};
 function configuration(c = {}) {
   const result = { ...DEFAULT_CONFIG };
   const aliases = { pregameMaxAgeMs: 'pregame_max_age_ms', liveMaxAgeMs: 'live_max_age_ms', closeMaxAgeMs: 'closing_max_age_ms', closingMaxAgeMs: 'closing_max_age_ms' };

@@ -366,10 +366,21 @@ function pub(G, W) {
   };
 }
 
+/* pub() of one game is the expensive part of every board read (merged books + CLV integrity for every market). A
+   full-week read (the page load, every live-feed snapshot) reuses each game's view for up to PUB_TTL; the
+   post-poll change detection (flushGames) always rebuilds and refreshes this cache, so a real change still goes out
+   on the next push exactly as before. */
+const PUB_TTL = 3000;
+function pubCached(G, W) {
+  const c = (W.pubCache ||= new Map()).get(G.id);
+  if (c && Date.now() - c.at < PUB_TTL) return c.v;
+  const v = pub(G, W); W.pubCache.set(G.id, { at: Date.now(), v });
+  return v;
+}
 function weekSnapshot(W) {
   return {
     id: W.id, ...W.k, label: W.label, detail: W.detail,
-    games: [...W.games.values()].map((G) => pub(G, W)).sort((a, b) => Date.parse(a.start) - Date.parse(b.start)),
+    games: [...W.games.values()].map((G) => pubCached(G, W)).sort((a, b) => Date.parse(a.start) - Date.parse(b.start)),
     moves: W.lines.moves(Date.now() - 7 * 86400e3).slice(0, 60),
     at: W.at,
   };
@@ -431,6 +442,7 @@ function flushGames(W, games) {
   if (!tracked().includes(W)) return;
   for (const G of games) {
     const p = pub(G, W);
+    (W.pubCache ||= new Map()).set(G.id, { at: Date.now(), v: p });
     /* Change detection ignores the fine grain of `seen` (every book is re-stamped on every Action Network poll,
        so without this EVERY game went out every 9 s during games and every phone redrew the whole board).
        Bucketed to 5 minutes it still refreshes well inside the client's 15-minute "old number" window, and a
