@@ -1066,6 +1066,7 @@ function betsMineHook() {
     sports: location.pathname.startsWith('/mlb/') ? undefined : ['mlb'],
     basePaths: location.pathname.startsWith('/mlb/') ? undefined : { mlb: '' },
     onNew: () => betsOpenSlip({}), detailHTML: (ticket) => ticket.sport === 'mlb' ? betsCard(ticket.raw) : null,
+    shareHTML: (ticket) => (ticket.sport === 'mlb' && ticket.raw && ticket.raw.status !== 'void' && typeof shareOpen === 'function' ? `<button type="button" data-share-bet="${esc(ticket.raw.id)}" aria-label="Share this bet">Share</button>` : ''),
     resultsHTML: () => `<h2>MLB results</h2>${betsResultsHTML()}`
   })) {
     $('#view-following')?.classList.add('portfolio-mode');

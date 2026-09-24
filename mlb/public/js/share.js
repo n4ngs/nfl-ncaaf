@@ -243,10 +243,26 @@ async function shareDraw(b, { amount = false } = {}) {
 }
 
 // ------------------------------------------------------------ the preview sheet
-const shareCanFiles = () => {
-  try { return !!navigator.canShare && navigator.canShare({ files: [new File([new Blob([''])], 'x.png', { type: 'image/png' })] }); } catch { return false; }
-};
+const shareKit = () => (typeof BoardPortfolioView !== 'undefined' ? BoardPortfolioView.share : null);
+// The words and link that travel with the picture (Messages, Mail, the system share sheet, the clipboard).
+function shareWords(b) {
+  const K = shareKit(), l0 = b.legs[0] || {}, single = b.legs.length === 1, url = `${location.origin}/mlb/`;
+  const win = typeof betsToWin === 'function' ? betsToWin(b.stake, b.odds) : null;
+  const amount = SHARE.amount && b.stake > 0 ? (b.status === 'open' || b.net == null ? `${shareMoney(b.stake)} to win ${win == null ? '' : shareMoney(win)}` : b.status === 'won' ? `Won ${shareMoney(b.net, true)} on ${shareMoney(b.stake)}` : `${shareMoney(b.stake)} staked`) : '';
+  const f = { pick: shareLabel(b), odds: shareOdds(b.odds), book: b.book || '', matchup: single ? l0.matchup || '' : b.legs.map((l) => l.label).join(' · '),
+    date: single ? shareWhen(l0.start) : '', status: b.status === 'open' ? '' : single && shareFinal(l0) ? `${SHARE_STATE[b.status] || ''} · ${shareFinal(l0)}` : SHARE_STATE[b.status] || '', amount, url };
+  return K ? K.text(f) : [f.pick + ' ' + f.odds, f.matchup, url].filter(Boolean).join('\n');
+}
+function shareLinks() {
+  const b = SHARE.bet, K = shareKit();
+  if (!b || !K) return;
+  const t = shareWords(b), m = $('#shareMail'), x = $('#shareSms');
+  if (m) m.href = K.mailto(t, `My bet: ${shareLabel(b)}`);
+  if (x) x.href = K.sms(t);
+}
+const shareSay = (msg) => { const er = $('#shareErr'); if (er) er.textContent = msg; };
 function shareSheetHTML(b) {
+  const K = shareKit(), can = !!K?.canShare();
   const label = shareLabel(b);
   const amt = b.stake > 0 ? `<div class="share-opt">
       <div><b id="shareAmtL">Include amount</b><span>Adds your stake and payout to the image.</span></div>
@@ -258,10 +274,16 @@ function shareSheetHTML(b) {
     <div class="share-prev" id="sharePrev"><span class="share-wait">Drawing…</span></div>
     ${amt}
     <div class="bets-btns share-btns" id="shareBtns">
-      ${shareCanFiles() ? '<button type="button" class="bets-btn" data-share-go disabled>Share</button>' : ''}
+      ${can ? '<button type="button" class="bets-btn" data-share-go disabled>Share</button>' : ''}
+      ${K?.canCopyImage() ? `<button type="button" class="bets-btn${can ? ' ghost' : ''}" data-share-copy-img disabled>Copy image</button>` : ''}
       <a class="bets-btn ghost" id="shareSave" download="bing-bong-bet.png" aria-disabled="true">Save image</a>
     </div>
-    <p class="share-err" id="shareErr" role="alert"></p>
+    <div class="bets-btns share-btns share-send">
+      ${K?.canCopyText() ? '<button type="button" class="bets-btn ghost" data-share-copy-txt>Copy text</button>' : ''}
+      <a class="bets-btn ghost" id="shareMail" href="#">Email</a>
+      <a class="bets-btn ghost" id="shareSms" href="#">Message</a>
+    </div>
+    <p class="share-err" id="shareErr" role="status" aria-live="polite"></p>
   </div>`;
 }
 async function sharePaint() {
@@ -282,6 +304,9 @@ async function sharePaint() {
   if (save) { save.href = SHARE.url; save.removeAttribute('aria-disabled'); }
   const go = $('[data-share-go]');
   if (go) go.disabled = false;
+  const ci = $('[data-share-copy-img]');
+  if (ci) ci.disabled = false;
+  shareLinks();
 }
 function shareOpen(id) {
   const b = typeof id === 'object' ? id : (typeof BETS !== 'undefined' ? BETS.list.find((x) => x.id === id) : null);
@@ -289,32 +314,35 @@ function shareOpen(id) {
   SHARE.bet = b;
   SHARE.amount = false; // hidden by default, every time
   openSheet(shareSheetHTML(b), 'share');
+  shareLinks();
   sharePaint();
 }
+// Share works either way: with the picture where the browser can take files, else with the words and a link.
 async function shareGo() {
-  if (!SHARE.blob) return;
-  const file = new File([SHARE.blob], 'bing-bong-bet.png', { type: 'image/png' });
-  try {
-    await navigator.share({ files: [file], title: 'My bet · Bing Bong Live' });
-  } catch (e) {
-    if (e?.name === 'AbortError') return; // closed the share sheet
-    const er = $('#shareErr');
-    if (er) er.textContent = 'Sharing didn’t work here. Use Save image instead.';
-  }
+  const K = shareKit();
+  if (!K || !SHARE.bet) return;
+  const file = SHARE.blob ? new File([SHARE.blob], 'bing-bong-bet.png', { type: 'image/png' }) : null;
+  const r = await K.send({ file, title: 'My bet · Bing Bong Live', text: shareWords(SHARE.bet), url: `${location.origin}/mlb/` });
+  if (r === 'failed' || r === 'unsupported') shareSay('Sharing didn’t work here. Copy or save the image instead.');
 }
 
 // ------------------------------------------------------------ interactions (data-share-*)
 document.addEventListener('click', (ev) => {
-  const t = ev.target.closest('[data-share-bet],[data-share-amount],[data-share-go],#shareSave');
+  const t = ev.target.closest('[data-share-bet],[data-share-amount],[data-share-go],[data-share-copy-img],[data-share-copy-txt],#shareSave,#shareMail,#shareSms');
   if (!t) return;
   if (t.id === 'shareSave') { if (!SHARE.url) ev.preventDefault(); return; }
+  if (t.id === 'shareMail' || t.id === 'shareSms') { shareLinks(); return; }   // plain links: Mail / Messages open with the words
   const d = t.dataset;
+  const K = shareKit();
+  if (d.shareCopyImg !== undefined) { if (K && SHARE.blob) K.copyImage(SHARE.blob).then((ok) => shareSay(ok ? 'Image copied. Paste it into Messages, Mail or a chat.' : 'Couldn’t copy the image here. Save it instead.')); return; }
+  if (d.shareCopyTxt !== undefined) { if (K && SHARE.bet) K.copyText(shareWords(SHARE.bet)).then((ok) => shareSay(ok ? 'Text copied.' : 'Couldn’t copy the text here.')); return; }
   if (d.shareBet) { ev.preventDefault(); shareOpen(d.shareBet); return; }
   if (d.shareAmount !== undefined) {
     SHARE.amount = !SHARE.amount;
     t.setAttribute('aria-checked', String(SHARE.amount));
     const go = $('[data-share-go]');
     if (go) go.disabled = true;
+    shareLinks();
     sharePaint();
     return;
   }

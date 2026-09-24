@@ -202,15 +202,32 @@ function shareAlt(b, withAmount) {
   const M = shareModel(b);
   return [`Hook & Ladder bet card: ${M.pick} ${M.odds}`, M.book, M.matchup, M.date, M.status, M.final, M.clv, withAmount ? M.amount : ''].filter(Boolean).join('. ').replace(MINUS, 'minus ');
 }
+const shareKit = () => (typeof BoardPortfolioView !== 'undefined' ? BoardPortfolioView.share : null);
+// The words and link that travel with the picture (Messages, Mail, the system share sheet, the clipboard).
+function shareWords(b, withAmount) {
+  const M = shareModel(b), K = shareKit();
+  const url = `${location.origin}/ncaaf/`;
+  const f = { pick: M.pick, odds: M.odds, book: M.book, matchup: M.matchup, date: M.date, status: M.st === 'open' ? '' : M.status, amount: withAmount ? M.amount : '', url };
+  return K ? K.text(f) : [M.pick + ' ' + M.odds, M.matchup, url].filter(Boolean).join('\n');
+}
 function shareSheetHTML() {
-  const s = S.sheet;
-  const can = !!(navigator.share && navigator.canShare);
+  const s = S.sheet, K = shareKit();
+  const can = !!K?.canShare();
   return `<h2 id="dlgTitle">Share this bet</h2>
-    <p class="lede">A picture of your ticket. Amounts stay off unless you add them.</p>
+    <p class="lede">A picture of your ticket, with its pick, price and game in words. Amounts stay off unless you add them.</p>
     <div class="share-prev"><img id="shareImg" alt="" width="${SHARE_W}" height="${SHARE_H}"></div>
     <button type="button" class="share-sw" role="switch" aria-checked="${!!s.amt}" data-share-amt><span>Include amount</span><i aria-hidden="true"></i></button>
-    <div class="row-btns share-btns">${can ? `<button class="btn" type="button" data-share-go disabled>${ICON.share}Share</button>` : ''}<a class="btn${can ? ' ghost' : ''}" id="shareSave" download="hook-and-ladder-bet.png" aria-disabled="true">Save image</a></div>
-    <p class="err" id="shareErr" role="alert"></p>`;
+    <div class="row-btns share-btns">${can ? `<button class="btn" type="button" data-share-go disabled>${ICON.share}Share</button>` : ''}${K?.canCopyImage() ? `<button class="btn${can ? ' ghost' : ''}" type="button" data-share-copy-img disabled>Copy image</button>` : ''}<a class="btn ghost" id="shareSave" download="hook-and-ladder-bet.png" aria-disabled="true">Save image</a></div>
+    <div class="row-btns share-btns share-send">${K?.canCopyText() ? '<button class="btn ghost" type="button" data-share-copy-txt>Copy text</button>' : ''}<a class="btn ghost" id="shareMail" href="#">Email</a><a class="btn ghost" id="shareSms" href="#">Message</a></div>
+    <p class="err" id="shareErr" role="status" aria-live="polite"></p>`;
+}
+function shareLinks() {
+  const b = S.bets.find((x) => x.id === S.sheet?.id), K = shareKit();
+  if (!b || !K) return;
+  const t = shareWords(b, !!S.sheet.amt);
+  const m = $('#shareMail'), x = $('#shareSms');
+  if (m) m.href = K.mailto(t, `My bet: ${shareModel(b).pick}`);
+  if (x) x.href = K.sms(t);
 }
 async function shareRender() {
   const s = S.sheet;
@@ -228,13 +245,12 @@ async function shareRender() {
   if (img) { img.src = shareUrl; img.alt = shareAlt(b, !!s.amt); }
   const save = $('#shareSave');
   if (save) { save.href = shareUrl; save.removeAttribute('aria-disabled'); }
+  // Share works either way: with the picture where the browser can take files, else with the words and a link.
   const go = $('[data-share-go]');
-  if (go) {
-    let ok = false;
-    try { ok = navigator.canShare({ files: [shareFile] }); } catch { ok = false; }
-    if (ok) go.disabled = false;
-    else { go.remove(); save?.classList.remove('ghost'); }
-  }
+  if (go) go.disabled = false;
+  const ci = $('[data-share-copy-img]');
+  if (ci) ci.disabled = false;
+  shareLinks();
 }
 function shareOpen(id) {
   if (!S.bets.some((x) => x.id === id)) return;
@@ -243,25 +259,37 @@ function shareOpen(id) {
   showSheet('share', true);
   const box = $('#dlgIn');
   if (box) box.scrollTop = 0;
+  shareLinks();
   shareRender();
 }
+const shareSay = (msg) => { const er = $('#shareErr'); if (er) er.textContent = msg; };
 
 document.addEventListener('click', async (ev) => {
-  const t = ev.target.closest('[data-share-bet], [data-share-amt], [data-share-go], #shareSave');
+  const t = ev.target.closest('[data-share-bet], [data-share-amt], [data-share-go], [data-share-copy-img], [data-share-copy-txt], #shareSave, #shareMail, #shareSms');
   if (!t) return;
   if (t.dataset.shareBet) { ev.preventDefault(); ev.stopPropagation(); shareOpen(t.dataset.shareBet); return; }
   if (S.sheet?.kind !== 'share') return;
   if (t.dataset.shareAmt !== undefined) {
     S.sheet.amt = !S.sheet.amt;
     t.setAttribute('aria-checked', String(S.sheet.amt));
+    shareLinks();
     shareRender();
     return;
   }
   if (t.id === 'shareSave') { if (!shareUrl) ev.preventDefault(); return; }
+  if (t.id === 'shareMail' || t.id === 'shareSms') { shareLinks(); return; }   // plain links: Mail / Messages open with the words
+  const K = shareKit(), b = S.bets.find((x) => x.id === S.sheet.id);
+  if (!K || !b) return;
   if (t.dataset.shareGo !== undefined) {
-    if (!shareFile) return;
-    try { await navigator.share({ files: [shareFile], title: 'My bet' }); }
-    catch (e) { if (e?.name !== 'AbortError') { const er = $('#shareErr'); if (er) er.textContent = 'Couldn’t open sharing. Save the image instead.'; } }
+    const r = await K.send({ file: shareFile, title: 'My bet', text: shareWords(b, !!S.sheet.amt), url: `${location.origin}/ncaaf/` });
+    if (r === 'failed' || r === 'unsupported') shareSay('Couldn’t open sharing here. Copy or save the image instead.');
+    return;
   }
+  if (t.dataset.shareCopyImg !== undefined) {
+    if (!shareFile) return;
+    shareSay(await K.copyImage(shareFile) ? 'Image copied. Paste it into Messages, Mail or a chat.' : 'Couldn’t copy the image here. Save it instead.');
+    return;
+  }
+  if (t.dataset.shareCopyTxt !== undefined) shareSay(await K.copyText(shareWords(b, !!S.sheet.amt)) ? 'Text copied.' : 'Couldn’t copy the text here.');
 });
 $('#dlg').addEventListener('close', () => { shareSeq++; if (shareUrl) { URL.revokeObjectURL(shareUrl); shareUrl = null; } shareFile = null; });

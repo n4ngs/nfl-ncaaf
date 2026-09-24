@@ -693,6 +693,7 @@ function renderBets() {
     sports: location.pathname.startsWith('/ncaaf/') ? undefined : ['ncaaf'],
     basePaths: location.pathname.startsWith('/ncaaf/') ? undefined : { ncaaf: '' },
     onNew: () => openSlip({}), detailHTML: (ticket) => ticket.sport === 'ncaaf' ? betCard(ticket.raw) : null,
+    shareHTML: (ticket) => (ticket.sport === 'ncaaf' && ticket.raw && ticket.raw.status !== 'void' && typeof shareBtn === 'function' ? shareBtn(ticket.raw) : ''),
     resultsHTML: () => `<h2>College football results</h2>${resultsView()}`,
     signalText: (ticket) => {
       if (ticket.sport !== 'ncaaf' || ticket.status !== 'open') return '';

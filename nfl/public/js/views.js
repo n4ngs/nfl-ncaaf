@@ -698,6 +698,7 @@ function renderBets() {
     sports: location.pathname.startsWith('/nfl/') ? undefined : ['nfl'],
     basePaths: location.pathname.startsWith('/nfl/') ? undefined : { nfl: '' },
     onNew: () => openSlip({}), detailHTML: (ticket) => ticket.sport === 'nfl' ? betCard(ticket.raw) : null,
+    shareHTML: (ticket) => (ticket.sport === 'nfl' && ticket.raw && ticket.raw.status !== 'void' && typeof shareBtn === 'function' ? shareBtn(ticket.raw) : ''),
     resultsHTML: () => `<h2>NFL results</h2>${resultsView()}`,
     signalText: (ticket) => {
       if (ticket.sport !== 'nfl' || ticket.status !== 'open') return '';

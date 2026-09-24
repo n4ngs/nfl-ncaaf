@@ -255,6 +255,7 @@
       <p class="portfolio-matchup">${esc(t.legs.length > 1 ? t.legs.map((l) => l.label).join(' · ') : t.legs[0]?.matchup || '')}</p>
       <div class="portfolio-values"><div class="portfolio-value"><small>Stake</small><strong>${money(t.stake)}</strong></div><div class="portfolio-value"><small>${open ? 'To win' : 'Net result'}</small><strong>${money(open ? toWin(t) : t.profit, !open)}</strong></div><div class="portfolio-value"><small>Placed</small><span>${esc(when(t.placedAt))}</span></div></div>
       <p class="portfolio-signal">${esc(signal)}</p>
+      ${options.shareHTML ? `<div class="portfolio-actions">${options.shareHTML(t) || ''}</div>` : ''}
       <details class="portfolio-details" data-details="${esc(t.key)}"><summary>Ticket details</summary><div class="portfolio-detail-body">${detail}${t.note ? `<p class="portfolio-meta">Note: ${esc(t.note)}</p>` : ''}${options.sport !== t.sport ? `<a class="portfolio-manage" href="${esc(t.sourceHref)}">Open ${esc(names[t.sport])} ticket log to manage</a>` : ''}</div></details>
     </article>`;
   }
@@ -384,5 +385,31 @@
     refresh(s);
     return true;
   }
-  return { mount, select, summarize, toWin, renderTicket, evidence, insightData, chooseInsightDay, renderInsights, scorecardData, renderScorecard };
+  // Sending a bet from the share sheets (nfl/ncaaf/mlb share.js). The system share sheet (iPhone, iPad, Mac Safari,
+  // Windows) with the image when it can take files, else with the words and a link; copy the image or the words for
+  // desktop browsers without a share sheet; and plain Email / Message links, which open Mail and Messages on a Mac or
+  // an iPhone. Nothing is uploaded: the image is drawn on the device.
+  const nav = () => (typeof navigator !== 'undefined' ? navigator : {});
+  const share = {
+    canShare: () => typeof nav().share === 'function',
+    canFiles(file) { try { return !!nav().canShare && !!file && nav().canShare({ files: [file] }); } catch { return false; } },
+    canCopyImage: () => typeof nav().clipboard?.write === 'function' && typeof globalThis.ClipboardItem === 'function',
+    canCopyText: () => typeof nav().clipboard?.writeText === 'function',
+    // 'shared' | 'aborted' | 'failed' | 'unsupported'
+    async send({ file = null, text = '', title = 'My bet', url = '' } = {}) {
+      if (!share.canShare()) return 'unsupported';
+      const data = share.canFiles(file) ? { files: [file], title } : { title, text, ...(url ? { url } : {}) };
+      try { await nav().share(data); return 'shared'; } catch (e) { return e && e.name === 'AbortError' ? 'aborted' : 'failed'; }
+    },
+    async copyImage(blob) { try { await nav().clipboard.write([new globalThis.ClipboardItem({ [blob.type || 'image/png']: blob })]); return true; } catch { return false; } },
+    async copyText(text) { try { await nav().clipboard.writeText(text); return true; } catch { return false; } },
+    mailto: (text, subject = 'My bet') => `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`,
+    // "sms:?&body=" is the form both iPhone Messages and Mac Messages read.
+    sms: (text) => `sms:?&body=${encodeURIComponent(text)}`,
+    // The words that go with the picture: pick and price, book, game, status, the amount only when asked, and a link.
+    text({ pick, odds, book, matchup, date, status, amount, url }) {
+      return [[pick, odds].filter(Boolean).join(' ') + (book ? ` at ${book}` : ''), [matchup, date].filter(Boolean).join(' · '), status, amount, url].filter(Boolean).join('\n').replace(/\u2212/g, '-');
+    },
+  };
+  return { mount, select, summarize, toWin, renderTicket, share, evidence, insightData, chooseInsightDay, renderInsights, scorecardData, renderScorecard };
 });

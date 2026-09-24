@@ -19,3 +19,4 @@
 @media (prefers-reduced-motion:reduce){
   .share-sw i,.share-sw i::after{transition:none}
 }
+.share-send{margin-top:8px}
