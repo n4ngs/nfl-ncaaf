@@ -204,9 +204,9 @@ function shareAlt(b, withAmount) {
 }
 const shareKit = () => (typeof BoardPortfolioView !== 'undefined' ? BoardPortfolioView.share : null);
 // The words and link that travel with the picture (Messages, Mail, the system share sheet, the clipboard).
-function shareWords(b, withAmount) {
+function shareWords(b, withAmount, withUrl = true) {
   const M = shareModel(b), K = shareKit();
-  const url = `${location.origin}/ncaaf/`;
+  const url = withUrl ? S.sheet?.link || `${location.origin}/ncaaf/` : '';
   const f = { pick: M.pick, odds: M.odds, book: M.book, matchup: M.matchup, date: M.date, status: M.st === 'open' ? '' : M.status, amount: withAmount ? M.amount : '', url };
   return K ? K.text(f) : [M.pick + ' ' + M.odds, M.matchup, url].filter(Boolean).join('\n');
 }
@@ -214,11 +214,11 @@ function shareSheetHTML() {
   const s = S.sheet, K = shareKit();
   const can = !!K?.canShare();
   return `<h2 id="dlgTitle">Share this bet</h2>
-    <p class="lede">A picture of your ticket, with its pick, price and game in words. Amounts stay off unless you add them.</p>
+    <p class="lede">A picture of your ticket and a link that shows it, like sharing a song. Amounts stay off unless you add them.</p>
     <div class="share-prev"><img id="shareImg" alt="" width="${SHARE_W}" height="${SHARE_H}"></div>
     <button type="button" class="share-sw" role="switch" aria-checked="${!!s.amt}" data-share-amt><span>Include amount</span><i aria-hidden="true"></i></button>
     <div class="row-btns share-btns">${can ? `<button class="btn" type="button" data-share-go disabled>${ICON.share}Share</button>` : ''}${K?.canCopyImage() ? `<button class="btn${can ? ' ghost' : ''}" type="button" data-share-copy-img disabled>Copy image</button>` : ''}<a class="btn ghost" id="shareSave" download="hook-and-ladder-bet.png" aria-disabled="true">Save image</a></div>
-    <div class="row-btns share-btns share-send">${K?.canCopyText() ? '<button class="btn ghost" type="button" data-share-copy-txt>Copy text</button>' : ''}<a class="btn ghost" id="shareMail" href="#">Email</a><a class="btn ghost" id="shareSms" href="#">Message</a></div>
+    <div class="row-btns share-btns share-send">${K?.canCopyText() ? '<button class="btn ghost" type="button" data-share-copy-link disabled>Copy link</button><button class="btn ghost" type="button" data-share-copy-txt>Copy text</button>' : ''}<a class="btn ghost" id="shareMail" href="#">Email</a><a class="btn ghost" id="shareSms" href="#">Message</a></div>
     <p class="err" id="shareErr" role="status" aria-live="polite"></p>`;
 }
 function shareLinks() {
@@ -251,6 +251,20 @@ async function shareRender() {
   const ci = $('[data-share-copy-img]');
   if (ci) ci.disabled = false;
   shareLinks();
+  shareMakeLink(b, blob);
+}
+// One share link per picture (the amount switch makes a new picture). Made as soon as the picture is ready, so a tap on
+// Share, Message or Email already has it (Safari only opens the share sheet straight from the tap).
+async function shareMakeLink(b, blob) {
+  const K = shareKit(), s = S.sheet, key = `${b.id}|${!!s.amt}`;
+  if (!K?.link || s.linkKey === key) return;
+  s.linkKey = key; s.link = null;
+  const url = await K.link({ blob, sport: 'ncaaf', title: `${shareModel(b).pick} ${shareModel(b).odds}`.trim(), text: shareWords(b, !!s.amt, false) });
+  if (S.sheet !== s || s.linkKey !== key) return;
+  s.link = url;
+  const cl = $('[data-share-copy-link]');
+  if (cl) cl.disabled = !url;
+  shareLinks();
 }
 function shareOpen(id) {
   if (!S.bets.some((x) => x.id === id)) return;
@@ -265,7 +279,7 @@ function shareOpen(id) {
 const shareSay = (msg) => { const er = $('#shareErr'); if (er) er.textContent = msg; };
 
 document.addEventListener('click', async (ev) => {
-  const t = ev.target.closest('[data-share-bet], [data-share-amt], [data-share-go], [data-share-copy-img], [data-share-copy-txt], #shareSave, #shareMail, #shareSms');
+  const t = ev.target.closest('[data-share-bet], [data-share-amt], [data-share-go], [data-share-copy-img], [data-share-copy-txt], [data-share-copy-link], #shareSave, #shareMail, #shareSms');
   if (!t) return;
   if (t.dataset.shareBet) { ev.preventDefault(); ev.stopPropagation(); shareOpen(t.dataset.shareBet); return; }
   if (S.sheet?.kind !== 'share') return;
@@ -281,7 +295,8 @@ document.addEventListener('click', async (ev) => {
   const K = shareKit(), b = S.bets.find((x) => x.id === S.sheet.id);
   if (!K || !b) return;
   if (t.dataset.shareGo !== undefined) {
-    const r = await K.send({ file: shareFile, title: 'My bet', text: shareWords(b, !!S.sheet.amt), url: `${location.origin}/ncaaf/` });
+    const link = S.sheet.link;
+    const r = await K.send({ file: shareFile, title: 'My bet', text: shareWords(b, !!S.sheet.amt, !link), url: link || `${location.origin}/ncaaf/`, preferLink: !!link });
     if (r === 'failed' || r === 'unsupported') shareSay('Couldn’t open sharing here. Copy or save the image instead.');
     return;
   }
@@ -290,6 +305,7 @@ document.addEventListener('click', async (ev) => {
     shareSay(await K.copyImage(shareFile) ? 'Image copied. Paste it into Messages, Mail or a chat.' : 'Couldn’t copy the image here. Save it instead.');
     return;
   }
+  if (t.dataset.shareCopyLink !== undefined) { if (S.sheet.link) shareSay(await K.copyText(S.sheet.link) ? 'Link copied. It shows this card when you paste it into Messages or a chat.' : 'Couldn’t copy the link here.'); return; }
   if (t.dataset.shareCopyTxt !== undefined) shareSay(await K.copyText(shareWords(b, !!S.sheet.amt)) ? 'Text copied.' : 'Couldn’t copy the text here.');
 });
 $('#dlg').addEventListener('close', () => { shareSeq++; if (shareUrl) { URL.revokeObjectURL(shareUrl); shareUrl = null; } shareFile = null; });

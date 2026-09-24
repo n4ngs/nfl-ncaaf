@@ -395,14 +395,27 @@
     canFiles(file) { try { return !!nav().canShare && !!file && nav().canShare({ files: [file] }); } catch { return false; } },
     canCopyImage: () => typeof nav().clipboard?.write === 'function' && typeof globalThis.ClipboardItem === 'function',
     canCopyText: () => typeof nav().clipboard?.writeText === 'function',
-    // 'shared' | 'aborted' | 'failed' | 'unsupported'
-    async send({ file = null, text = '', title = 'My bet', url = '' } = {}) {
+    // 'shared' | 'aborted' | 'failed' | 'unsupported'. With a share link (preferLink) the words and the link go, and the
+    // app on the other end shows the card as the link preview; without one, the picture itself where it can.
+    async send({ file = null, text = '', title = 'My bet', url = '', preferLink = false } = {}) {
       if (!share.canShare()) return 'unsupported';
-      const data = share.canFiles(file) ? { files: [file], title } : { title, text, ...(url ? { url } : {}) };
+      const data = !(preferLink && url) && share.canFiles(file) ? { files: [file], title } : { title, text, ...(url ? { url } : {}) };
       try { await nav().share(data); return 'shared'; } catch (e) { return e && e.name === 'AbortError' ? 'aborted' : 'failed'; }
     },
     async copyImage(blob) { try { await nav().clipboard.write([new globalThis.ClipboardItem({ [blob.type || 'image/png']: blob })]); return true; } catch { return false; } },
     async copyText(text) { try { await nav().clipboard.writeText(text); return true; } catch { return false; } },
+    // A share link like a song link: the picture is posted once to /api/share (shared/share-links.js) and comes back as
+    // https://<host>/s/<id>, a public page whose preview is the card. Null when the server has no share links.
+    async link({ blob, sport, title, text }) {
+      try {
+        const bytes = new Uint8Array(await blob.arrayBuffer()); let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        const r = await fetch('/api/share', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image: btoa(bin), sport, title, text }) });
+        if (!r.ok) return null;
+        const j = await r.json();
+        return typeof j.url === 'string' && /^https?:\/\/[^\s]+\/s\/[A-Za-z0-9_-]{22}$/.test(j.url) ? j.url : null;
+      } catch { return null; }
+    },
     mailto: (text, subject = 'My bet') => `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`,
     // "sms:?&body=" is the form both iPhone Messages and Mac Messages read.
     sms: (text) => `sms:?&body=${encodeURIComponent(text)}`,

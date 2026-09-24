@@ -84,6 +84,8 @@ const LOGO = // a terminal caret — the wordmark's icon, favicon and PWA icon
   + '<rect x="34" y="38.5" width="15" height="5" rx="2.5" fill="#F5F5F7"/></svg>';
 // The owner's Admin Center: captures every request at the door, owner and guests kept apart (see board.js).
 const ACCOUNT_ORIGIN = process.env.ACCOUNT_ORIGIN || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${PORT}`);
+// Share links (shared/share-links.js): a bet card sent like a song. /s/<id> is public so link previews work.
+const ShareLinks = require('./shared/share-links').create({ dataDir: DATA_DIR, origin: ACCOUNT_ORIGIN, brand: BRAND });
 const Accounts = require('./shared/accounts')({ dataDir: DATA_DIR, origin: ACCOUNT_ORIGIN, isSameOrigin, clientIp, onSessionCreated: (req, res, context) => clearAuth(res, context.secure) });
 const { OpportunityService } = require('./shared/opportunities');
 const { BOOK_NAMES } = require('./shared/sharp-books');
@@ -403,6 +405,10 @@ const server = http.createServer(async (req, res) => {
     if (GUEST_LINK && safeEq(gm[1], GUEST_LINK)) { Board.entrance(who, 'guest', 'guest-link'); setAuth(res, 'guest', isHttps(req)); res.writeHead(303, { location: '/nfl/', 'cache-control': 'no-store' }); return res.end(); }
     Board.entrance(who, null, 'bad-link');
     return page(res, 401, { wrong: true });
+  }
+  // A shared bet card: viewing needs nothing (Messages and Slack fetch the preview); creating needs a board sign-in.
+  if (pathname.startsWith('/s/') || pathname === '/api/share') {
+    if (await ShareLinks.handle(req, res, pathname, { role: GATED ? role(req) : 'owner', ip: clientIp(req), sameOrigin: isSameOrigin(req) })) return;
   }
 
   let r = role(req);

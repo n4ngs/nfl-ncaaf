@@ -245,8 +245,8 @@ async function shareDraw(b, { amount = false } = {}) {
 // ------------------------------------------------------------ the preview sheet
 const shareKit = () => (typeof BoardPortfolioView !== 'undefined' ? BoardPortfolioView.share : null);
 // The words and link that travel with the picture (Messages, Mail, the system share sheet, the clipboard).
-function shareWords(b) {
-  const K = shareKit(), l0 = b.legs[0] || {}, single = b.legs.length === 1, url = `${location.origin}/mlb/`;
+function shareWords(b, withUrl = true) {
+  const K = shareKit(), l0 = b.legs[0] || {}, single = b.legs.length === 1, url = withUrl ? SHARE.link || `${location.origin}/mlb/` : '';
   const win = typeof betsToWin === 'function' ? betsToWin(b.stake, b.odds) : null;
   const amount = SHARE.amount && b.stake > 0 ? (b.status === 'open' || b.net == null ? `${shareMoney(b.stake)} to win ${win == null ? '' : shareMoney(win)}` : b.status === 'won' ? `Won ${shareMoney(b.net, true)} on ${shareMoney(b.stake)}` : `${shareMoney(b.stake)} staked`) : '';
   const f = { pick: shareLabel(b), odds: shareOdds(b.odds), book: b.book || '', matchup: single ? l0.matchup || '' : b.legs.map((l) => l.label).join(' · '),
@@ -270,7 +270,7 @@ function shareSheetHTML(b) {
     </div>` : '';
   return `<div class="share-sheet">
     <h2 id="dlgTitle">Share this bet</h2>
-    <p class="share-lede">${esc(label)} ${esc(shareOdds(b.odds))}. The amount stays off the image unless you add it.</p>
+    <p class="share-lede">${esc(label)} ${esc(shareOdds(b.odds))}. A picture and a link that shows it, like sharing a song. The amount stays off unless you add it.</p>
     <div class="share-prev" id="sharePrev"><span class="share-wait">Drawing…</span></div>
     ${amt}
     <div class="bets-btns share-btns" id="shareBtns">
@@ -279,7 +279,7 @@ function shareSheetHTML(b) {
       <a class="bets-btn ghost" id="shareSave" download="bing-bong-bet.png" aria-disabled="true">Save image</a>
     </div>
     <div class="bets-btns share-btns share-send">
-      ${K?.canCopyText() ? '<button type="button" class="bets-btn ghost" data-share-copy-txt>Copy text</button>' : ''}
+      ${K?.canCopyText() ? '<button type="button" class="bets-btn ghost" data-share-copy-link disabled>Copy link</button><button type="button" class="bets-btn ghost" data-share-copy-txt>Copy text</button>' : ''}
       <a class="bets-btn ghost" id="shareMail" href="#">Email</a>
       <a class="bets-btn ghost" id="shareSms" href="#">Message</a>
     </div>
@@ -307,11 +307,26 @@ async function sharePaint() {
   const ci = $('[data-share-copy-img]');
   if (ci) ci.disabled = false;
   shareLinks();
+  shareMakeLink(b, blob);
+}
+// One share link per picture (the amount switch makes a new picture), made as soon as the picture is ready so a tap on
+// Share, Message or Email already has it (Safari only opens the share sheet straight from the tap).
+async function shareMakeLink(b, blob) {
+  const K = shareKit(), key = `${b.id}|${SHARE.amount}`;
+  if (!K?.link || SHARE.linkKey === key) return;
+  SHARE.linkKey = key; SHARE.link = null;
+  const url = await K.link({ blob, sport: 'mlb', title: `${shareLabel(b)} ${shareOdds(b.odds)}`.trim(), text: shareWords(b, false) });
+  if (SHARE.bet !== b || SHARE.linkKey !== key) return;
+  SHARE.link = url;
+  const cl = $('[data-share-copy-link]');
+  if (cl) cl.disabled = !url;
+  shareLinks();
 }
 function shareOpen(id) {
   const b = typeof id === 'object' ? id : (typeof BETS !== 'undefined' ? BETS.list.find((x) => x.id === id) : null);
   if (!b) return;
   SHARE.bet = b;
+  SHARE.link = null; SHARE.linkKey = null;
   SHARE.amount = false; // hidden by default, every time
   openSheet(shareSheetHTML(b), 'share');
   shareLinks();
@@ -322,19 +337,21 @@ async function shareGo() {
   const K = shareKit();
   if (!K || !SHARE.bet) return;
   const file = SHARE.blob ? new File([SHARE.blob], 'bing-bong-bet.png', { type: 'image/png' }) : null;
-  const r = await K.send({ file, title: 'My bet · Bing Bong Live', text: shareWords(SHARE.bet), url: `${location.origin}/mlb/` });
+  const link = SHARE.link;
+  const r = await K.send({ file, title: 'My bet · Bing Bong Live', text: shareWords(SHARE.bet, !link), url: link || `${location.origin}/mlb/`, preferLink: !!link });
   if (r === 'failed' || r === 'unsupported') shareSay('Sharing didn’t work here. Copy or save the image instead.');
 }
 
 // ------------------------------------------------------------ interactions (data-share-*)
 document.addEventListener('click', (ev) => {
-  const t = ev.target.closest('[data-share-bet],[data-share-amount],[data-share-go],[data-share-copy-img],[data-share-copy-txt],#shareSave,#shareMail,#shareSms');
+  const t = ev.target.closest('[data-share-bet],[data-share-amount],[data-share-go],[data-share-copy-img],[data-share-copy-txt],[data-share-copy-link],#shareSave,#shareMail,#shareSms');
   if (!t) return;
   if (t.id === 'shareSave') { if (!SHARE.url) ev.preventDefault(); return; }
   if (t.id === 'shareMail' || t.id === 'shareSms') { shareLinks(); return; }   // plain links: Mail / Messages open with the words
   const d = t.dataset;
   const K = shareKit();
   if (d.shareCopyImg !== undefined) { if (K && SHARE.blob) K.copyImage(SHARE.blob).then((ok) => shareSay(ok ? 'Image copied. Paste it into Messages, Mail or a chat.' : 'Couldn’t copy the image here. Save it instead.')); return; }
+  if (d.shareCopyLink !== undefined) { if (K && SHARE.link) K.copyText(SHARE.link).then((ok) => shareSay(ok ? 'Link copied. It shows this card when you paste it into Messages or a chat.' : 'Couldn’t copy the link here.')); return; }
   if (d.shareCopyTxt !== undefined) { if (K && SHARE.bet) K.copyText(shareWords(SHARE.bet)).then((ok) => shareSay(ok ? 'Text copied.' : 'Couldn’t copy the text here.')); return; }
   if (d.shareBet) { ev.preventDefault(); shareOpen(d.shareBet); return; }
   if (d.shareAmount !== undefined) {
@@ -352,5 +369,6 @@ $('#dlg')?.addEventListener('close', () => {
   SHARE.seq++;
   SHARE.bet = null;
   SHARE.blob = null;
+  SHARE.link = null; SHARE.linkKey = null;
   if (SHARE.url) { URL.revokeObjectURL(SHARE.url); SHARE.url = ''; }
 });
