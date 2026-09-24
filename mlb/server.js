@@ -23,6 +23,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { clientIp: resolvedClientIp } = require('../shared/client-ip');
+// Per-book openers (Owls history) and closes (Sharp closing) relayed by the terminal; additive on /api/odds/:pk.
+const Reference = require('../shared/reference-lines').subscribe('mlb', null);
 // Merged engines accept the terminal's signed address only over loopback. Standalone engines resolve
 // their own direct/Railway ingress. These are existing process settings, never request headers.
 const CLIENT_IP_OPTIONS = process.env.BASE_PATH && process.env.TELEMETRY_PEER_SECRET
@@ -1354,7 +1356,9 @@ async function oddsRoutes(req, res, url, uid) {
   const om = /^\/api\/odds\/(\d+)$/.exec(p);
   if (om && M === 'GET') {
     const o = Odds.game(Number(om[1]));
-    if (!o) sendJSON(res, 404, { error: 'No odds for that game.' }); else sendJSON(res, 200, o);
+    let reference = null;
+    try { const G = gameOf(Number(om[1])); const nm = t => String(t?.full || t?.name || t?.short || '').trim(); if (G) reference = Reference.lookup(nm(G.away), nm(G.home), G.start); } catch {}
+    if (!o) sendJSON(res, 404, { error: 'No odds for that game.' }); else sendJSON(res, 200, { ...o, reference });
     return true;
   }
   if (p === '/api/keys' && M === 'GET') {

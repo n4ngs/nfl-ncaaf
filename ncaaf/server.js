@@ -42,6 +42,9 @@ const OWLS = require('./lib/owls');
 const { subscribe: subscribeOwls } = require('../shared/owls-consumer');
 const SHARP = require('./lib/sharp');
 const { subscribe: subscribeSharp } = require('../shared/sharp-consumer');
+// Per-book openers (Owls history) and closes (Sharp closing), relayed by the terminal. Additive: shown on
+// the game detail as `reference`; the board's own open/close selection is unchanged.
+const Reference = require('../shared/reference-lines').subscribe('ncaaf', null);
 const Bets = require('./lib/bets');
 const Manual = require('./lib/manual');
 const Group = require('./lib/group');
@@ -1473,7 +1476,8 @@ const server = http.createServer(async (req, res) => {
         if (!G) continue;
         const s = await summary(G);
         if (s?.fpi && G.state === 'pre') W.fpi.set(G.id, { home: s.fpi.home, at: Date.now() });
-        return sendJSON(res, 200, { now: Date.now(), game: pub(G, W), hist: integrityHistory(G, W), summary: s });
+        let reference = null; try { reference = Reference.lookup(G.away?.name, G.home?.name, G.start); } catch {}
+        return sendJSON(res, 200, { now: Date.now(), game: pub(G, W), hist: integrityHistory(G, W), summary: s, reference });
       }
       return sendJSON(res, 404, { error: 'That game is not loaded. Open its week first.' });
     }
