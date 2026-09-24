@@ -7,14 +7,15 @@
 const MLBVAS = { reads: [], ready: false, at: 0 };
 async function mlbVasLoad() {
   try {
-    const r = await fetch(`api/vas?date=${encodeURIComponent(S.date || '')}`, { headers: { accept: 'application/json' } });
+    // Every cached read (today and tomorrow): the board's Model column needs whichever day is on screen.
+    const r = await fetch('api/vas', { headers: { accept: 'application/json' } });
     if (r.ok) { const d = await r.json(); MLBVAS.reads = d.reads || []; MLBVAS.ready = !!d.ready; MLBVAS.at = Date.now(); if (typeof oddsRepaint === 'function') oddsRepaint(); }
   } catch { /* the board works without it */ }
 }
 function mlbVasBlock(games) {
   if (!MLBVAS.at) return '';
   const odds = (o) => (o > 0 ? '+' + o : String(o));
-  const hits = MLBVAS.reads.filter((r) => r.tier === 'DIAMOND' && r.price != null && Date.parse(r.start) > Date.now());
+  const hits = MLBVAS.reads.filter((r) => r.tier === 'DIAMOND' && r.price != null && Date.parse(r.start) > Date.now() && (!S.date || r.day === S.date));
   const team = (r) => (r.names ? (r.side === 'home' ? r.names.home : r.names.away) : r.side);
   const ago = (t) => { const m = Math.round((Date.now() - Date.parse(t)) / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
   const body = !MLBVAS.ready ? '<p class="vas-quiet">The model is loading its game history. Reads start once it is complete.</p>'
