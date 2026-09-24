@@ -58,3 +58,23 @@ test('too few books to form a consensus leaves every number alone', () => {
   assert.equal(books.mgm.t, 45.5);
   assert.equal(books.mgm.outliers, undefined);
 });
+
+test('a near-market alt rung is dropped by its price shape; a stale line priced at its own number is kept', () => {
+  const peers = () => ({ circa: line(6, 44.5), dk: line(6, 44.5), fd: line(6, 44.5), pin: line(6, 45) });
+  // JMU @ ODU: MGM 48.5 with the easy under at -175 is the market's 44.5 re-priced, not a line.
+  const alt = { ...peers(), mgm: line(6, 48.5, { to: [135, -175] }) };
+  dropOutliers(alt);
+  assert.equal(alt.mgm.t, null);
+  // Oregon @ USC: home 0 at +140/-190 against a +3 market, the easy away side juiced.
+  const spread = { circa: line(3, 62.5), dk: line(3, 62.5), fd: line(3, 62.5), pin: line(3, 62), mgm: line(0, 61.5, { so: [140, -190] }) };
+  dropOutliers(spread);
+  assert.equal(spread.mgm.s, null);
+  // The same 48.5 at -110/-110 is a real off-market number, the edge the board exists to show.
+  const stale = { ...peers(), mgm: line(6, 48.5) };
+  dropOutliers(stale);
+  assert.equal(stale.mgm.t, 48.5);
+  // A 2-point gap is never judged on price alone.
+  const near = { ...peers(), mgm: line(6, 46.5, { to: [135, -175] }) };
+  dropOutliers(near);
+  assert.equal(near.mgm.t, 46.5);
+});

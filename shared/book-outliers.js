@@ -16,6 +16,21 @@ function median(values) {
   return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
 }
 
+/* A genuine off-market number is priced near even at its own line (that is the edge worth showing). An
+   alternate rung is priced at the real market's value, so the side the off number makes easy carries the
+   heavy juice: 48.5 at +135/-175 when the market is 44.5. That shape, 3+ points off, is dropped too. */
+const ALT_GAP = 3, ALT_PROB = 0.56;
+const implied = (o) => (o < 0 ? -o / (100 - o) : 100 / (100 + o));
+function altPriced(market, value, ref, prices) {
+  const [a, b] = prices || [];
+  if (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a) < 100 || Math.abs(b) < 100) return false;
+  const pa = implied(a) / (implied(a) + implied(b));
+  // Totals [over, under]: a low total makes the over easy. Spreads [home, away] on the home line: more points
+  // for home makes home easy.
+  const firstEasy = market === 't' ? value < ref : value > ref;
+  return (firstEasy ? pa : 1 - pa) >= ALT_PROB;
+}
+
 function dropOutliers(books, limits = LIMITS) {
   if (!books) return books;
   for (const market of Object.keys(limits)) {
@@ -27,8 +42,8 @@ function dropOutliers(books, limits = LIMITS) {
     for (const [book, value] of rows) {
       // Judge each book against the others, so the outlier cannot pull its own reference.
       const ref = median(rows.filter(([b]) => b !== book).map(([, v]) => v));
-      if (Math.abs(value - ref) <= limits[market]) continue;
-      const line = books[book];
+      const line = books[book], gap = Math.abs(value - ref);
+      if (gap <= limits[market] && !(gap >= ALT_GAP && altPriced(market, value, ref, line[`${market}o`]))) continue;
       (line.outliers ||= {})[market] = { line: value, prices: line[`${market}o`] || null, consensus: ref, src: line.market_sources?.[market] || line.src || null };
       line[market] = null;
       line[`${market}o`] = [null, null];
