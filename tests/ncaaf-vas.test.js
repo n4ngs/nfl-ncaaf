@@ -318,14 +318,14 @@ test('service: model win %, market no-vig, lean (Weak, own LEAN record), availab
   await svc.refresh(); await svc.refresh();
   assert.equal(svc.status().lastError, null);
   const G = { id: '99', state: 'pre', start: '2026-09-27T19:30:00Z', home: { abbr: 'ONE', rank: 21 }, away: { abbr: 'TWO', rank: 4 } };
-  const books = { cons: { s: -3.5, ml: [-2000, 1200] } };
+  const books = { cons: { s: -20, ml: [-2000, 1200] } };
   const out = svc.forGame(G, null, books, { open: { s: -3 }, splits: { s: { tix: 18, money: 19 }, ml: { tix: 49, money: 3 } } });
   const f = out.fair;
   assert.ok(Math.abs(f.win.home + f.win.away - 1) < 1e-12); assert.equal(f.sigma, 16);
   const nv = (1 / 1.05) / (1 / 1.05 + 1 / 13); assert.ok(Math.abs(f.market.home - nv) < 1e-12, 'proportional no-vig of the consensus moneyline');
   assert.ok(f.win.home < f.market.home - 0.06, 'toy model is far below a -2000 favourite');
   assert.equal(f.lean.side, 'away'); assert.equal(f.lean.label, 'WEAK'); assert.doesNotMatch(f.lean.caveat, /\bbet\b|will win/i);
-  assert.equal(f.side.side, f.margin + -3.5 > 0 ? 'home' : 'away');
+  assert.equal(f.side.side, f.margin + -20 > 0 ? 'home' : 'away');
   assert.equal(out.move.flow.rlm, true, '18% of tickets on home, line moved toward home'); assert.match(out.move.flow.note, /forward-only/);
   const inj = out.move.injuries; assert.equal(inj.length, 2); assert.equal(inj[0].valued, false); assert.equal(inj[0].pOut, 0.5); assert.equal(inj[1].pOut, 0);
   // kickoff closes the lean; the final settles it; it shows as its own LEAN row and never inside ALL
@@ -336,7 +336,7 @@ test('service: model win %, market no-vig, lean (Weak, own LEAN record), availab
   // public lean ledger: written when the lean first showed, closed at kickoff, settled at the final
   const book = svc.leanBook();
   assert.equal(book.rows.length, 1); const r = book.rows[0];
-  assert.equal(r.side, 'away'); assert.equal(r.result, 'won'); assert.equal(r.mlPrice, 1200); assert.equal(r.spreadLine, 3.5); assert.equal(r.cover, 'covered');
+  assert.equal(r.side, 'away'); assert.equal(r.result, 'won'); assert.equal(r.mlPrice, 1200); assert.equal(r.spreadLine, 20); assert.equal(r.cover, 'covered');
   assert.ok(Number.isFinite(r.clvEv)); assert.equal(book.totals.won, 1); assert.match(book.caveat, /did not beat the closing line/);
   // the seeded owner pin (another game) is its own section, never a model lean
   assert.ok(book.pinned.some((x) => x.gid === '401856699' && x.team === 'Ole Miss')); assert.ok(!book.rows.some((x) => x.gid === '401856699'));
@@ -353,9 +353,24 @@ test('service: owner pin shows the pinned team, but its model line is whatever t
   await svc.refresh();
   const G = { id: '99', state: 'pre', start: '2026-09-27T19:30:00Z', home: { id: '1', abbr: 'ONE', short: 'One' }, away: { id: '2', abbr: 'TWO', short: 'Two' } };
   svc.setPin(G, 'home');                                         // the owner pins the home side
-  const lopsided = svc.forGame(G, null, { cons: { s: -3.5, ml: [-2000, 1200] } }, {});   // market: home a huge favourite
+  const lopsided = svc.forGame(G, null, { cons: { s: -20, ml: [-2000, 1200] } }, {});   // market: home a huge favourite
   assert.equal(lopsided.pin.side, 'home'); assert.equal(lopsided.pin.team, 'One');
   assert.equal(lopsided.pin.model.kind, 'lean'); assert.equal(lopsided.pin.model.side, 'away', 'the model line leans the other way, and says so');
   assert.equal(lopsided.fair.lean.side, 'away', 'the pin never changes the model');
-  svc.setPin(G, null); assert.equal(svc.forGame(G, null, { cons: { s: -3.5, ml: [-2000, 1200] } }, {}).pin, null);
+  svc.setPin(G, null); assert.equal(svc.forGame(G, null, { cons: { s: -20, ml: [-2000, 1200] } }, {}).pin, null);
+});
+
+test('service: a moneyline that contradicts the spread is a feed error; the market win % then comes from the spread', async () => {
+  const Svc = require('../ncaaf/lib/vas-service');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ncaaf-ml-'));
+  const svc = Svc.create({ dir, now: () => Date.parse('2026-09-20T12:00:00Z'), nevada: [],
+    fetchBuffer: async (u) => { const s = Number(u.match(/_(\d{4})\.csv$/)[1]); const r = rawSeason(s, (s - 2000) * 100);
+      return u.includes('schedules') ? r.schedule : u.includes('gamelog') ? r.gamelog : u.includes('summaries') ? r.teams : r.playerBox; },
+    fetchJSON: async (u) => (u.includes('scoreboard') ? { events: [{ id: '77', date: '2026-09-27T19:30Z', week: { number: 5 }, season: { type: 2 }, competitions: [{ neutralSite: false, conferenceCompetition: false,
+      status: { type: { state: 'pre' } }, competitors: [{ homeAway: 'home', team: { id: '1' } }, { homeAway: 'away', team: { id: '2' } }] }] }] } : { items: [] }) });
+  await svc.refresh();
+  const G = { id: '77', state: 'pre', start: '2026-09-27T19:30:00Z', home: { id: '1', abbr: 'ONE' }, away: { id: '2', abbr: 'TWO' } };
+  const f = svc.forGame(G, null, { cons: { s: -40, ml: [50000, -100000] } }, {}).fair;   // home -40 but the moneyline says the away side
+  assert.match(f.market.source, /spread/); assert.ok(f.market.home > 0.99, 'a 40-point favourite, not 0 %');
+  assert.equal(svc.leanBook().rows.length, 0, 'nothing recorded off a broken moneyline');
 });

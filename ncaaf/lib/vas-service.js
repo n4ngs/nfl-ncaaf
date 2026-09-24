@@ -167,11 +167,20 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
   const LEAN_GAP = 0.06;   // 6 win-% points: about 30 % of a typical week's games (4 flagged ~45 %, too many to mean much)
   const SIGMA = (MODEL && MODEL.win_prob && MODEL.win_prob.sigma) || 16;
   const noVig = (ml) => { if (!ml || !Number.isFinite(ml[0]) || !Number.isFinite(ml[1])) return null; const a = 1 / american(ml[0]), b = 1 / american(ml[1]); return a / (a + b); };
-  function marketWin(books) {
-    for (const [k, label] of [['cons', 'consensus'], ['pin', 'Pinnacle']]) { const p = noVig(books && books[k] && books[k].ml); if (p != null) return { home: p, source: label, ml: books[k].ml }; }
-    const ps = Object.values(books || {}).map((L) => noVig(L && L.ml)).filter((v) => v != null);
-    return ps.length ? { home: median(ps), source: `median of ${ps.length} books`, ml: null } : null;
+  // A moneyline that contradicts the consensus spread by more than 20 win-% points is a feed error (seen live: an FCS
+  // game whose consensus moneyline had the 40-point underdog at 100 %). Then the market's win % comes from the spread.
+  const ML_SPREAD_TOL = 0.2;
+  const fromSpread = (cs) => (Number.isFinite(cs) ? phi(-cs / SIGMA) : null);
+  function marketWin(books, cs = books && books.cons && Number.isFinite(books.cons.s) ? books.cons.s : consensusNow(books)) {
+    const ps = fromSpread(cs);
+    const ok = (p) => p != null && (ps == null || Math.abs(p - ps) <= ML_SPREAD_TOL);
+    for (const [k, label] of [['cons', 'consensus'], ['pin', 'Pinnacle']]) { const p = noVig(books && books[k] && books[k].ml); if (ok(p)) return { home: p, source: label, ml: books[k].ml }; }
+    const all = Object.values(books || {}).map((L) => noVig(L && L.ml)).filter(ok);
+    if (all.length) return { home: median(all), source: `median of ${all.length} books`, ml: null };
+    return ps != null ? { home: ps, source: 'consensus spread (moneyline unavailable or off)', ml: null } : null;
   }
+  // a ledger row whose moneyline contradicted its own spread when it was recorded (written before this check existed)
+  const badRow = (L) => Number.isFinite(L.spreadLine) && Number.isFinite(L.marketWin) && Math.abs(L.marketWin - phi(-L.spreadLine / SIGMA)) > ML_SPREAD_TOL;
   function fairRead(G, row, fc, books) {
     const mw = marketWin(books), cs = books && books.cons && Number.isFinite(books.cons.s) ? books.cons.s : consensusNow(books);
     const key = `${row.gid}|${mw && mw.home}|${cs}`, hit = fairCache.get(row.gid);
@@ -215,7 +224,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
     if (!mw) return;
     const r = leanRec.get(k);
     if (r) { leanRec.mark(k, r.side === 'home' ? mw.home : 1 - mw.home); return; }
-    if (!v.lean || !cons || !Array.isArray(cons.ml)) return;
+    if (!v.lean || !cons || !Array.isArray(cons.ml) || !mw.ml) return;   // only leans priced off a sane moneyline are recorded
     const price = v.lean.side === 'home' ? cons.ml[0] : cons.ml[1];
     if (!Number.isFinite(price)) return;
     leanRec.observe(k, { tier: 'LEAN', side: v.lean.side, market: 'ml', line: null, entryOdds: price, entryBook: 'cons',
@@ -254,12 +263,13 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
       const clvWin = Number.isFinite(L.closeWin) ? L.closeWin - L.marketWin : null;           // market moved toward the lean (+)
       const clvPts = Number.isFinite(L.closeSpread) && Number.isFinite(L.spreadLine) ? L.spreadLine - L.closeSpread : null; // + = got a better number than the close
       const clvEv = Number.isFinite(L.closeWin) ? (L.closeWin * american(L.mlPrice) - 1) : null;
-      return { ...L, clvWin, clvPts, clvEv };
+      return { ...L, clvWin, clvPts, clvEv, void: badRow(L) ? 'Void: the feed\'s moneyline contradicted the spread when this was recorded (a data error, not a model read). Kept for the record, not counted.' : null };
     });
-    const done = rows.filter((r) => r.result), closed = rows.filter((r) => r.clvEv != null);
+    const counted = rows.filter((r) => !r.void);
+    const done = counted.filter((r) => r.result), closed = counted.filter((r) => r.clvEv != null);
     const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
     const covers = done.filter((r) => r.cover && r.cover !== 'push');
-    ledgerView = { rows, totals: { leans: rows.length, settled: done.length, won: done.filter((r) => r.result === 'won').length, lost: done.filter((r) => r.result === 'lost').length,
+    ledgerView = { rows, totals: { leans: counted.length, void: rows.length - counted.length, settled: done.length, won: done.filter((r) => r.result === 'won').length, lost: done.filter((r) => r.result === 'lost').length,
       covered: covers.filter((r) => r.cover === 'covered').length, coverN: covers.length, avgClvEvPct: closed.length ? avg(closed.map((r) => r.clvEv)) * 100 : null,
       avgClvPts: avg(closed.filter((r) => r.clvPts != null).map((r) => r.clvPts)), closed: closed.length },
       threshold: LEAN_GAP, sigma: SIGMA, model: MODEL.version,
