@@ -36,7 +36,39 @@
   const BoardFair = { ncdf, winFromMargin, american, fmtAmerican };
 
   // ------------------------------------------------------------------ my books
+  const VIEW_KEY = 'tb_bookView';
+  // The board's book columns: an optional "My books only" filter and the column order. With no order of your own,
+  // the order is smart: your starred books first (in the order you starred them), then the rest as the board lists
+  // them. Dragging a column (or Alt+Arrow on its header) saves your own order; "Reset order" goes back to smart.
+  function arrange(books, { mine = [], mineOnly = false, order = [] } = {}) {
+    const list = Array.isArray(books) ? books.filter((b) => b && valid(b.key)) : [];
+    const starred = new Set(mine);
+    let out = mineOnly && list.some((b) => starred.has(b.key)) ? list.filter((b) => starred.has(b.key)) : list.slice();
+    const pos = new Map(list.map((b, i) => [b.key, i]));
+    if (order.length) {
+      const at = new Map(order.map((k, i) => [k, i]));
+      out.sort((a, b) => (at.has(a.key) ? at.get(a.key) : 1e6 + pos.get(a.key)) - (at.has(b.key) ? at.get(b.key) : 1e6 + pos.get(b.key)));
+    } else {
+      const rank = new Map(mine.map((k, i) => [k, i]));
+      out.sort((a, b) => (rank.has(a.key) ? rank.get(a.key) : 1e6 + pos.get(a.key)) - (rank.has(b.key) ? rank.get(b.key) : 1e6 + pos.get(b.key)));
+    }
+    return out;
+  }
+  // Move `key` next to `target` (before it, or after it when `after`) in the shown order; books not shown keep their
+  // place in the saved order after the shown ones.
+  function moveKey(shown, key, target, after = false, saved = []) {
+    const s = shown.filter((k) => k !== key);
+    let i = s.indexOf(target);
+    if (i < 0 || key === target) return shown.slice();
+    if (after) i++;
+    s.splice(i, 0, key);
+    return [...s, ...saved.filter((k) => !s.includes(k))];
+  }
+
   function create({ storage = null, emit = null } = {}) {
+    const readView = () => { try { const v = storage && JSON.parse(storage.getItem(VIEW_KEY) || '{}'); return { mineOnly: !!(v && v.mineOnly), order: clean(v && v.order) }; } catch { return { mineOnly: false, order: [] }; } };
+    const writeView = () => { try { if (storage) storage.setItem(VIEW_KEY, JSON.stringify(view)); } catch { /* private mode */ } };
+    let view = readView();
     const read = () => { try { const v = storage && storage.getItem(KEY); return v == null ? [] : clean(JSON.parse(v)); } catch { return []; } };
     const write = (list) => { try { if (storage) storage.setItem(KEY, JSON.stringify(list)); } catch { /* private mode */ } };
     let set = new Set(read()), touched = false;
@@ -53,6 +85,25 @@
         if (set.has(k)) set.delete(k); else set.add(k);
         touched = true; write(api.list()); notify(); push();
         return set.has(k);
+      },
+      // ---- the board's book columns (this device)
+      mineOnly: () => view.mineOnly && set.size > 0,
+      setMineOnly(on) { view = { ...view, mineOnly: !!on }; writeView(); notify(); },
+      order: () => view.order.slice(),
+      customOrder: () => view.order.length > 0,
+      setOrder(keys) { view = { ...view, order: clean(keys) }; writeView(); notify(); },
+      resetOrder() { if (!view.order.length) return; view = { ...view, order: [] }; writeView(); notify(); },
+      // What a board shows: books filtered and ordered. books: [{key, ...}] in the board's own order.
+      arrange: (books) => arrange(books, { mine: [...set], mineOnly: view.mineOnly, order: view.order }),
+      // Move one column; `shown` is the key order on screen now.
+      move(shown, key, target, after = false) { api.setOrder(moveKey(shown, key, target, after, view.order)); },
+      // The bar above a board: All books / My books, and how to rearrange.
+      viewBarHTML(books, e = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))) {
+        const n = (books || []).filter((b) => b && set.has(b.key)).length, only = view.mineOnly && n > 0;
+        const seg = `<div class="bkv-seg" role="group" aria-label="Book columns"><button type="button" data-bkview="all" aria-pressed="${!only}">All books</button><button type="button" data-bkview="mine" aria-pressed="${only}"${n ? '' : ' disabled title="Star books in the Book menu or Tools first"'}>My books${n ? ` (${n})` : ''}</button></div>`;
+        const hint = `<span class="bkv-hint">${n ? '' : 'Star your books to filter. '}Drag a book's column to move it${view.order.length ? '' : '; your books come first'}.</span>`;
+        const reset = view.order.length ? '<button type="button" class="bkv-reset" data-bkorder-reset>Reset order</button>' : '';
+        return `<div class="bkv">${seg}${hint}${reset}</div>`;
       },
       // Un-star every book at once (the picker's Clear button). Saves, repaints and syncs like toggle.
       clear() {
@@ -73,6 +124,7 @@
         if (!same) notify();
       },
       // Another tab changed the list.
+      reloadView() { view = readView(); notify(); },
       reload() { const next = read(); const same = next.length === set.size && next.every((k) => set.has(k)); set = new Set(next); if (!same) notify(); },
       cls: (k) => (set.has(k) ? ' my-bk' : ''),
       star: (k) => (set.has(k) ? '★' : '☆'),
@@ -91,7 +143,7 @@
     return api;
   }
 
-  const out = { create, clean, KEY, BoardFair };
+  const out = { create, clean, KEY, VIEW_KEY, arrange, moveKey, BoardFair };
   if (typeof module === 'object' && module.exports) module.exports = out;
   if (!root || !root.document) return;
 
@@ -119,8 +171,55 @@
     ev.preventDefault(); ev.stopPropagation();
     MyBooks.toggle(b.dataset.mybook);
   }, true);
+  // The board bar and its column moves.
+  doc.addEventListener('click', (ev) => {
+    const t = ev.target && ev.target.closest && ev.target.closest('[data-bkview],[data-bkorder-reset]');
+    if (!t) return;
+    ev.preventDefault();
+    if (t.hasAttribute('data-bkorder-reset')) MyBooks.resetOrder(); else MyBooks.setMineOnly(t.dataset.bkview === 'mine');
+  });
+  const shownKeys = (th) => [...th.closest('tr').querySelectorAll('th[data-bk]')].map((x) => x.dataset.bk);
+  // Mouse or pen: drag a column header sideways onto another. (Touch keeps scrolling the table; there the order is
+  // smart by default and the keyboard / desktop order carries over.)
+  let drag = null;
+  doc.addEventListener('pointerdown', (ev) => {
+    const th = ev.target && ev.target.closest && ev.target.closest('th[data-bk][data-bk-move]');
+    if (!th || ev.pointerType === 'touch' || ev.button !== 0) return;
+    drag = { th, key: th.dataset.bk, x: ev.clientX, on: false, target: null, after: false };
+  });
+  const clearMarks = () => { for (const x of doc.querySelectorAll('.bk-drag,.bk-drop-l,.bk-drop-r')) x.classList.remove('bk-drag', 'bk-drop-l', 'bk-drop-r'); };
+  doc.addEventListener('pointermove', (ev) => {
+    if (!drag) return;
+    if (!drag.on && Math.abs(ev.clientX - drag.x) < 6) return;
+    drag.on = true; clearMarks();
+    drag.th.classList.add('bk-drag');
+    const over = doc.elementFromPoint(ev.clientX, ev.clientY), th = over && over.closest && over.closest('th[data-bk]');
+    if (th && th !== drag.th && th.closest('tr') === drag.th.closest('tr')) {
+      const r = th.getBoundingClientRect(); drag.target = th.dataset.bk; drag.after = ev.clientX > r.left + r.width / 2;
+      th.classList.add(drag.after ? 'bk-drop-r' : 'bk-drop-l');
+    } else drag.target = null;
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    const d = drag; drag = null; clearMarks();
+    if (d.on && d.target) MyBooks.move(shownKeys(d.th), d.key, d.target, d.after);
+    if (d.on) { const stop = (e) => { e.stopPropagation(); e.preventDefault(); }; doc.addEventListener('click', stop, { capture: true, once: true }); setTimeout(() => doc.removeEventListener('click', stop, { capture: true }), 0); }
+  };
+  doc.addEventListener('pointerup', endDrag);
+  doc.addEventListener('pointercancel', () => { drag = null; clearMarks(); });
+  // Keyboard: Alt+Left / Alt+Right on a focused book header moves that column.
+  doc.addEventListener('keydown', (ev) => {
+    const th = ev.target && ev.target.closest && ev.target.closest('th[data-bk][data-bk-move]');
+    if (!th || !ev.altKey || (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight')) return;
+    const keys = shownKeys(th), i = keys.indexOf(th.dataset.bk), j = ev.key === 'ArrowLeft' ? i - 1 : i + 1;
+    if (j < 0 || j >= keys.length) return;
+    ev.preventDefault();
+    const key = th.dataset.bk;
+    MyBooks.move(keys, key, keys[j], ev.key === 'ArrowRight');
+    requestAnimationFrame(() => { const again = doc.querySelector(`th[data-bk="${key}"][data-bk-move]`); if (again) again.focus(); });
+  });
   doc.addEventListener('board:account-books', (ev) => MyBooks.adoptAccount(ev.detail && ev.detail.books, { set: !!(ev.detail && ev.detail.set) }));
-  root.addEventListener('storage', (ev) => { if (ev.key === KEY) MyBooks.reload(); });
+  root.addEventListener('storage', (ev) => { if (ev.key === KEY) MyBooks.reload(); if (ev.key === VIEW_KEY) MyBooks.reloadView(); });
   root.MyBooks = MyBooks;
   root.BoardFair = BoardFair;
 })(typeof window !== 'undefined' ? window : null);

@@ -47,3 +47,19 @@
 .br-hd .my-bk-star,.odds-brhd .my-bk-star{margin-right:3px}
 /* the picker inside a board's Book menu */
 #myBooksPick .mybk{margin:4px 0 0;padding:14px 16px 16px;border-top:1px solid var(--line)}
+
+/* the board bar (MyBooks.viewBarHTML): All books / My books, and moving book columns */
+.bkv{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin:12px 0 4px}
+.bkv-seg{display:inline-flex;gap:2px;padding:3px;border-radius:999px;background:var(--fill)}
+.bkv-seg button{min-height:32px;padding:5px 14px;border:0;border-radius:999px;background:transparent;color:var(--ink-2);font:inherit;font-size:12px;font-weight:650;cursor:pointer;touch-action:manipulation}
+.bkv-seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.bkv-seg button:disabled{opacity:.5;cursor:default}
+.bkv-hint{font-size:12px;color:var(--ink-3)}
+.bkv-reset{min-height:32px;padding:5px 12px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--ink);font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.bkv button:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+th[data-bk][data-bk-move]{cursor:grab}
+th[data-bk][data-bk-move]:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+th.bk-drag{opacity:.45;cursor:grabbing}
+th.bk-drop-l{box-shadow:inset 3px 0 0 var(--brand)!important}
+th.bk-drop-r{box-shadow:inset -3px 0 0 var(--brand)!important}
+@media (hover:none){.bkv-hint{display:none}}

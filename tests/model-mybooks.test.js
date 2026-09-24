@@ -345,3 +345,34 @@ test('NCAAF Model column: finished games keep the pregame fair line; in play sho
   assert.equal(c.modelMargin({ state: 'post', model }), -3.2);
   assert.equal(c.modelMargin({ state: 'in', model }), null);
 });
+
+test('board columns: your books first by default, "My books" filters, your own order wins, moves keep hidden books', () => {
+  const { arrange, moveKey } = require('../design/mybooks');
+  const books = ['circa', 'pin', 'dk', 'mgm', 'fd', 'czr'].map((key) => ({ key }));
+  const keys = (l) => l.map((b) => b.key);
+  assert.deepEqual(keys(arrange(books)), ['circa', 'pin', 'dk', 'mgm', 'fd', 'czr'], 'nothing starred: the board order');
+  assert.deepEqual(keys(arrange(books, { mine: ['mgm', 'dk'] })), ['mgm', 'dk', 'circa', 'pin', 'fd', 'czr'], 'smart: starred first, in star order');
+  assert.deepEqual(keys(arrange(books, { mine: ['mgm', 'dk'], mineOnly: true })), ['mgm', 'dk']);
+  assert.deepEqual(keys(arrange(books, { mine: ['zzz'], mineOnly: true })), keys(books), 'filter with none of them on this board shows all');
+  assert.deepEqual(keys(arrange(books, { mine: ['mgm'], order: ['fd', 'pin'] })), ['fd', 'pin', 'circa', 'dk', 'mgm', 'czr'], 'own order first, unknown books after in board order');
+  assert.deepEqual(moveKey(['a', 'b', 'c', 'd'], 'd', 'b'), ['a', 'd', 'b', 'c']);
+  assert.deepEqual(moveKey(['a', 'b', 'c', 'd'], 'a', 'c', true), ['b', 'c', 'a', 'd']);
+  assert.deepEqual(moveKey(['a', 'b'], 'b', 'a', false, ['a', 'x', 'b', 'y']), ['b', 'a', 'x', 'y'], 'books filtered off keep their place');
+});
+
+test('board columns: the view saves on this device, repaints boards, and the bar says what to do', () => {
+  const storage = memStorage({ [KEY]: '["mgm"]' });
+  const mb = create({ storage });
+  let paints = 0; mb.subscribe(() => paints++);
+  const books = [{ key: 'dk' }, { key: 'mgm' }, { key: 'fd' }];
+  assert.deepEqual(mb.arrange(books).map((b) => b.key), ['mgm', 'dk', 'fd']);
+  mb.setMineOnly(true); assert.deepEqual(mb.arrange(books).map((b) => b.key), ['mgm']); assert.equal(paints, 1);
+  assert.match(mb.viewBarHTML(books), /data-bkview="mine" aria-pressed="true">My books \(1\)/);
+  mb.setMineOnly(false); mb.move(['mgm', 'dk', 'fd'], 'fd', 'mgm');
+  assert.deepEqual(mb.arrange(books).map((b) => b.key), ['fd', 'mgm', 'dk']);
+  assert.match(mb.viewBarHTML(books), /data-bkorder-reset>Reset order/);
+  assert.deepEqual(create({ storage }).arrange(books).map((b) => b.key), ['fd', 'mgm', 'dk'], 'kept for the next visit');
+  mb.resetOrder(); assert.deepEqual(mb.arrange(books).map((b) => b.key), ['mgm', 'dk', 'fd']);
+  const none = create({ storage: memStorage() });
+  assert.match(none.viewBarHTML(books), /data-bkview="mine" aria-pressed="false" disabled/);
+});

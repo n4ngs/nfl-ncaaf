@@ -426,7 +426,8 @@ function renderBoard(loading = false) {
   renderFreshness();
 
   // Keep book controls current even when a filter has no results.
-  const availableBooks = visibleBooks();
+  // My books (design/mybooks.js): "My books only" filters the columns; the order is yours, or your books first.
+  const availableBooks = myBooks()?.arrange ? myBooks().arrange(visibleBooks()) : visibleBooks();
   if (S.phBook !== 'mkt' && !availableBooks.some((b) => b.key === S.phBook)) S.phBook = 'mkt';
   const bookLabel = $('#bookLabel');
   if (bookLabel) bookLabel.textContent = S.phBook === 'mkt' ? 'Market' : bookName(S.phBook);
@@ -455,7 +456,8 @@ function renderBoard(loading = false) {
   const head = `<div class="br-hd"><span>${esc(mkt === 't' ? 'Over / under' : mkt === 'ml' ? 'Moneyline' : mkt === 'h1' ? '1st-half spread' : 'Spread')}</span><span>${myBkStar(S.phBook)}${esc(colName)}</span><span>Best</span></div>`;
   const block = (games) => `<div class="card brd m">${head}${games.map((g) => boardRow(g, mkt)).join('')}</div>${boardTable(games, mkt, cols)}`;
   const wasOpen = $('#doneGroup')?.open;
-  $('#boardBody').innerHTML = groups.map((grp) => `
+  const bkBar = myBooks()?.viewBarHTML ? myBooks().viewBarHTML(visibleBooks()) : '';
+  $('#boardBody').innerHTML = bkBar + groups.map((grp) => `
     <div class="win-h"><h3>${esc(grp.day)} · ${esc(grp.win)}</h3><span>${plural(grp.games.length, 'game')}</span></div>${block(grp.games)}`).join('')
     + (done.length ? `<details class="done" id="doneGroup"${wasOpen || !groups.length ? ' open' : ''}><summary class="win-h"><h3>Final</h3><span>${plural(done.length, 'game')} · closing lines and results ${ICON.chev}</span></summary>${block(done.sort((a, b) => Date.parse(b.start) - Date.parse(a.start)))}</details>` : '');
 }
@@ -591,7 +593,7 @@ function boardRow(g, mkt) {
 function boardTable(games, mkt, books = visibleBooks()) {
   const [s1, s2] = sideKeys(mkt);
   const withModel = true;
-  const head = `<thead><tr><th class="l stk">Matchup</th>${withModel ? `<th class="mdl-th" title="${esc(MODEL_TIP[mkt] || MODEL_TIP.s)}">Model</th>` : ''}<th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}"${isMyBook(b.key) ? ' class="my-bk"' : ''} title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}${isMyBook(b.key) ? ' · one of my books' : ''}">${myBkStar(b.key)}${b.color ? `<i class="bkdot" style="background:${esc(b.color)}"></i>` : ''}${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
+  const head = `<thead><tr><th class="l stk">Matchup</th>${withModel ? `<th class="mdl-th" title="${esc(MODEL_TIP[mkt] || MODEL_TIP.s)}">Model</th>` : ''}<th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}" data-bk-move tabindex="0"${isMyBook(b.key) ? ' class="my-bk"' : ''} title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}${isMyBook(b.key) ? ' · one of my books' : ''} · drag, or Alt+Arrow, to move this column">${myBkStar(b.key)}${b.color ? `<i class="bkdot" style="background:${esc(b.color)}"></i>` : ''}${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
   const rows = games.map((g, i) => {
     const lead = (g.home.score ?? 0) > (g.away.score ?? 0) ? 'home' : 'away';
     const trail = !isPre(g) && g.home.score !== g.away.score ? (lead === 'home' ? 'trail0' : 'trail1') : '';
