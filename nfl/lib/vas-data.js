@@ -20,7 +20,9 @@ const URLS = {
 };
 const PBP_COLS = ['game_id', 'posteam', 'defteam', 'play_type', 'epa', 'success', 'qb_dropback', 'special', 'qb_kneel', 'qb_spike', 'passer_id', 'wp', 'play_deleted'];
 const SNAP_COLS = ['game_id', 'team', 'pfr_player_id', 'position', 'offense_pct', 'defense_pct', 'offense_snaps', 'defense_snaps', 'player'];
-const GAME_COLS = ['game_id', 'season', 'game_type', 'week', 'gameday', 'gametime', 'away_team', 'away_score', 'home_team', 'home_score', 'location', 'div_game', 'roof'];
+const GAME_COLS = ['game_id', 'season', 'game_type', 'week', 'gameday', 'gametime', 'away_team', 'away_score', 'home_team', 'home_score', 'location', 'div_game', 'roof', 'spread_line', 'total_line'];
+// Columns a file may lack (older exports, test fixtures): read as empty instead of rejecting the file.
+const OPTIONAL_COLS = new Set(['play_deleted', 'player', 'spread_line', 'total_line']);
 const REFRESH_MS = 12 * 3600e3, RETRY_MS = 3600e3;
 
 // NFL season of a date: the calendar year from March onward, else the previous year.
@@ -80,7 +82,7 @@ function parseCsvGz(buf, cols, onRow) {
         head = splitCsv(line); ix = {};
         for (const c of cols) { ix[c] = head.indexOf(c); }
         cols.forEach((c, k) => { slot[c] = k; if (ix[c] >= 0) want.set(ix[c], k); });
-        const miss = cols.filter(c => ix[c] < 0 && c !== 'play_deleted' && c !== 'player');
+        const miss = cols.filter(c => ix[c] < 0 && !OPTIONAL_COLS.has(c));
         if (miss.length) throw Error('csv missing columns ' + miss.join(','));
         return;
       }
@@ -116,7 +118,9 @@ async function parseGames(buf) {
     const hs = num(g('home_score')), as = num(g('away_score'));
     games.push({ gid: I(g('game_id')), season, week: num(g('week')), gameType: I(g('game_type')), day: I(g('gameday')), time: I(g('gametime')) || null,
       home: I(g('home_team')), away: I(g('away_team')), homeScore: Number.isFinite(hs) ? hs : null, awayScore: Number.isFinite(as) ? as : null,
-      neutral: g('location') === 'Neutral', div: num(g('div_game')) === 1 ? 1 : 0, roof: I(g('roof')) || null });
+      neutral: g('location') === 'Neutral', div: num(g('div_game')) === 1 ? 1 : 0, roof: I(g('roof')) || null,
+      // nflverse closing lines: spread_line > 0 means the home team was favoured by that many points.
+      close: num(g('spread_line')), closeTotal: num(g('total_line')) });
   });
   return games;
 }
@@ -174,7 +178,8 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
 
   const schedule = () => load('games', URLS.games(), parseGames, null);
   const toEngine = g => ({ gid: g.gid, season: g.season, week: g.week, day: g.day, time: g.time, home: g.home, away: g.away,
-    homeScore: g.homeScore, awayScore: g.awayScore, neutral: g.neutral, div: g.div, roof: g.roof });
+    homeScore: g.homeScore, awayScore: g.awayScore, neutral: g.neutral, div: g.div, roof: g.roof,
+    ...(Number.isFinite(g.close) ? { close: g.close } : {}), ...(Number.isFinite(g.closeTotal) ? { closeTotal: g.closeTotal } : {}) });
 
   // {games, plays, snaps} for seasons S-2..S, exactly the rows the research walk used.
   async function history(season = seasonFor(now())) {

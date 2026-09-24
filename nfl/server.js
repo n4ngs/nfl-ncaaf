@@ -1886,6 +1886,10 @@ const server = http.createServer(async (req, res) => {
       if (role !== 'owner') return ownerOnly();
       return sendJSON(res, 200, require('../shared/edges-feed').football({ weeks: tracked(), view: pub }));
     }
+    if (p === '/api/vas/season') {
+      if (role !== 'owner') return ownerOnly();
+      return sendJSON(res, 200, Model.season ? Model.season() : { ready: false, rows: [] });
+    }
     if (p === '/api/vas/record') {
       if (role !== 'owner') return ownerOnly();
       return sendJSON(res, 200, Model.summary());

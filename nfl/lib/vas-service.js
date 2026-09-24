@@ -142,6 +142,20 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
   }
 
   return {
+    // Model vs market vs result for this season's completed games: the model's fair margin/total (pre-day features),
+    // the closing line (nflverse) and what happened. For the owner's proof page; nothing here is a pick.
+    season: () => {
+      if (!state || !MODEL) return { ready: false, rows: [] };
+      const rows = [];
+      for (const g of played) {
+        if (!Number.isFinite(g.homeScore) || !Number.isFinite(g.awayScore)) continue;
+        const f = state.featured.get(g.gid); if (!f) continue;
+        const pred = E.predict(f, MODEL);
+        rows.push({ gid: g.gid, week: g.week, day: g.day, home: g.home, away: g.away, fair: pred.margin, market: Number.isFinite(g.close) ? g.close : null,
+          fairTotal: pred.total, marketTotal: Number.isFinite(g.closeTotal) ? g.closeTotal : null, result: g.homeScore - g.awayScore, total: g.homeScore + g.awayScore });
+      }
+      return { ready: true, unit: 'pts', rows };
+    },
     refresh, forGame, injuries, summary: () => record.summary(),
     status: () => ({ model: MODEL && MODEL.version, builtAt, building, history: info, data: data.status(), lastError,
       // Proof page format: totals thresholds with Bonferroni-adjusted p (the research's own pass/fail bar)

@@ -184,6 +184,18 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
   }
 
   return {
+    // Model vs market vs result for this season's completed games (owner's proof page). ESPN's close is the home
+    // spread (negative = home favoured), so the market's expected home margin is its negative.
+    season: () => {
+      if (!state || !MODEL || !hist) return { ready: false, rows: [] };
+      const rows = [];
+      for (const g of hist.games) {
+        const p = past.get(String(g.gid)); if (!p || !Number.isFinite(g.home_pts) || !Number.isFinite(g.away_pts)) continue;
+        rows.push({ gid: g.gid, week: g.week, day: String(g.start || '').slice(0, 10), home: String(g.home_id), away: String(g.away_id), fair: p.margin,
+          market: Number.isFinite(g.close) ? -g.close : null, fairTotal: p.total, marketTotal: null, result: g.home_pts - g.away_pts, total: g.home_pts + g.away_pts });
+      }
+      return { ready: true, unit: 'pts', rows };
+    },
     refresh, summary: () => record.summary(),
     forGame(G, hist, books, published) { const out = forGame(G, hist, books, published); try { refreshMarks(G, books); } catch {} return out; },
     status: () => ({ model: MODEL && MODEL.version, builtAt, building, history: info, data: data.status(), lastError, tiers: { THIN: 'variant B, proven on holdout, opener timing unverified', WEAK: 'lean' },
