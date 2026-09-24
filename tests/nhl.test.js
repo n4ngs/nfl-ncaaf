@@ -14,3 +14,11 @@ test('NHL roster presence does not confirm starters or fabricate GSAA',()=>{cons
 test('NHL preseason framework blocks units and unsupported fair prices',()=>{const a=H.analysis(g);assert.equal(a.units,0);assert.equal(a.fairProbability,null);assert.equal(a.edge,null);assert.match(a.status,/NO ACTION/);assert.match(a.failureMode,/Split squads/);});
 test('NHL schedule context flags B2B and 3 in 4 from calendar games, not narrative',()=>{const prior=[{...g,id:'2',date:'2026-09-21'},{...g,id:'3',date:'2026-09-19'}];const s=H.scheduleContext(g,prior);assert.equal(s.away.backToBack,true);assert.equal(s.away.threeInFour,true);assert.equal(s.away.restDays,0);assert.equal(H.scheduleContext(g,[]).away.restDays,null);});
 test('NHL Sharp puck lines and totals normalize; regulation and draw moneylines never become two-way',()=>{const row={id:'123',event_id:'event',event_uuid:'same',league:'nhl',sportsbook:'betmgm',home_team:event().home,away_team:event().away,event_start_time:start,is_main_line:true,is_live:false,timestamp:new Date(now).toISOString(),odds_american:-110};assert.equal(Sharp.normalizeBoard([{...row,market_type:'puck_line',selection_type:'home',line:-1.5}],'nhl')[0].books.mgm.s,-1.5);assert.equal(Sharp.normalizeBoard([{...row,market_type:'total_goals',selection_type:'over',line:6}],'nhl')[0].books.mgm.t,6);assert.equal(Sharp.normalizeBoard([{...row,market_type:'moneyline',selection_type:'home'},{...row,id:'124',market_type:'moneyline',selection_type:'draw'}],'nhl').length,0);assert.equal(Sharp.normalizeBoard([{...row,market_type:'moneyline',selection_type:'home',market_name:'60 minute moneyline'}],'nhl').length,0);});
+test('NHL in play: a book whose only quote is a pregame number is dropped, never shown as current',()=>{
+  const e=event();e.live.czr={integrityMeta:{ml:{home:quote({is_live:false,american_odds:-180}),away:quote({is_live:false,american_odds:155})}}};
+  const out=H.combine(g,e,null,now);
+  assert.ok(out.mgm,'the in-play book stays');
+  assert.equal(out.czr,undefined,'the pregame-only book is not published during the game');
+  const mixed=event();mixed.live.mgm.integrityMeta.ml.away=quote({is_live:false,american_odds:130});
+  assert.equal(H.combine(g,mixed,null,now).mgm,undefined,'a half-pregame pair is not a live market');
+});

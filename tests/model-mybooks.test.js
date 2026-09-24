@@ -242,3 +242,41 @@ test('MLB odds strip: live prices only when fresh, otherwise a labelled close/pr
   assert.match(html, /class="ostrip-tag on">Live</);
   assert.match(html, /−400/); assert.match(html, />7\.5</);
 });
+
+// ------------------------------------------------------------ NHL: board helpers and the page structure
+function nhlBoard(connected = true) {
+  const src = fs.readFileSync(path.join(__dirname, '../nhl/public/app.js'), 'utf8');
+  const pick = (name) => { const m = src.match(new RegExp(`^(?:const|function) ${name}\\b.*$`, 'm')); assert.ok(m, name); return m[0]; };
+  const body = [pick('fresh'), pick('american'), pick('SIDES'), pick('dec'), pick('quoteOf'), pick('lineMain'), pick('betterQ'), pick('bestOf')].join('\n');
+  const c = { NH: { connected }, Date };
+  vm.createContext(c); vm.runInContext(body + '\nglobalThis.api = { quoteOf, lineMain, bestOf };', c);
+  return c.api;
+}
+test('NHL board: in play shows only in-play quotes; Best ignores stale quotes and prefers the better number', () => {
+  const at = new Date(Date.now() - 1000).toISOString();
+  const q = (o, extra = {}) => ({ market_status: 'active', is_live: false, american_odds: o, source_observed_at: at, freshness: 'FRESH', ...extra });
+  const nb = nhlBoard();
+  const pre = { state: 'pre', books: { circa: { integrity: { ml: { home: q(-150), away: q(130) } } }, mgm: { integrity: { ml: { home: q(-140), away: q(120) } } }, dk: { integrity: { ml: { home: q(-120, { freshness: 'STALE' }), away: q(100) } } } } };
+  assert.equal(nb.bestOf(pre, 'ml', 'home').book, 'mgm', 'a stale -120 is never Best');
+  assert.equal(nb.bestOf(pre, 'ml', 'away').book, 'circa');
+  const live = { ...pre, state: 'in', books: { circa: { integrity: { ml: { home: q(-180), away: q(155) } } }, mgm: { integrity: { ml: { home: q(-400, { is_live: true }), away: q(300, { is_live: true }) } } } } };
+  assert.equal(nb.quoteOf(live, 'circa', 'ml', 'home'), null, 'a pregame number is hidden during the game');
+  assert.equal(nb.quoteOf(live, 'mgm', 'ml', 'home').american_odds, -400);
+  assert.equal(nb.bestOf(live, 'ml', 'home').book, 'mgm');
+  assert.equal(nb.lineMain('s', 'home', { line_value: -1.5, american_odds: 160 }), '−1.5');
+  assert.equal(nb.lineMain('t', 'over', { line_value: 6.5, american_odds: -110 }), 'o6.5');
+  const pl = { state: 'pre', books: { a: { integrity: { s: { home: q(-200, { line_value: -1.5 }) } } }, b: { integrity: { s: { home: q(-250, { line_value: 1.5 }) } } } } };
+  assert.equal(nb.bestOf(pl, 's', 'home').book, 'b', 'getting +1.5 beats laying -1.5');
+});
+test('NHL page: latest-goal hero first, then the odds board (Model + My books), Goalie Matrix and game room kept', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../nhl/public/index.html'), 'utf8');
+  const i = (s) => { const k = html.indexOf(s); assert.ok(k >= 0, s); return k; };
+  assert.ok(i('id="nh-hero"') < i('data-market="ml"') && i('data-market="ml"') < i('id="game-list"') && i('id="game-list"') < i('id="goalie-matrix"'));
+  i('data-market="s"'); i('data-market="t"'); i('id="nh-phbook"'); i('id="nh-mybooks"'); i('id="game-dialog"'); i('id="ticket-dialog"');
+  const js = fs.readFileSync(path.join(__dirname, '../nhl/public/app.js'), 'utf8');
+  assert.match(js, /<video id="nh-hero-video" muted autoplay loop playsinline/);
+  assert.match(js, /data-hero-rate="'\+r\+'"/);
+  assert.match(js, /Open on NHL\.com/);
+  assert.match(js, /class="nb-table has-model"/);
+  assert.match(js, /<th class="mdl-th"/);
+});
