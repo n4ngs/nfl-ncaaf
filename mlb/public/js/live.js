@@ -97,7 +97,7 @@ function connect() {
     if (!S.isToday || S.loading) return;
     if (ab) S.atbats.set(pk, ab); else S.atbats.delete(pk);
     if (S.gameOpen === pk) updateGameSheet();
-    if (S.tab === 'live' || S.tab === 'games' || S.tab === 'following') invalidate();
+    if (S.tab === 'live' || S.tab === 'games' || S.tab === 'odds' || S.tab === 'following') invalidate();
   });
   on('extras', (d) => { if (S.isToday && !S.loading) { S.pitches = d.pitches; S.swings = d.swings; if (S.tab === 'homers') invalidate(); } });
 }

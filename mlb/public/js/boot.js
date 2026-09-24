@@ -2,7 +2,7 @@
 /* Bing Bong Live — interactions and startup. */
 
 // ------------------------------------------------------------ tabs
-const TABS = ['live', 'homers', 'games', 'following', 'tools'];
+const TABS = ['live', 'homers', 'odds', 'games', 'following', 'tools'];
 function setTab(tab, { push = true } = {}) {
   if (!TABS.includes(tab)) tab = 'live';
   const changed = S.tab !== tab;

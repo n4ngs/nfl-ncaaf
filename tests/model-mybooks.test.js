@@ -206,3 +206,39 @@ test('every board loads the shared My books layer and no board keeps a fixed Bet
   const terminal = fs.readFileSync(path.join(__dirname, '../terminal.js'), 'utf8');
   assert.match(terminal, /'mybooks\.css', 'mybooks\.js'/);
 });
+
+// ------------------------------------------------------------ MLB: Odds tab and the Live page odds strip
+test('MLB nav: an Odds tab on desktop and in the 5-slot phone bar; Tools moves to the header on phones', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../mlb/public/index.html'), 'utf8');
+  const bar = html.slice(html.indexOf('<nav class="tabbar"'), html.indexOf('</nav>', html.indexOf('<nav class="tabbar"')));
+  assert.deepEqual([...bar.matchAll(/data-tab="(\w+)"/g)].map((m) => m[1]), ['live', 'homers', 'odds', 'games', 'following']);
+  const nav = html.slice(html.indexOf('<nav class="nav"'), html.indexOf('</nav>', html.indexOf('<nav class="nav"')));
+  assert.deepEqual([...nav.matchAll(/data-tab="(\w+)"/g)].map((m) => m[1]), ['live', 'homers', 'odds', 'games', 'following', 'tools']);
+  assert.match(html, /class="ibtn tools-btn" data-tab="tools"/);
+  assert.match(html, /id="view-odds" data-view="odds"[\s\S]*?<div id="oddsHost"><\/div>/);
+  assert.ok(html.indexOf('id="oddsStripSec"') < html.indexOf('id="hero"'), 'the odds strip sits above the home-run video');
+  assert.match(html, /id="hero" aria-label="Latest home run"/, 'the latest home run hero stays');
+  assert.match(fs.readFileSync(path.join(__dirname, '../mlb/public/js/boot.js'), 'utf8'), /const TABS = \['live', 'homers', 'odds', 'games', 'following', 'tools'\]/);
+});
+test('MLB odds strip: live prices only when fresh, otherwise a labelled close/pregame number; tap opens the game', () => {
+  const { c, g } = mlbHarness(create({ storage: memStorage() }));
+  const at = new Date(Date.parse('2026-09-22T18:00:00Z') - 1000).toISOString();
+  const q = (odds, line = null) => ({ source: 'vsin', source_observed_at: at, received_at: at, market_status: 'active', is_live: true, max_age_ms: 60000, freshness: 'FRESH', actionable: true, american_odds: odds, line_value: line });
+  const pre = { ml: [-150, 130], t: { line: 8.5, odds: [-110, -110] } };
+  c.state.games.set(7, { pk: 7, books: { cons: pre } });
+  let html = c.oddsStripCard(g);
+  assert.match(html, /data-odds-open="7"/);
+  assert.match(html, /−150/); assert.match(html, /\+130/); assert.match(html, />8\.5</);
+  assert.ok(!/ostrip-tag/.test(html), 'a pregame card needs no tag');
+  // in play with no fresh live price: the pregame number, labelled, never shown as current
+  const live = { ...g, state: 'Live' };
+  html = c.oddsStripCard(live);
+  assert.match(html, /class="ostrip-tag">Pregame</);
+  c.state.games.set(7, { pk: 7, books: { cons: pre }, close: { ml: [-160, 140], t: { line: 9, odds: [-110, -110] } } });
+  assert.match(c.oddsStripCard(live), /class="ostrip-tag">Close</);
+  // a fresh live price wins
+  c.state.games.set(7, { pk: 7, books: { cons: pre }, live: { cons: { is_live: true, quote_meta: { ml: { home: q(-400), away: q(300) }, t: { over: q(-115, 7.5), under: q(-105, 7.5) } } } } });
+  html = c.oddsStripCard(live);
+  assert.match(html, /class="ostrip-tag on">Live</);
+  assert.match(html, /−400/); assert.match(html, />7\.5</);
+});

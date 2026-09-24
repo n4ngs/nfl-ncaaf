@@ -329,7 +329,8 @@ function oddsRepaint() {
   if (ODDS.raf) return;
   ODDS.raf = requestAnimationFrame(() => {
     ODDS.raf = 0;
-    if (S.tab === 'games') oddsGamesHook();
+    if (S.tab === 'odds') oddsGamesHook();
+    if (S.tab === 'live') oddsStripRender();
     if (S.dlgKind === 'edges') oddsEdgeRefresh();
     if (S.dlgKind === 'odds') oddsSheetRefresh();
   });
@@ -353,17 +354,9 @@ function oddsGamesHook() {
   if (!host) return;
   const day = S.loading || S.date;
   if (day && !S.loading) oddsFetchDay(day);
-  if (!host.dataset.ready) {
-    host.dataset.ready = '1';
-    host.innerHTML = '<div class="odds-switch seg" role="group" aria-label="Show scores or odds" id="oddsSwitch"></div><div id="oddsView" class="odds-view"></div>';
-  }
-  const on = ODDS.view === 'odds';
-  $('#view-games')?.classList.toggle('odds-mode', on);
-  oddsSwap($('#oddsSwitch'), `<button type="button" data-odds-view="scores" aria-pressed="${!on}">Scores</button><button type="button" data-odds-view="odds" aria-pressed="${on}">Odds</button>`);
-  $('#gamesList').hidden = on;
-  const view = $('#oddsView');
-  view.hidden = !on;
-  if (on) oddsSwap(view, oddsViewHTML());
+  // The Odds tab is its own view now (it used to be a Scores | Odds switch inside Games).
+  if (!host.dataset.ready) { host.dataset.ready = '1'; host.innerHTML = '<div id="oddsView" class="odds-view"></div>'; }
+  oddsSwap($('#oddsView'), oddsViewHTML());
 }
 
 function oddsDayGames() {
@@ -474,6 +467,47 @@ function oddsMktSeg(mkt) {
   return `<div class="seg odds-mseg" role="group" aria-label="Which market to show">${ODDS_MKT_TABS.map(one).join('')}</div>`;
 }
 
+
+// ------------------------------------------------------------ Live page: today's odds strip
+/* One compact card per game, directly under the date strip: each side's moneyline and the total. In play it shows
+   only a fresh live price; with no live price it falls back to the pregame close, labelled "Close", never passed off
+   as current. A final game shows its close. Tapping a card opens that game's odds (every book, line history). */
+function oddsStripQuote(g, O, mkt, side) {
+  if (oddsIsLive(g)) {
+    for (const k of [...new Set(['cons', 'pin', 'circa', ...Object.keys(O?.live || {})])]) { const q = oddsLiveQuote(g, O, k, mkt, side); if (q?.actionable) return { p: q, tag: 'Live' }; }
+    // no fresh live price: the pregame close (or, before it is recorded, the last pregame market), labelled as such
+    const c = oddsSide(O?.close || oddsMarket(O).L, mkt, side);
+    return c && c.odds != null ? { p: c, tag: O?.close ? 'Close' : 'Pregame' } : null;
+  }
+  if (g.state === 'Final' || isOff(g)) { const c = oddsSide(O?.close || oddsMarket(O).L, mkt, side); return c && c.odds != null ? { p: c, tag: O?.close ? 'Close' : 'Last' } : null; }
+  const p = oddsSide(oddsMarket(O).L, mkt, side);
+  return p && p.odds != null ? { p, tag: '' } : null;
+}
+function oddsStripCard(g) {
+  const O = oddsGame(g.pk), live = oddsIsLive(g) || (g.state === 'Live' && !isOff(g)), fin = g.state === 'Final' || isOff(g);
+  const a = oddsStripQuote(g, O, 'ml', 'away'), h = oddsStripQuote(g, O, 'ml', 'home'), t = oddsStripQuote(g, O, 't', 'over');
+  const tag = [a, h, t].map((x) => x?.tag).find(Boolean) || '';
+  const team = (side, q) => { const tm = oddsTeam(g, side); return `<span class="ostrip-tm${!oddsIsPre(g) && g[side]?.score != null ? '' : ''}">${logo(tm.id)}<span class="ostrip-ab">${esc(tm.abbr)}</span>${!oddsIsPre(g) && g[side]?.score != null ? `<span class="ostrip-sc num">${g[side].score}</span>` : ''}<b class="num">${q ? esc(oddsFmt(q.p.odds)) : '—'}</b></span>`; };
+  const status = oddsIsPre(g) ? timeLabel(g.start) : gameStatus(g);
+  const spoken = `${oddsTeam(g, 'away').name} ${a ? oddsSpoken(oddsFmt(a.p.odds)) : 'no price'}, ${oddsTeam(g, 'home').name} ${h ? oddsSpoken(oddsFmt(h.p.odds)) : 'no price'}${t ? `, total ${oddsTrim(t.p.line)}` : ''}${tag ? `, ${tag.toLowerCase()} prices` : ''}. Opens every book and the line history.`;
+  return `<button type="button" class="ostrip-card${live ? ' live' : ''}${fin ? ' fin' : ''}" data-odds-open="${g.pk}" data-fk="strip${g.pk}" aria-label="${esc(spoken)}">
+    <span class="ostrip-st">${live ? '<span class="dot"></span>' : ''}<span>${esc(status)}</span>${tag ? `<small class="ostrip-tag${tag === 'Live' ? ' on' : ''}">${esc(tag)}</small>` : ''}</span>
+    ${team('away', a)}${team('home', h)}
+    <span class="ostrip-tot"><span>Total</span><b class="num">${t ? esc(oddsTrim(t.p.line)) : '—'}</b></span></button>`;
+}
+function oddsStripRender() {
+  const sec = $('#oddsStripSec'), el = $('#oddsStrip');
+  if (!sec || !el) return;
+  const day = S.loading || S.date;
+  if (day && !S.loading) oddsFetchDay(day);
+  const rank = (g) => (oddsIsLive(g) || (g.state === 'Live' && !isOff(g)) ? 0 : oddsIsPre(g) ? 1 : 2);
+  const games = oddsDayGames().sort((x, y) => rank(x) - rank(y) || Date.parse(x.start) - Date.parse(y.start));
+  sec.hidden = !games.length;
+  if (!games.length) return;
+  const keep = el.scrollLeft;
+  oddsSwap(el, games.map(oddsStripCard).join(''));
+  el.scrollLeft = keep;
+}
 
 // ------------------------------------------------------------ the Model column and My books
 /* The model's number per side, from the cached model read (server lib/vas-service.js, refreshed every 10 minutes and
@@ -1474,9 +1508,7 @@ document.addEventListener('click', (ev) => {
   if (d.oddsReset !== undefined) { ODDS.filter = 'all'; ODDS.query = ''; store.set('oddsFilter', 'all'); oddsRepaint(); return; }
   if (d.oddsHistoryRetry !== undefined) { ODDS.sheetHist = null; oddsSheetPaint(); oddsLoadHist(ODDS.sheetPk); return; }
   if (d.oddsView) {
-    ODDS.view = d.oddsView === 'odds' ? 'odds' : 'scores';
-    store.set('gamesView', ODDS.view);
-    oddsGamesHook();
+    if (typeof setTab === 'function') setTab(d.oddsView === 'odds' ? 'odds' : 'games');
   } else if (d.oddsFilter) {
     ODDS.filter = d.oddsFilter;
     store.set('oddsFilter', ODDS.filter);
@@ -1512,7 +1544,7 @@ document.addEventListener('input', (ev) => {
 });
 $('#dlg')?.addEventListener('close', () => { ODDS.sheetPk = null; ODDS.sheetHist = null; });
 // Relative times ("12 min old") and freshness keep moving while the view is up.
-setInterval(() => { if (!document.hidden && (S.tab === 'games' || S.dlgKind === 'odds' || S.dlgKind === 'edges')) oddsRepaint(); }, 5000);
+setInterval(() => { if (!document.hidden && (S.tab === 'odds' || S.tab === 'live' || S.dlgKind === 'odds' || S.dlgKind === 'edges')) oddsRepaint(); }, 5000);
 
 /* BetMGM Nevada — its price is a real link, so one tap opens BetMGM with the bet already in the slip (a
    popup blocker can stop window.open, never an anchor). This opens the board's own slip alongside it so

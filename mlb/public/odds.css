@@ -540,3 +540,49 @@ html[data-theme="dark"] .odds-view,html[data-theme="dark"] .odds-sheet{--odds-go
 .odds-ctrl .mybk-open{white-space:nowrap}
 .odds-bt.has-model span.odds-px.mdl > .num{color:var(--brand-text)}
 .odds-br-f .mdl-b i{color:var(--brand-text)}
+
+/* ═══ Live page: today's odds strip (js/odds.js oddsStripRender) ═══
+   Directly under the date strip, above the home-run video. It scrolls sideways inside itself, never the page. */
+.ostrip-sec{margin:12px 0 20px;min-width:0;max-width:100%}
+.ostrip-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 8px}
+.ostrip-h h2{margin:0;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink)}
+.ostrip-h .more{font-size:13px;font-weight:600;color:var(--ink-2);white-space:nowrap}
+.ostrip{display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;padding:2px 2px 8px;margin:0 -2px;max-width:calc(100% + 4px);scrollbar-width:thin}
+.ostrip:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:14px}
+.ostrip-card{flex:0 0 auto;width:152px;display:grid;gap:6px;padding:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);text-align:left;font:inherit;cursor:pointer;scroll-snap-align:start;transition:border-color .15s}
+.ostrip-card:hover{border-color:var(--edge,var(--ink-3))}
+.ostrip-card.live{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.ostrip-card.fin{background:transparent}
+.ostrip-st{display:flex;align-items:center;gap:6px;min-height:18px;font-size:11px;font-weight:600;color:var(--ink-2);white-space:nowrap}
+.ostrip-card.live .ostrip-st{color:var(--accent)}
+.ostrip-st .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
+.ostrip-tag{margin-left:auto;padding:1px 7px;border-radius:999px;background:var(--fill);color:var(--ink-2);font-size:10px;font-weight:600;letter-spacing:.02em}
+.ostrip-tag.on{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.ostrip-tm{display:flex;align-items:center;gap:6px;min-width:0;font-size:13px}
+.ostrip-tm img,.ostrip-tm svg{width:18px;height:18px;flex:none}
+.ostrip-ab{font-weight:650}
+.ostrip-sc{color:var(--ink-2);font-weight:600}
+.ostrip-tm b{margin-left:auto;font-size:15px;font-weight:680;letter-spacing:-.02em}
+.ostrip-card.fin .ostrip-tm b{color:var(--ink-2);font-weight:600}
+.ostrip-tot{display:flex;align-items:baseline;justify-content:space-between;padding-top:6px;border-top:1px solid var(--line);font-size:11px;color:var(--ink-2)}
+.ostrip-tot b{font-size:13px;font-weight:650;color:var(--ink)}
+@media (min-width:1024px){.ostrip-card{width:168px}}
+/* Phones: the home-run video sits right under the odds strip; the headline and the rest follow in their usual order. */
+@media (max-width:1023px){
+  #view-live.on{display:flex;flex-direction:column}
+  #view-live > *{order:5;min-width:0}
+  #view-live > #oddsStripSec{order:0}
+  #view-live > .hero-grid{order:1}
+  #view-live > .head{order:2}
+  #view-live > .hero-grid > .hero{margin-top:4px}
+  .ostrip-sec{margin-bottom:12px}
+}
+/* Desktop: keep the latest home run above the fold with the strip on top. */
+@media (min-width:1024px){
+  #oddsStripSec:not([hidden]) ~ .head{padding-top:18px;padding-bottom:6px;align-items:center}
+  #oddsStripSec:not([hidden]) ~ .head .dayline{margin-bottom:4px;font-size:13px}
+  #oddsStripSec:not([hidden]) ~ .head h1{font-size:40px}
+  #oddsStripSec:not([hidden]) ~ .hero-grid{margin-top:10px}
+  .ostrip-sec{margin:12px 0 0}
+  .ostrip-card{gap:4px;padding:8px 12px}
+}

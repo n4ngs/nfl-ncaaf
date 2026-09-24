@@ -42,11 +42,13 @@
     <nav class="nav" aria-label="Sections">
       <a data-tab="live" href="#live">Live</a>
       <a data-tab="homers" href="#homers">Homers</a>
+      <a data-tab="odds" href="#odds">Odds</a>
       <a data-tab="games" href="#games">Games</a>
       <a data-tab="following" href="#following">My bets</a>
       <a data-tab="tools" href="#tools">Tools</a>
     </nav>
     <div class="top-actions">
+      <a class="ibtn tools-btn" data-tab="tools" href="#tools" aria-label="Tools: calculators, sizing and sources" title="Tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="3"/><path d="M7.5 8.5h9M7.5 12h9M7.5 15.5h5"/></svg></a>
       <button class="pill phone-btn" id="phoneBtn" type="button">Open on iPhone</button>
       <button class="ibtn" id="alertBtn" type="button" aria-label="Home run alerts: off"></button>
       <button class="ibtn" id="themeBtn" type="button" aria-label="Theme: automatic"></button>
@@ -62,6 +64,8 @@
   <main id="main">
     <!-- ============ LIVE ============ -->
     <section class="view" id="view-live" data-view="live" aria-label="Live">
+      <!-- today's prices, one tap from the top of the page (js/odds.js oddsStripRender) -->
+      <section class="ostrip-sec" id="oddsStripSec" aria-label="Today's odds" hidden><div class="ostrip-h"><h2>Odds</h2><a class="more" href="#odds" data-tab="odds">Every book, Model column <span aria-hidden="true">→</span></a></div><div class="ostrip" id="oddsStrip" tabindex="0" role="region" aria-label="Today's games: moneyline and total. Scroll sideways for more."></div></section>
       <div id="banner"></div>
       <div id="mlbMoveSlot"></div>
       <section class="head">
@@ -127,8 +131,12 @@
     <!-- ============ GAMES ============ -->
     <section class="view" id="view-games" data-view="games" aria-label="Games">
       <div class="view-h"><div><h1>Games</h1><p id="gamesSub"></p></div></div>
-      <div id="oddsHost"></div>
       <div class="games" id="gamesList"></div>
+    </section>
+
+    <!-- ============ ODDS ============ -->
+    <section class="view" id="view-odds" data-view="odds" aria-label="Odds">
+      <div id="oddsHost"></div>
     </section>
 
     <!-- ============ FOLLOWING ============ -->
@@ -150,9 +158,9 @@
 <nav class="tabbar" aria-label="Sections">
   <a data-tab="live" href="#live"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg>Live</a>
   <a data-tab="homers" href="#homers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M7.2 5.2c1.6 1.8 2.4 4 2.4 6.8s-.8 5-2.4 6.8M16.8 5.2c-1.6 1.8-2.4 4-2.4 6.8s.8 5 2.4 6.8"/></svg>Homers<span class="badge" id="hrBadge" hidden></span></a>
+  <a data-tab="odds" href="#odds"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5-5 4 3 7-8"/><path d="M15 7h5v5"/></svg>Odds</a>
   <a data-tab="games" href="#games"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M12 5v14M3.5 12h17"/></svg>Games</a>
   <a data-tab="following" href="#following"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.8l2.5 5.1 5.6.8-4 3.9 1 5.6-5.1-2.7-5 2.7 1-5.6-4.1-3.9 5.6-.8z"/></svg>My bets</a>
-  <a data-tab="tools" href="#tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="3"/><path d="M7.5 8.5h9M7.5 12h9M7.5 15.5h5"/></svg>Tools</a>
 </nav>
 
 <div class="toasts" id="toasts" aria-live="polite"></div>

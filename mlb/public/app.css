@@ -702,3 +702,8 @@ html:has(.dlg[open]){overflow:hidden}
 .btn:hover{filter:brightness(1.08)}
 .btn:active{transform:scale(.985)}
 .pbtn[aria-pressed="true"],.seg button[aria-pressed="true"]{box-shadow:0 1px 3px rgba(0,0,0,.14)}
+
+/* Tools moved out of the phone tab bar (the Odds tab took its slot); on phones it is this header button. */
+.tools-btn{display:inline-grid;place-items:center;color:var(--ink-2)}
+.tools-btn svg{width:20px;height:20px}
+@media (min-width:1024px){.tools-btn{display:none}}

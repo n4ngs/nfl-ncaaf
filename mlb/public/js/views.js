@@ -21,6 +21,7 @@ function renderAll() {
   if (S.tab === 'live') renderLive();
   else if (S.tab === 'homers') { S.hrSeen = homers().length; renderHomers(); }
   else if (S.tab === 'games') renderGames();
+  else if (S.tab === 'odds' && typeof oddsGamesHook === 'function') oddsGamesHook();   // the odds board (odds.js)
   else if (S.tab === 'following') renderFollowing();
   else if (S.tab === 'tools' && typeof mlbToolsHook === 'function') mlbToolsHook();
   S.fresh.clear();
@@ -96,6 +97,7 @@ function renderDays() {
 // ------------------------------------------------------------ LIVE
 function renderLive() {
   renderBanner();
+  if (typeof oddsStripRender === 'function') oddsStripRender();   // today's odds, top of the page (odds.js)
   renderHead();
   renderAir();
   renderHero();
@@ -516,12 +518,11 @@ function gameCard(g) {
 }
 function renderGames() {
   const order = [...S.games.values()].sort((a, b) => ({ Live: 0, Preview: 1, Final: 2 }[a.state] ?? 3) - ({ Live: 0, Preview: 1, Final: 2 }[b.state] ?? 3) || Date.parse(a.start) - Date.parse(b.start));
-  $('#gamesSub').textContent = S.loading ? 'Loading…' : `${dayLabel(S.date, true)} · ${order.length} game${order.length === 1 ? '' : 's'}. ${store.get('gamesView', 'scores') === 'odds' ? 'Prices from every book, best first. Tap a price to log a bet.' : 'Tap one for every at-bat.'}`;
+  $('#gamesSub').textContent = S.loading ? 'Loading…' : `${dayLabel(S.date, true)} · ${order.length} game${order.length === 1 ? '' : 's'}. Tap one for every at-bat. Prices from every book are on the Odds tab.`;
   const html = S.loading ? '<div class="card empty"><b>Loading games…</b></div>'
     : order.map(gameCard).join('') || `<div class="card empty"><b>No games ${S.isToday ? 'today' : 'on this day'}</b>Pick another day from the Live tab.</div>`;
   const el = $('#gamesList');
   if (el.dataset.key !== html) { el.innerHTML = html; el.dataset.key = html; }
-  if (typeof oddsGamesHook === 'function') oddsGamesHook(); // betting stack (odds.js / bets.js)
 }
 
 // ------------------------------------------------------------ FOLLOWING
