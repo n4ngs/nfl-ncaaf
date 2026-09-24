@@ -1834,6 +1834,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/keys') return sendJSON(res, 200, (await margins((cal.season || new Date().getFullYear()) - 1)) || { n: 0 });
     if (p === '/api/lan') return sendJSON(res, 200, { urls: PUBLIC_URL ? [PUBLIC_URL] : lanUrls(), public: !!PUBLIC_URL, port: PORT });
+    // Edges page feed (terminal, loopback, once a minute): this week's model reads + Nevada lines, compact.
+    if (p === '/api/edges') {
+      if (role !== 'owner') return ownerOnly();
+      return sendJSON(res, 200, require('../shared/edges-feed').football({ weeks: tracked(), view: pub }));
+    }
     if (p === '/api/vas/record') {
       if (role !== 'owner') return ownerOnly();
       return sendJSON(res, 200, Model.summary());

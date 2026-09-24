@@ -1322,6 +1322,22 @@ async function oddsRoutes(req, res, url, uid) {
     sendJSON(res, 200, { reads: Vas.forDate(date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null), ready: !!(Vas.status().history && Vas.status().history.complete) });
     return true;
   }
+  // Edges page feed (terminal, loopback, once a minute): pregame DIAMOND reads + Nevada moneylines, compact.
+  if (p === '/api/edges' && M === 'GET') {
+    if (roleOf(req) !== 'owner') { sendJSON(res, 403, { error: 'Owner only.' }); return true; }
+    const now = Date.now(), { NEVADA, usable } = require('../shared/edges-feed');
+    const games = Vas.forDate(null).filter((r) => r.tier === 'DIAMOND' && Date.parse(r.start) > now).map((r) => {
+      const books = {}, B = (Odds.game(r.pk)?.odds?.books) || {};
+      for (const k of NEVADA) {
+        const L = B[k], q = L && L.quote_meta && L.quote_meta.ml;
+        const ok = (s, i) => Array.isArray(L?.ml) && Number.isFinite(L.ml[i]) && L.ml[i] !== 0 && (!q || !q[s] || usable(q[s]));
+        if (ok('home', 0) && ok('away', 1)) books[k] = { home: L.ml[0], away: L.ml[1] };
+      }
+      return { id: String(r.pk), start: r.start, day: r.day, matchup: r.matchup, names: r.names || null, read: { tier: r.tier, side: r.side, gap: r.gap, pHome: r.pHome ?? null, market: r.market ?? null, price: r.price ?? null, dk: r.dk || null, openerSeenAt: r.openerSeenAt || null, note: r.note || null }, books };
+    });
+    sendJSON(res, 200, { now, ready: !!(Vas.status().history && Vas.status().history.complete), games });
+    return true;
+  }
   if (p === '/api/vas/record' && M === 'GET') {
     if (roleOf(req) !== 'owner') { sendJSON(res, 403, { error: 'Owner only.' }); return true; }
     sendJSON(res, 200, Vas.summary()); return true;

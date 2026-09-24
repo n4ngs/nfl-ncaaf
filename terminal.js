@@ -94,6 +94,10 @@ const Board = require('./board')({ dataDir: DATA_DIR, sports: SPORTS, ownerName:
 // Owner-only model proof page (<ADMIN_PATH>/proof): holdout proof + live closing-line record for every sport.
 const Research = require('./research')({ adminPath: GATED ? ADMIN_PATH : '', sports: SPORTS, logo: LOGO });
 const Proof = require('./proof')({ adminPath: GATED ? ADMIN_PATH : '', sports: SPORTS, logo: LOGO, ownerCookie: `ps_code=${OWNER_HASH}; hl_code=${OWNER_HASH}; bbl_access=${BBL_OWNER}` });
+// Edges (/edges): every qualifying signal across the four boards on one screen. Computed once a minute from each
+// engine's compact /api/edges feed over loopback and served from cache; never computed per request.
+const Edges = require('./edges')({ sports: SPORTS, adminPath: GATED ? ADMIN_PATH : '', ownerCookie: `ps_code=${OWNER_HASH}; hl_code=${OWNER_HASH}; bbl_access=${BBL_OWNER}` });
+Edges.start();
 const MANIFEST = JSON.stringify({
   name: BRAND, short_name: BRAND, start_url: '/', scope: '/', display: 'standalone',
   background_color: '#0B0B0D', theme_color: '#0B0B0D',
@@ -397,12 +401,13 @@ const server = http.createServer(async (req, res) => {
 
   // Open boards: a browser with no sign-in becomes a guest on the spot — cookies set on this response and
   // added to this request, so the engine sees a guest now, not after a reload. Admin is never granted here.
-  if (GATED && !r && OPEN_BOARDS && GUEST_HASH && (pathname === '/' || /^\/(nfl|ncaaf|mlb|nhl)(\/|$)/.test(pathname))) {
+  if (GATED && !r && OPEN_BOARDS && GUEST_HASH && (pathname === '/' || /^\/(nfl|ncaaf|mlb|nhl|edges)(\/|$)/.test(pathname))) {
     setAuth(res, 'guest', isHttps(req));
     req.headers.cookie = `${req.headers.cookie ? req.headers.cookie + '; ' : ''}ps_guest=${GUEST_HASH}; hl_guest=${GUEST_HASH}; bbl_guest=${BBL_GUEST}`;
     r = 'guest';
     Board.entrance(who, 'guest', 'open');
   }
+  if (Edges.handle(req, res, pathname, qs, GATED ? r : 'owner')) return;
   const featureRoute = pathname === '/opportunities' || pathname === '/opportunities/' || pathname.startsWith('/api/opportunities') || pathname === '/api/notifications';
   if (featureRoute) {
     if (GATED && !r && !OPEN_BOARDS) { res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end('{"error":"Sign in"}'); }
@@ -488,7 +493,7 @@ const server = http.createServer(async (req, res) => {
               .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, script => /localStorage\.setItem\(["'](?:ps|hl)\.(?:ok|key)["']/.test(script) ? '' : script);
           }
           if (account || r !== 'owner') html = html.replace('</head>', '<script>try{localStorage.removeItem("ps.ok");localStorage.removeItem("hl.ok");sessionStorage.removeItem("ps.heal");sessionStorage.removeItem("hl.heal")}catch(e){}</script></head>');
-          if (GATED && ADMIN_PATH && r === 'owner') html = html.replace('</nav></div><style>', `</nav>${ADMIN_PILL}</div><style>`);
+          html = html.replace('</nav></div><style>', `</nav>${EDGES_LINK}${GATED && ADMIN_PATH && r === 'owner' ? ADMIN_PILL : ''}</div><style>`);
           h['cache-control'] = 'no-store';
           h.vary = 'accept-encoding, cookie';
           h['referrer-policy'] = 'no-referrer';
@@ -531,10 +536,17 @@ const server = http.createServer(async (req, res) => {
  } catch { if (!res.headersSent) res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' }); if (!res.writableEnded) res.end('{"error":"Service is temporarily unavailable."}'); }
 });
 
+// Edges, next to the sport switcher on every board (everyone). Styled from the board's own tokens.
+const EDGES_LINK = '<a class="xedge" href="/edges">Edges</a>'
+  + '<style>#xsport .xedge{display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:0 13px;border-radius:9px;font-size:13px;font-weight:650;color:inherit;'
+  + 'text-decoration:none;flex:none;border:1px solid color-mix(in srgb,currentColor 24%,transparent)}#xsport .xedge:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent,#EE3A2E)}'
+  + '#xsport .xedge:hover{background:color-mix(in srgb,currentColor 8%,transparent)}@media (max-width:560px){#xsport .xedge{padding:0 9px;font-size:12px;gap:5px;min-height:40px}}'
+  // On a phone the owner's bar also carries Admin: drop the brand mark there so nothing wraps to a second row.
+  + '@media (max-width:420px){#xsport .xedge:before{display:none}#xsport .xedge{padding:0 7px}#xsport:has(.xadm) .brand{display:none}#xsport .xadm{padding:0 8px}#xsport .xadm:before{display:none}#xsport:has(.xadm) .xedge{padding:0 6px}}</style>';
 // The owner-only way in, placed at the end of the sport bar. Styled from the board's own tokens.
 const ADMIN_PILL = `<a class="xadm" href="${ADMIN_PATH}" aria-label="Admin Center">Admin</a>`
   + '<style>#xsport .xadm{margin-left:auto;display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:10px;border:1px solid var(--line);'
-  + 'font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;background:var(--fill)}#xsport .xadm:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}'
+  + 'font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;background:var(--fill)}#xsport .xadm:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent,#EE3A2E)}'
   + '#xsport .xadm:hover{border-color:var(--ink-3,var(--line))}@media (max-width:560px){#xsport .xadm{padding:0 10px}}</style>';
 
 server.requestTimeout = 0;
@@ -548,5 +560,5 @@ server.listen(PORT, () => {
 });
 
 let down = false;
-function shutdown() { if (down) return; down = true; opportunityHTTP.close(); opportunities.close(); owlsFeed.stop(); sharpFeed.stop(); Object.values(sharpRelays).forEach(relay => relay.close()); Object.values(oddsRelays).forEach(relay => relay.close()); Board.close(); for (const k of Object.keys(children)) { const c = children[k]; if (c) { c.removeAllListeners('exit'); try { c.kill('SIGTERM'); } catch {} } } server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); }
+function shutdown() { if (down) return; down = true; Edges.stop(); opportunityHTTP.close(); opportunities.close(); owlsFeed.stop(); sharpFeed.stop(); Object.values(sharpRelays).forEach(relay => relay.close()); Object.values(oddsRelays).forEach(relay => relay.close()); Board.close(); for (const k of Object.keys(children)) { const c = children[k]; if (c) { c.removeAllListeners('exit'); try { c.kill('SIGTERM'); } catch {} } } server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); }
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, shutdown);
