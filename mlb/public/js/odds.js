@@ -1425,12 +1425,22 @@ function oddsEdgeRows(all = false) {
     if (!r) groups.set(k, { ...e, books: [e.book] });
     else { r.books.push(e.book); r.onlyBook = false; if (e.age != null && (r.age == null || e.age < r.age)) r.age = e.age; }
   }
+  // Both sides of the same number showing a gap (Over 8.5 at one book, Under 8.5 at another) is the books disagreeing
+  // with each other, not a lean: each side alone is close to a coin flip. Mark both rows so they say so.
+  const num = (e) => (e.mkt === 't' ? e.line : e.line == null ? 'ml' : e.side === 'home' ? e.line : -e.line);
+  const OTHER = { home: 'away', away: 'home', over: 'under', under: 'over' }, bySide = new Map();
+  for (const r of groups.values()) { const k = `${r.pk}|${r.mkt}|${num(r)}|${r.side}`, b = bySide.get(k); if (!b || r.ev > b.ev) bySide.set(k, r); }
+  for (const r of groups.values()) {
+    const o = bySide.get(`${r.pk}|${r.mkt}|${num(r)}|${OTHER[r.side]}`);
+    r.twoWay = o ? { pick: oddsPick(o.g, o.mkt, o.side, o.line), odds: o.odds, books: o.books } : null;
+  }
   const rank = { solid: 0, thin: 1, weak: 2 };
   return [...groups.values()].sort((a, b) => Date.parse(a.g.start) - Date.parse(b.g.start) || a.pk - b.pk || rank[a.conf] - rank[b.conf]);
 }
 const oddsEdgePct = (e) => `+${Math.max(1, Math.round(e.ev * 100))}%`;
 function oddsEdgeCaveats(e) {
   const c = [];
+  if (e.twoWay) c.push(`Other side too: ${e.twoWay.pick} ${oddsFmt(e.twoWay.odds)} at ${e.twoWay.books.map(oddsBookName).join(', ')}, books disagree, a coin flip alone`);
   if (e.evMkt != null && e.evMkt < 0) c.push('Other books disagree');
   if (e.onlyBook) c.push('Only book at this price');
   const age = e.age != null ? Math.round(e.age / 60e3) : null;

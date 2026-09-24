@@ -27,3 +27,22 @@ for (const sport of ['nfl', 'ncaaf']) {
     assert.match(c.api.edgeCaveats(by('over', 45.5))[0], /^Other side too: Under 45\.5 \+105 at DK, books disagree, a coin flip alone$/);
   });
 }
+
+test('MLB Edge Finder: both sides of the same number are marked, and say it is a coin flip alone', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../mlb/public/js/odds.js'), 'utf8');
+  const body = src.slice(src.indexOf('function oddsEdgeRows('), src.indexOf('const oddsEdgePct'));
+  const cav = src.slice(src.indexOf('function oddsEdgeCaveats(e)'), src.indexOf('const oddsEdgeWhen'));
+  const g = { pk: 1, start: '2026-09-24T17:00:00Z', home: { abbr: 'NYY' }, away: { abbr: 'BOS' } };
+  const row = (mkt, side, book, line, odds, ev) => ({ g, pk: 1, mkt, side, book, line, odds, ev, conf: 'thin', onlyBook: false, age: null });
+  const list = [row('t', 'over', 'mgm', 8.5, 105, 0.017), row('t', 'under', 'dk', 8.5, 105, 0.017), row('ml', 'home', 'mgm', null, 110, 0.02), row('rl', 'away', 'czr', 1.5, 150, 0.02)];
+  const c = { oddsDayGames: () => [g], oddsIsPre: () => true, oddsEdgeScore: () => list, oddsShowWeak: () => true, oddsFmt: (o) => (o > 0 ? '+' + o : String(o)),
+    oddsBookName: (k) => k.toUpperCase(), oddsGame: () => null, ODDS: { moves: new Map() }, serverNow: () => 0, Map, Set };
+  c.oddsPick = (gg, mkt, side, line) => (mkt === 't' ? `${side === 'over' ? 'Over' : 'Under'} ${line}` : `${gg[side].abbr}${line == null ? ' ML' : ' ' + line}`);
+  vm.createContext(c); vm.runInContext(body + cav + '\nglobalThis.api = { oddsEdgeRows, oddsEdgeCaveats };', c);
+  const rows = c.api.oddsEdgeRows();
+  const over = rows.find((r) => r.side === 'over');
+  assert.equal(over.twoWay.pick, 'Under 8.5');
+  assert.match(c.api.oddsEdgeCaveats(over)[0], /^Other side too: Under 8\.5 \+105 at DK, books disagree, a coin flip alone$/);
+  assert.equal(rows.find((r) => r.mkt === 'ml').twoWay, null);
+  assert.equal(rows.find((r) => r.mkt === 'rl').twoWay, null);
+});
