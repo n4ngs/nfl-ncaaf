@@ -1,2 +1,0 @@
-{ "about": "Seed for the owner's pins (copied to DATA_DIR/ncaaf/ncaaf-vas/pins.json once, when that file does not exist). A pin is the owner's own call, shown with a Pinned tag; it never changes the model's numbers.",
-  "pins": { "401856699": { "team": "145", "name": "Ole Miss", "side": "away", "at": "2026-09-23T00:00:00Z", "matchup": "MISS @ FLA", "start": "2026-09-26T19:30:00Z" } } }

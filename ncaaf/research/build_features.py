@@ -4,13 +4,6 @@ import os, json, numpy as np, pandas as pd, time
 from features import walk, CFG, STATS
 G = pd.read_parquet('data/cache/games.parquet'); M = pd.read_parquet('data/cache/market.parquet')
 G = G.merge(M[['gid', 'close']], on='gid', how='left')
-# why_line.py context (fetch_context.py): poll rank at kickoff (99 = unranked), first-year head coach, attendance
-RK = pd.read_parquet('data/cache/ranks.parquet'); G = G.merge(RK, on='gid', how='left')
-for c in ('home_rank', 'away_rank'): G[c] = G[c].fillna(99).astype(int)
-CO = pd.read_parquet('data/cache/coaches.parquet')[['team', 'season']].drop_duplicates(); NC = set(zip(CO.team, CO.season))
-for s_ in ('home', 'away'): G[s_ + '_newc'] = [int((t, S) in NC) for t, S in zip(G[s_ + '_id'], G.season)]
-ATT = pd.concat([pd.read_csv(f'data/sdv/cfb_schedule_{S}.csv', usecols=['game_id', 'attendance']) for S in range(2014, 2027)]).rename(columns={'game_id': 'gid'})
-G = G.merge(ATT.drop_duplicates('gid'), on='gid', how='left')
 PARITY = os.environ.get('PARITY')
 if os.environ.get('CLOSE_SRC') == 'espn':
     # live-loader rule (ncaaf/lib/vas-data.js): consensus close = median of ESPN core odds top-level `spread` over real
@@ -23,7 +16,7 @@ if os.environ.get('CLOSE_SRC') == 'espn':
         ec[e['id']] = float(np.median(v)) if v else np.nan
     G['close'] = G.gid.map(ec)
 if PARITY: G = G[G.season >= int(PARITY)].reset_index(drop=True)
-cols = ['gid', 'season', 'start', 'neutral', 'conf_game', 'home_id', 'away_id', 'home_pts', 'away_pts', 'home_fbs', 'away_fbs', 'home_qb', 'away_qb', 'close', 'home_rank', 'away_rank', 'home_newc', 'away_newc', 'attendance'] + \
+cols = ['gid', 'season', 'start', 'neutral', 'conf_game', 'home_id', 'away_id', 'home_pts', 'away_pts', 'home_fbs', 'away_fbs', 'home_qb', 'away_qb', 'close'] + \
        ([] if PARITY else ['home_qb1', 'away_qb1']) + \
        [f'{s}_{k}' for s in ('home', 'away') for k in STATS if k != 'pts']
 recs = []
@@ -32,11 +25,9 @@ for r in G[cols].to_dict('records'):
         if isinstance(v, (np.integer,)): r[k] = int(v)
         elif isinstance(v, (np.floating,)): r[k] = float(v)
     r['close'] = None if r['close'] != r['close'] else r['close']
-    r['attendance'] = None if r['attendance'] != r['attendance'] else r['attendance']
     recs.append(r)
 t0 = time.time()
 feats, W = walk(recs, CFG, keep_sides=bool(PARITY), late=not PARITY)
-if not PARITY: json.dump(recs, open('data/cache/walk_recs.json', 'w'))   # why_line.py re-walks with other configs
 print(f'walk: {len(feats)} games in {time.time()-t0:.1f}s')
 if PARITY:
     os.makedirs('data/cache/parity', exist_ok=True)

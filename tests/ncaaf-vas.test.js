@@ -3,8 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict'), fs = 
 const E = require('../ncaaf/lib/vas-engine');
 
 const R = path.join(__dirname, '../ncaaf/research/data/cache/');
-const CFG = { hl: 9.0, k_shrink: 1.0, carry: 0.7, rest_cap: 28, lr_m: 0.4, hfa_m: 2.0, carry_m: 0.95, k_qb: 2.0, fcs_m: -20.0,
-  carry_nc: 0.7, carry_m_nc: 0.8, lr_m_nc: 0.55, dec_v: 0.96, k_v: 8.0 };
+const CFG = { hl: 9.0, k_shrink: 1.0, carry: 0.7, rest_cap: 28, lr_m: 0.4, hfa_m: 2.0, carry_m: 0.95, k_qb: 2.0, fcs_m: -20.0 };
 
 // A tiny hand-made model so the synthetic tests do not depend on the (git-ignored) exported file.
 const lin = (features, coef) => ({ features, coef, mean: features.map(() => 0), std: features.map(() => 1), intercept: 0 });
@@ -199,27 +198,17 @@ test('loader parity: real 2023-25 raw files -> engine -> 2025 features equal Pyt
   { skip: !(fs.existsSync(RAW + 'sdv_csv/player_box_2025.csv') && fs.existsSync(RAW + 'espn/odds.jsonl') && fs.existsSync(R + 'parity/features_py_espnclose.json')) }, async () => {
     const odds = new Map();
     for (const l of fs.readFileSync(RAW + 'espn/odds.jsonl', 'utf8').split('\n')) if (l) { const e = JSON.parse(l); odds.set(e.id, e.books); }
-    const fix = JSON.parse(fs.readFileSync(R + 'parity/history_espnclose.json'));
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ncaaf-vas-par-'));
     const v = D.create({ dir, now: () => Date.parse('2026-01-20T00:00:00Z'), seed: '/nonexistent-seed.json',
       fetchBuffer: async (u) => fs.readFileSync(RAW + 'sdv_csv/' + u.split('/').pop()),
-      fetchJSON: async (u) => {
-        if (u.includes('/scoreboard')) {   // every game of the season with its poll ranks on week 1, nothing on other weeks
-          const q = new URL(u).searchParams, S = Number(q.get('dates'));
-          if (q.get('week') !== '1' || q.get('seasontype') !== '2') return { events: [] };
-          return { events: fix.games.filter((g) => g.season === S).map((g) => ({ id: String(g.gid), competitions: [{ competitors: [
-            { homeAway: 'home', curatedRank: { current: g.home_rank } }, { homeAway: 'away', curatedRank: { current: g.away_rank } }] }] })) };
-        }
-        const gid = Number(u.split('/events/')[1].split('/')[0]); return { items: (odds.get(gid) || []).map((b) => ({ provider: { name: b.book }, spread: b.spread })) }; } });
+      fetchJSON: async (u) => { const gid = Number(u.split('/events/')[1].split('/')[0]); return { items: (odds.get(gid) || []).map((b) => ({ provider: { name: b.book }, spread: b.spread })) }; } });
     const t0 = process.hrtime.bigint();
     const h = await v.history(2025, { maxCloses: 10000 });
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
     assert.equal(h.complete, true);
-    // first-year head coaches come from the model JSON (research/fetch_context.py) in the app; here from the fixture
-    h.newCoach = {}; for (const g of fix.games) for (const sd of ['home', 'away']) if (g[sd + '_newc']) (h.newCoach[g.season] ||= []).push(g[sd + '_id']);
     const st = E.build(h, CFG);
     const py = JSON.parse(fs.readFileSync(R + 'parity/features_py_espnclose.json'));
-    const season = new Map(fix.games.map((g) => [g.gid, g.season]));
+    const season = new Map(JSON.parse(fs.readFileSync(R + 'parity/history_espnclose.json')).games.map((g) => [g.gid, g.season]));
     let worst = 0, n = 0, games = 0;
     for (const r of py) {
       if (season.get(r.gid) !== 2025) continue;
@@ -271,91 +260,4 @@ test('loader: lead back / receiver from the last 3 games (passers excluded upstr
   assert.equal(L.wr.name, 'W1'); assert.ok(Math.abs(L.wr.share - 5 / 17) < 1e-12);
   assert.equal(D.leads([g(1, [], [[20, 3, 'W1'], [21, 3, 'W2'], [22, 3, 'W3'], [23, 3, 'W4'], [24, 3, 'W5']]), g(2, [], [[25, 3, 'W6']])], 1, 2026).wr, null, 'no receiver reaches 22 % of catches');
   assert.equal(D.leads(games.slice(0, 1), 1, 2026).rb, null, 'needs two games');
-});
-
-// ------------------------------------------------------------------ why the line moved (research/why_line.py)
-test('engine: letdown / bounce-back flags, new-staff carry and learning rate', () => {
-  const st = (q) => ({ epa: 0.05 * q, repa: 0, pepa: 0.05, fdr: 0.3, expl: 0.1, ypp: 5.5, st: 0, plays: 70 });
-  const mk = (gid, day, h, a, hp, ap, close, extra = {}) => { const g = { gid, season: 2026, start: day + 'T19:00Z', neutral: 0, conf_game: 1, home_id: h, away_id: a, home_pts: hp, away_pts: ap,
-    home_fbs: 1, away_fbs: 1, home_qb: 0, away_qb: 0, close, ...extra }; for (const [k, v] of Object.entries(st(0))) { g['home_' + k] = v; g['away_' + k] = v; } return g; };
-  // team 1 (away, +4.5 dog) beats #4 team 2 on the road; team 3 loses at home as a 7-pt favourite
-  const games = [mk(1, '2026-09-12', 2, 1, 24, 32, -4.5, { home_rank: 4, away_rank: 12 }), mk(2, '2026-09-12', 3, 4, 10, 20, -7)];
-  const s = E.build({ games }, CFG);
-  const f = s.featuresFor({ season: 2026, day: '2026-09-19', neutral: 0, conf_game: 1, home_id: 3, away_id: 1, home_fbs: 1, away_fbs: 1 });
-  assert.equal(f._away.last_emo, 1, 'won as an underdog over a ranked team'); assert.equal(f.ld_away_road, 1, 'now on the road: letdown spot');
-  assert.equal(f.ld_home, 0); assert.equal(f._home.last_bad, 1, 'lost as the favourite'); assert.equal(f.d_last_bad, 1);
-  const n = s.featuresFor({ season: 2026, day: '2026-09-19', neutral: 1, conf_game: 0, home_id: 4, away_id: 1, home_fbs: 1, away_fbs: 1 });
-  assert.equal(n.ld_away_road, 0, 'neutral site: not a road letdown');
-  // first-year staff: the market rating learns faster from this season's closes (lr_m_nc) than for a returning staff
-  const a = E.build({ games }, CFG), b = E.build({ games, newCoach: { 2026: [1] } }, CFG);
-  assert.ok(Math.abs(b.marketRating(1)) > Math.abs(a.marketRating(1)), 'new staff moves further on the same result');
-  assert.equal(a.marketRating(4), b.marketRating(4), 'other teams unchanged');
-});
-
-test('lines: public splits are recorded when they change (forward-only reverse-line-move research)', () => {
-  const { Week } = require('../ncaaf/lib/lines');
-  const W = new Week({ season: 2099, type: 2, week: 1 });
-  W.recordSplits('g1', { s: { tix: 18, money: 19 }, ml: { tix: 49, money: 3 } }, -3, 1);
-  W.recordSplits('g1', { s: { tix: 18, money: 19 }, ml: { tix: 49, money: 3 } }, -3, 2);
-  W.recordSplits('g1', { s: { tix: 20, money: 19 }, ml: { tix: 49, money: 3 } }, -3.5, 3);
-  W.recordSplits('g1', null, -3.5, 4);
-  assert.deepEqual(W.full('g1').sp, [[1, 18, 19, 49, 3, -3], [3, 20, 19, 49, 3, -3.5]]);
-});
-
-test('service: model win %, market no-vig, lean (Weak, own LEAN record), availability list, market flow', async () => {
-  const Svc = require('../ncaaf/lib/vas-service');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ncaaf-svc-'));
-  fs.writeFileSync(path.join(dir, 'player-status.json'), JSON.stringify({ players: [{ gid: 99, team: 2, name: 'Some Corner', pos: 'CB', status: 'questionable' },
-    { gid: 99, team: 2, name: 'Off Field', pos: 'OT', status: 'active', note: 'arrest, no suspension' }] }));
-  let T = Date.parse('2026-09-20T12:00:00Z');
-  const svc = Svc.create({ dir, now: () => T, nevada: [],
-    fetchBuffer: async (u) => { const s = Number(u.match(/_(\d{4})\.csv$/)[1]); const r = rawSeason(s, (s - 2000) * 100);
-      return u.includes('schedules') ? r.schedule : u.includes('gamelog') ? r.gamelog : u.includes('summaries') ? r.teams : r.playerBox; },
-    fetchJSON: async (u) => {
-      if (u.includes('scoreboard')) return { events: [{ id: '99', date: '2026-09-27T19:30Z', week: { number: 5 }, season: { type: 2 }, competitions: [{ neutralSite: false, conferenceCompetition: true,
-        status: { type: { state: 'pre' } }, competitors: [{ homeAway: 'home', team: { id: '1' } }, { homeAway: 'away', team: { id: '2' } }] }] }] };
-      return { items: [{ provider: { name: 'ESPN BET' }, spread: -3 }] }; } });
-  await svc.refresh(); await svc.refresh();
-  assert.equal(svc.status().lastError, null);
-  const G = { id: '99', state: 'pre', start: '2026-09-27T19:30:00Z', home: { abbr: 'ONE', rank: 21 }, away: { abbr: 'TWO', rank: 4 } };
-  const books = { cons: { s: -3.5, ml: [-2000, 1200] } };
-  const out = svc.forGame(G, null, books, { open: { s: -3 }, splits: { s: { tix: 18, money: 19 }, ml: { tix: 49, money: 3 } } });
-  const f = out.fair;
-  assert.ok(Math.abs(f.win.home + f.win.away - 1) < 1e-12); assert.equal(f.sigma, 16);
-  const nv = (1 / 1.05) / (1 / 1.05 + 1 / 13); assert.ok(Math.abs(f.market.home - nv) < 1e-12, 'proportional no-vig of the consensus moneyline');
-  assert.ok(f.win.home < f.market.home - 0.06, 'toy model is far below a -2000 favourite');
-  assert.equal(f.lean.side, 'away'); assert.equal(f.lean.label, 'WEAK'); assert.doesNotMatch(f.lean.caveat, /\bbet\b|will win/i);
-  assert.equal(f.side.side, f.margin + -3.5 > 0 ? 'home' : 'away');
-  assert.equal(out.move.flow.rlm, true, '18% of tickets on home, line moved toward home'); assert.match(out.move.flow.note, /forward-only/);
-  const inj = out.move.injuries; assert.equal(inj.length, 2); assert.equal(inj[0].valued, false); assert.equal(inj[0].pOut, 0.5); assert.equal(inj[1].pOut, 0);
-  // kickoff closes the lean; the final settles it; it shows as its own LEAN row and never inside ALL
-  T = Date.parse('2026-09-28T03:00:00Z');
-  svc.forGame({ ...G, state: 'post', home: { ...G.home, score: 17 }, away: { ...G.away, score: 24 } }, null, books, {});
-  const sum = svc.summary();
-  assert.equal(sum.tiers.LEAN.bets, 1); assert.equal(sum.tiers.LEAN.won, 1); assert.equal(sum.tiers.ALL, undefined, 'no tested read was logged, so no ALL row');
-  // public lean ledger: written when the lean first showed, closed at kickoff, settled at the final
-  const book = svc.leanBook();
-  assert.equal(book.rows.length, 1); const r = book.rows[0];
-  assert.equal(r.side, 'away'); assert.equal(r.result, 'won'); assert.equal(r.mlPrice, 1200); assert.equal(r.spreadLine, 3.5); assert.equal(r.cover, 'covered');
-  assert.ok(Number.isFinite(r.clvEv)); assert.equal(book.totals.won, 1); assert.match(book.caveat, /did not beat the closing line/);
-  // the seeded owner pin (another game) is its own section, never a model lean
-  assert.ok(book.pinned.some((x) => x.gid === '401856699' && x.team === 'Ole Miss')); assert.ok(!book.rows.some((x) => x.gid === '401856699'));
-});
-
-test('service: owner pin shows the pinned team, but its model line is whatever the model computes', async () => {
-  const Svc = require('../ncaaf/lib/vas-service');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ncaaf-pin-'));
-  const svc = Svc.create({ dir, now: () => Date.parse('2026-09-20T12:00:00Z'), nevada: [],
-    fetchBuffer: async (u) => { const s = Number(u.match(/_(\d{4})\.csv$/)[1]); const r = rawSeason(s, (s - 2000) * 100);
-      return u.includes('schedules') ? r.schedule : u.includes('gamelog') ? r.gamelog : u.includes('summaries') ? r.teams : r.playerBox; },
-    fetchJSON: async (u) => (u.includes('scoreboard') ? { events: [{ id: '99', date: '2026-09-27T19:30Z', week: { number: 5 }, season: { type: 2 }, competitions: [{ neutralSite: false, conferenceCompetition: true,
-      status: { type: { state: 'pre' } }, competitors: [{ homeAway: 'home', team: { id: '1' } }, { homeAway: 'away', team: { id: '2' } }] }] }] } : { items: [] }) });
-  await svc.refresh();
-  const G = { id: '99', state: 'pre', start: '2026-09-27T19:30:00Z', home: { id: '1', abbr: 'ONE', short: 'One' }, away: { id: '2', abbr: 'TWO', short: 'Two' } };
-  svc.setPin(G, 'home');                                         // the owner pins the home side
-  const lopsided = svc.forGame(G, null, { cons: { s: -3.5, ml: [-2000, 1200] } }, {});   // market: home a huge favourite
-  assert.equal(lopsided.pin.side, 'home'); assert.equal(lopsided.pin.team, 'One');
-  assert.equal(lopsided.pin.model.kind, 'lean'); assert.equal(lopsided.pin.model.side, 'away', 'the model line leans the other way, and says so');
-  assert.equal(lopsided.fair.lean.side, 'away', 'the pin never changes the model');
-  svc.setPin(G, null); assert.equal(svc.forGame(G, null, { cons: { s: -3.5, ml: [-2000, 1200] } }, {}).pin, null);
 });

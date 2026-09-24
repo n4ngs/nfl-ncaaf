@@ -26,14 +26,6 @@ function build(history, cfg) {
   const dec = Math.pow(0.5, 1 / C.hl);
   const S = new Map(), league = new Map(), seasonOf = new Map(), lastDay = new Map(), fbsOf = new Map();
   const M = new Map(), qbLast = new Map(), QB = new Map(), recent = new Map();
-  // why_line.py additions: first-year staff (team:season), venue home edge (market + results views), home attendance
-  const newc = new Set(), V = new Map(), R = new Map(), A = new Map();
-  const cf = (k, d) => (Number.isFinite(C[k]) ? C[k] : d);
-  const carryNc = cf('carry_nc', C.carry), carryMNc = cf('carry_m_nc', C.carry_m), lrNc = cf('lr_m_nc', C.lr_m), decV = cf('dec_v', 0.96), kV = cf('k_v', 8);
-  const markNewc = (g) => { for (const sd of ['home', 'away']) if (g[sd + '_newc']) newc.add(g[sd + '_id'] + ':' + g.season); };
-  for (const [s, ids] of Object.entries(history.newCoach || {})) for (const t of ids) newc.add(t + ':' + Number(s));
-  const vdev = (D, t) => { const v = D.get(t); return v ? v[0] / (v[1] + kV) - v[2] / (v[3] + kV) : 0; };
-  const vadd = (D, h, a, x) => { for (const [t, i, y] of [[h, 0, x], [a, 2, -x]]) { let v = D.get(t); if (!v) { v = [0, 0, 0, 0]; D.set(t, v); } v[i] = v[i] * decV + y; v[i + 1] = v[i + 1] * decV + 1; } };
   const st = (t) => { let s = S.get(t); if (!s) { s = {}; S.set(t, s); } return s; };
   const mean = (key) => { const v = league.get(key); return v && v[1] > 0 ? v[0] / v[1] : 0; };
   const lg = (key) => { let v = league.get(key); if (!v) { v = [0, 0]; league.set(key, v); } return v; };
@@ -45,9 +37,8 @@ function build(history, cfg) {
   }
   function carry(t, season) {
     if (seasonOf.has(t) && seasonOf.get(t) !== season) {
-      const nc = newc.has(t + ':' + season);
-      const s = st(t); for (const key of Object.keys(s)) s[key] = s[key] * (nc ? carryNc : C.carry);
-      if (M.has(t)) M.set(t, M.get(t) * (nc ? carryMNc : C.carry_m));
+      const s = st(t); for (const key of Object.keys(s)) s[key] = s[key] * C.carry;
+      if (M.has(t)) M.set(t, M.get(t) * C.carry_m);
       seasonOf.set(t, season);
     }
   }
@@ -68,11 +59,6 @@ function build(history, cfg) {
     r.qb = q;
     const L = recent.get(t), same = !!L && L[0] === season;
     r.last_ats = same ? L[1] : 0; r.last_upset = same ? L[2] : 0; r.last_blowout = same ? L[3] : 0;
-    r.last_emo = same ? L[4] : 0; r.last_bad = same ? L[5] : 0;
-    r.newc = newc.has(t + ':' + season) ? 1 : 0;
-    r.venue_m = vdev(V, t); r.venue_r = vdev(R, t);
-    const at = A.get(t), lm = mean('all:att');
-    r.att = at ? (at[0] + 3 * lm) / (at[1] + 3) - lm : 0;
     return r;
   }
   // research-only: an arbitrary (e.g. the confirmed) starter's history for this team
@@ -81,8 +67,7 @@ function build(history, cfg) {
     return [Math.log1p(qs[0]), (qs[1] + C.k_qb * mean('all:qb_pepa')) / (qs[0] + C.k_qb)];
   }
   function updateDay(games) {
-    const adj = [], pre = new Map();
-    for (const g of games) pre.set(g.gid, (rating(g.home_id, 'o', 'pts') - rating(g.home_id, 'd', 'pts')) - (rating(g.away_id, 'o', 'pts') - rating(g.away_id, 'd', 'pts')));
+    const adj = [];
     for (const g of games) {
       for (const [sd, other] of [['home', 'away'], ['away', 'home']]) {
         const t = g[sd + '_id'], o = g[other + '_id'];
@@ -108,14 +93,6 @@ function build(history, cfg) {
     }
     for (const g of games) {
       const d = dayOf(g.start);
-      if (!g.neutral) {
-        vadd(R, g.home_id, g.away_id, (g.home_pts - g.away_pts) - pre.get(g.gid));
-        const att = g.attendance;
-        if (ok(att) && att > 0) {
-          const la = Math.log(att); let v = A.get(g.home_id); if (!v) { v = [0, 0]; A.set(g.home_id, v); }
-          v[0] += la; v[1] += 1; const w = lg('all:att'); w[0] += la; w[1] += 1;
-        }
-      }
       for (const sd of ['home', 'away']) {
         const t = g[sd + '_id'];
         seasonOf.set(t, g.season); lastDay.set(t, d); fbsOf.set(t, g[sd + '_fbs']);
@@ -132,20 +109,16 @@ function build(history, cfg) {
         const h = g.home_id, a = g.away_id;
         const mh = M.has(h) ? M.get(h) : (g.home_fbs ? 0 : C.fcs_m), ma = M.has(a) ? M.get(a) : (g.away_fbs ? 0 : C.fcs_m);
         const err = -c - (mh - ma + C.hfa_m * (1 - g.neutral));
-        const lh = newc.has(h + ':' + g.season) ? lrNc : C.lr_m, la = newc.has(a + ':' + g.season) ? lrNc : C.lr_m;
-        M.set(h, mh + lh * err); M.set(a, ma - la * err);
-        if (!g.neutral) vadd(V, h, a, err);
+        M.set(h, mh + C.lr_m * err); M.set(a, ma - C.lr_m * err);
         const m = g.home_pts - g.away_pts;
-        const hr = g.home_rank || 99, ar = g.away_rank || 99;
-        // emotional win = beat a ranked team or won as an underdog; bad loss = lost as the favourite
-        recent.set(h, [g.season, Math.max(-28, Math.min(28, m + c)), m > 0 && c > 0 ? 1 : 0, m > 21 ? 1 : 0, m > 0 && (ar <= 25 || c > 0) ? 1 : 0, m < 0 && c < 0 ? 1 : 0]);
-        recent.set(a, [g.season, Math.max(-28, Math.min(28, -m - c)), m < 0 && c < 0 ? 1 : 0, -m > 21 ? 1 : 0, m < 0 && (hr <= 25 || c < 0) ? 1 : 0, m > 0 && c > 0 ? 1 : 0]);
+        recent.set(h, [g.season, Math.max(-28, Math.min(28, m + c)), m > 0 && c > 0 ? 1 : 0, m > 21 ? 1 : 0]);
+        recent.set(a, [g.season, Math.max(-28, Math.min(28, -m - c)), m < 0 && c < 0 ? 1 : 0, -m > 21 ? 1 : 0]);
       }
     }
   }
 
   const byDay = new Map();
-  for (const g of history.games) { const d = dayOf(g.start); if (!byDay.has(d)) byDay.set(d, []); byDay.get(d).push(g); markNewc(g); }
+  for (const g of history.games) { const d = dayOf(g.start); if (!byDay.has(d)) byDay.set(d, []); byDay.get(d).push(g); }
   const featured = new Map();
   for (const d of [...byDay.keys()].sort()) {
     const dg = byDay.get(d).slice().sort((x, y) => (x.start < y.start ? -1 : x.start > y.start ? 1 : x.gid - y.gid));
@@ -160,7 +133,6 @@ function build(history, cfg) {
     // game: {season, start|day, neutral, conf_game, home_id, away_id, home_fbs, away_fbs}; opts.late = {homeQb, awayQb}
     featuresFor(g, opts = {}) {
       const d = g.day || dayOf(g.start);
-      markNewc(g);
       const h = side(g.home_id, g.season, d, g.home_fbs), a = side(g.away_id, g.season, d, g.away_fbs);
       const f = { ...combine(h, a, g), _home: h, _away: a };
       if (opts.late) {
@@ -172,17 +144,6 @@ function build(history, cfg) {
       return f;
     },
     marketRating: (t) => M.get(t),
-    // venue home edge in points (market view: what closing lines priced at this venue; results view: noisy), for display
-    venue(t) {
-      const est = (D, flat) => {
-        const devs = []; for (const k of D.keys()) if (fbsOf.get(k) && D.get(k)[1] > 10) devs.push(vdev(D, k));
-        if (!devs.length || !D.has(t)) return null;
-        const lgHfa = flat + devs.reduce((x, y) => x + y, 0) / devs.length / 2;
-        const v = flat ? flat + vdev(D, t) - (lgHfa - flat) : vdev(D, t) - lgHfa;
-        return { pts: v, league: lgHfa, rank: devs.filter((x) => x > vdev(D, t)).length + 1, of: devs.length, games: D.get(t)[1] };
-      };
-      return { market: est(V, C.hfa_m), results: est(R, 0) };
-    },
   };
 }
 
@@ -196,11 +157,6 @@ function combine(h, a, g) {
   f.min_n = Math.min(h.n, a.n);
   f.d_qb_starts = h.qb_starts - a.qb_starts; f.d_qb_pepa = h.qb_pepa - a.qb_pepa;
   f.d_last_ats = h.last_ats - a.last_ats; f.d_last_upset = h.last_upset - a.last_upset; f.d_last_blowout = h.last_blowout - a.last_blowout;
-  const road = 1 - g.neutral;
-  // letdown: the away team comes off an emotional win and is on the road; the home team off one; bounce-back diff
-  f.ld_away_road = a.last_emo * road; f.ld_home = h.last_emo; f.d_last_bad = h.last_bad - a.last_bad;
-  f.d_newc = h.newc - a.newc;
-  f.x_venue_m = h.venue_m * road; f.x_venue_r = h.venue_r * road; f.x_att = h.att * road;
   f.neutral = g.neutral; f.conf_game = g.conf_game; f.home_fbs = g.home_fbs; f.away_fbs = g.away_fbs;
   return f;
 }
@@ -265,7 +221,6 @@ function totalSignal(f, total, market, model, variant = 'A') {
 const GROUPS = [
   ['gap', 'Model number vs the opening line', ['x_gap']],
   ['recency', 'Last week\'s result vs the spread (recency)', ['d_last_ats', 'd_last_upset', 'd_last_blowout']],
-  ['letdown', 'Letdown / bounce-back spot (big win last week, now on the road; or a loss as the favourite)', ['ld_away_road', 'ld_home', 'd_last_bad']],
   ['qb', 'Starting quarterback', ['d_qb_pepa', 'd_qb_starts', 'L_d_qb_starts', 'L_d_qb_pepa', 'L_home_qb_change', 'L_away_qb_change']],
   ['key', 'Lead back / lead receiver out', ['L_d_rb_out', 'L_d_wr_out']],
 ];
