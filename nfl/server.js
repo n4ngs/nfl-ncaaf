@@ -44,7 +44,9 @@ const SHARP = require('./lib/sharp');
 const { subscribe: subscribeSharp } = require('../shared/sharp-consumer');
 // Per-book openers (Owls history) and closes (Sharp closing), relayed by the terminal. Additive: shown on
 // the game detail as `reference`; the board's own open/close selection is unchanged.
-const Reference = require('../shared/reference-lines').subscribe('nfl', null);
+const Reference = require('../shared/reference-lines').subscribe('nfl', () => applyReference());
+// The full league injury report (dated rows), relayed by the terminal. Falls back to the summary's headline list.
+const Injuries = require('../shared/injuries').subscribe('nfl', null);
 const Bets = require('./lib/bets');
 const Manual = require('./lib/manual');
 const Group = require('./lib/group');
@@ -635,7 +637,44 @@ function applyPin(cache, selected = tracked()) {
   });
   for (const W of selected) W.at.pin = cache.receivedAt;
 }
+// Reference lines (terminal: Owls history openers, Sharp closing snapshots) enter the integrity ledger as their
+// own sources with the provider's clocks. The ledger's rules then decide: the earliest pregame quote is the open
+// and the newest fresh pregame quote is the close, so a timestamped book opener or a kickoff-frozen close wins
+// over ESPN's untimed DraftKings numbers, and ESPN remains the fallback when neither exists.
+function referenceLine(market, M) {
+  const sides = market === 't' ? ['over', 'under'] : ['home', 'away'];
+  const integrityMeta = { [market]: Object.fromEntries(sides.map((side, i) => [side, { source_observed_at: M.observed_at?.[i] || null, market_status: 'active' }])) };
+  if (market === 's') return { s: M.line, so: M.prices, integrityMeta };
+  if (market === 't') return { t: M.line, to: M.prices, integrityMeta };
+  return { ml: M.prices, integrityMeta };
+}
+function applyReference(selected = tracked()) {
+  // Isolated harnesses evaluate these helpers without the IPC subscription.
+  if (typeof Reference === 'undefined') return;
+  const now = Date.now(), dirty = [];
+  integrity.batch(() => {
+    for (const W of selected) {
+      const ids = new Set(), seen = W.refSig ||= new Map();
+      for (const G of W.games.values()) {
+        const ref = Reference.lookup(G.away?.name, G.home?.name, G.start);
+        if (!ref) continue;
+        const signature = JSON.stringify(ref);
+        if (seen.get(G.id) === signature) continue;
+        seen.set(G.id, signature);
+        for (const [source, books] of [['owls_open', ref.open], ['sharp_close', ref.close]]) {
+          for (const [book, B] of Object.entries(books || {})) for (const market of ['s', 't', 'ml']) {
+            if (B?.[market]?.prices) retainObservation(G, book, referenceLine(market, B[market]), source, now, false, 'full_game', null, { market_type: market });
+          }
+        }
+        ids.add(G.id);
+      }
+      if (ids.size) dirty.push([W, ids]);
+    }
+  });
+  for (const [W, ids] of dirty) flushGames(W, [...ids].map(id => W.games.get(id)).filter(Boolean));
+}
 function replayGlobalQuotes(W) {
+  applyReference([W]);
   if (globalQuotes.vsin) applyVsin(globalQuotes.vsin, [W]);
   if (globalQuotes.pin) applyPin(globalQuotes.pin, [W]);
   if (globalQuotes.owls) applyOwls(globalQuotes.owls, [W]);
@@ -1487,9 +1526,11 @@ const server = http.createServer(async (req, res) => {
         if (!G) continue;
         const s = await summary(G);
         if (s?.fpi && G.state === 'pre') W.fpi.set(G.id, { home: s.fpi.home, at: Date.now() });
-        let injuries = null; try { injuries = Model.injuries(G, s?.inj); } catch {}
+        let injuryReport = null; try { injuryReport = Injuries.forTeams(G.away?.name, G.home?.name); } catch {}
+        const leagueInj = injuryReport ? [['away', G.away], ['home', G.home]].map(([side, team]) => ({ team: String(team?.id || ''), rows: injuryReport[side] })).filter(t => t.rows.length) : null;
+        let injuries = null; try { injuries = Model.injuries(G, leagueInj?.length ? leagueInj : s?.inj); } catch {}
         let reference = null; try { reference = Reference.lookup(G.away?.name, G.home?.name, G.start); } catch {}
-        return sendJSON(res, 200, { now: Date.now(), game: pub(G, W), hist: integrityHistory(G, W), summary: s, injuries, reference });
+        return sendJSON(res, 200, { now: Date.now(), game: pub(G, W), hist: integrityHistory(G, W), summary: s, injuries, injuryReport, reference });
       }
       return sendJSON(res, 404, { error: 'That game is not loaded. Open its week first.' });
     }

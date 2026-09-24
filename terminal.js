@@ -25,6 +25,7 @@ const { createSharpFeed } = require('./shared/sharp-feed');
 const betLinks = require('./shared/bet-links').createLinkResolver();
 const { relayToChild: relaySharpToChild } = require('./shared/sharp-consumer');
 const { createReferenceLines, relayToChild: relayReferenceToChild } = require('./shared/reference-lines');
+const { createInjuries, relayToChild: relayInjuriesToChild } = require('./shared/injuries');
 
 const PORT = Number(process.env.PORT) || 4000;
 // Where everything durable lives: bets, names, share links, line history, the Admin Center log. On Railway
@@ -139,6 +140,9 @@ const oddsRelays = {};
 const sharpRelays = {};
 // Per-book openers (Owls line history) and closes (Sharp closing snapshots); see shared/reference-lines.js.
 const referenceRelays = {};
+// League-wide injury reports (ESPN league lists; MLB injured-list transactions), relayed to every engine.
+const injuryRelays = {};
+const injuries = createInjuries({ log: (...a) => console.log('[injuries]', ...a), onUpdate: (sport, view) => injuryRelays[sport]?.update(view) });
 const referenceLines = createReferenceLines({
   owlsKey: process.env.OWLS_INSIGHT_API_KEY, sharpKey: process.env.SHARP_API_KEY,
   file: path.join(DATA_DIR, 'reference-lines.json'),
@@ -165,6 +169,8 @@ function launch(key) {
   sharpRelays[key] = relaySharpToChild(child, key, sharpFeed);
   referenceRelays[key]?.close();
   referenceRelays[key] = relayReferenceToChild(child, key, referenceLines);
+  injuryRelays[key]?.close();
+  injuryRelays[key] = relayInjuriesToChild(child, key, injuries);
   child.on('exit', (code, sig) => { console.log(`[terminal] ${key} exited (code=${code} sig=${sig}); restarting in 1s`); setTimeout(() => launch(key), 1000); });
   console.log(`[terminal] ${key} -> 127.0.0.1:${s.port} base=${s.base}`);
 }
@@ -338,7 +344,7 @@ const server = http.createServer(async (req, res) => {
   if (privateRoute && !GATED) return notFound();
 
   // terminal-owned endpoints -------------------------------------------------
-  if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify({ ok: true, app: 'nfl.ncaaf', oddsFeed: owlsFeed.status(), feeds: { sharp: sharpFeed.status(), owls: owlsFeed.status(), reference: referenceLines.status() } })); }
+  if (pathname === '/health' || pathname === '/api/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify({ ok: true, app: 'nfl.ncaaf', oddsFeed: owlsFeed.status(), feeds: { sharp: sharpFeed.status(), owls: owlsFeed.status(), reference: referenceLines.status(), injuries: injuries.status() } })); }
   if (pathname === '/icon.svg' || pathname === '/favicon.ico') { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' }); return res.end(LOGO); }
   const dm = /^\/_board\/((?:broadcast|portfolio|feeds|handoff|support|accounts|notifications|opportunities|foundation|mybooks)\.(?:css|js)|(?:portfolio-view|activity|passkeys)\.js|refined\.css)$/.exec(pathname);
   if (dm) return serveDesign(req, res, dm[1], dm[1].endsWith('.css') ? 'css' : 'js');
@@ -566,11 +572,12 @@ server.keepAliveTimeout = 76000;
 owlsFeed.start();
 sharpFeed.start();
 referenceLines.start();
+injuries.start();
 server.listen(PORT, () => {
   console.log(`[terminal] data -> ${DATA_DIR}${process.env.RAILWAY_VOLUME_MOUNT_PATH && !DATA_DIR.startsWith(path.resolve(process.env.RAILWAY_VOLUME_MOUNT_PATH)) ? '  (WARNING: not on the volume)' : ''}`);
   console.log(`[terminal] ${BRAND} on :${PORT}  gated=${GATED} guest=${!!GUEST_HASH}${GUEST_LINK ? `  guest-link=/g/${GUEST_LINK}` : ''}`);
 });
 
 let down = false;
-function shutdown() { if (down) return; down = true; Edges.stop(); opportunityHTTP.close(); opportunities.close(); owlsFeed.stop(); sharpFeed.stop(); referenceLines.stop(); Object.values(referenceRelays).forEach(relay => relay.close()); Object.values(sharpRelays).forEach(relay => relay.close()); Object.values(oddsRelays).forEach(relay => relay.close()); Board.close(); for (const k of Object.keys(children)) { const c = children[k]; if (c) { c.removeAllListeners('exit'); try { c.kill('SIGTERM'); } catch {} } } server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); }
+function shutdown() { if (down) return; down = true; Edges.stop(); opportunityHTTP.close(); opportunities.close(); owlsFeed.stop(); sharpFeed.stop(); referenceLines.stop(); Object.values(referenceRelays).forEach(relay => relay.close()); injuries.stop(); Object.values(injuryRelays).forEach(relay => relay.close()); Object.values(sharpRelays).forEach(relay => relay.close()); Object.values(oddsRelays).forEach(relay => relay.close()); Board.close(); for (const k of Object.keys(children)) { const c = children[k]; if (c) { c.removeAllListeners('exit'); try { c.kill('SIGTERM'); } catch {} } } server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000).unref(); }
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, shutdown);

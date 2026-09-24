@@ -147,3 +147,24 @@ test('engine lookup tolerates provider spelling differences only when exactly on
   assert.equal(sub.lookup('Houston', 'Georgia Southern', '2026-09-26T20:00:00Z'), null);
   sub.close();
 });
+
+test('reference observations enter the integrity ledger: a months-old opener is the open, a kickoff-frozen close is the close received after kickoff', (t) => {
+  const { IntegrityStore } = require('../shared/clv-integrity');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ref-clv-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = new IntegrityStore({ dataDir: dir, sport: 'nfl' });
+  const kick = Date.parse(START), at = ms => new Date(kick + ms).toISOString();
+  const event = { id: '401872948', start: START };
+  const meta = (market, clocks) => ({ [market]: Object.fromEntries((market === 't' ? ['over', 'under'] : ['home', 'away']).map((s, i) => [s, { source_observed_at: clocks[i], market_status: 'active' }])) });
+  // Opener: observed 2026-05-14, received now (before kickoff).
+  store.observeLine(event, 'dk', { s: -7.5, so: [-110, -110], integrityMeta: meta('s', ['2026-05-14T20:08:22.093Z', '2026-05-14T20:08:22.093Z']) }, { source: 'owls_open', received_at: at(-86400e3), is_live: false, market_type: 's' });
+  // Close: observed 8 s before kickoff, received 6 minutes after kickoff.
+  store.observeLine(event, 'dk', { s: -5.5, so: [-105, -115], integrityMeta: meta('s', [at(-8000), at(-8000)]) }, { source: 'sharp_close', received_at: at(360e3), is_live: false, market_type: 's' });
+  const open = store.resolve({ ...event, quote_source: 'owls_open' }, 's', 'home', 'dk', kick + 400e3);
+  assert.equal(open.open.line_value, -7.5); assert.equal(open.open.source_observed_at, '2026-05-14T20:08:22.093Z');
+  assert.equal(open.close, null, 'a months-old opener is never a close');
+  const close = store.resolve({ ...event, quote_source: 'sharp_close' }, 's', 'home', 'dk', kick + 400e3);
+  assert.equal(close.close.line_value, -5.5); assert.equal(close.close.american_odds, -105);
+  assert.equal(close.close_status, 'PROVISIONAL');
+  // Before the close was received it does not exist (no look-ahead).
+  assert.equal(store.resolve({ ...event, quote_source: 'sharp_close' }, 's', 'home', 'dk', kick + 60e3).close, null);
+});

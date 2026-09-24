@@ -17,7 +17,7 @@ const dec = a => (a > 0 ? 1 + a / 100 : 1 + 100 / -a);
 const novig = (h, a) => { if (!Number.isFinite(h) || !Number.isFinite(a)) return null; const p = 1 / dec(h), q = 1 / dec(a), s = p + q; return s > 1 && s < 1.15 ? p / s : null; };
 const ymd = d => d.toISOString().slice(0, 10).replace(/-/g, '');
 
-function create({ dir, now = Date.now, log = () => {}, ua = 'THE.BOARD/1.0', fetchJSON }) {
+function create({ dir, now = Date.now, log = () => {}, ua = 'THE.BOARD/1.0', fetchJSON, reference = null }) {
   const get = fetchJSON || (async url => {
     const r = await fetch(url, { headers: { accept: 'application/json', 'user-agent': ua }, signal: AbortSignal.timeout(20000) });
     if (!r.ok) throw Error('HTTP ' + r.status); return r.json();
@@ -59,10 +59,15 @@ function create({ dir, now = Date.now, log = () => {}, ua = 'THE.BOARD/1.0', fet
         // The model's own expected total runs (fundamentals stage), carried for the board's Model column. Totals are
         // not a proven signal, so it is shown there as an estimate only; nothing here tiers or records it.
         if (MODEL.tot) { const t = E.predictTotal(f, MODEL); read.total = Number.isFinite(t) ? Math.round(t * 100) / 100 : null; }
-        if (!espn) { reads.set(g.pk, { ...read, note: 'No sportsbook listing matched yet.' }); continue; }
-        let books; try { books = await data.openers(espn); } catch { books = null; }
+        // DraftKings' opener: Owls line history first (the price DraftKings posted, with its own timestamp, relayed by
+        // the terminal), else ESPN's untimed `open`. Current price still comes from ESPN's DraftKings listing.
+        let ref = null; try { ref = reference ? reference(g) : null; } catch { ref = null; }
+        if (!espn && !ref) { reads.set(g.pk, { ...read, note: 'No sportsbook listing matched yet.' }); continue; }
+        let books = null; if (espn) { try { books = await data.openers(espn); } catch { books = null; } }
         const dk = (books || []).find(b => /draft\s*kings/i.test(b.book));
-        const oh = dk && dk.home.open, oa = dk && dk.away.open, ch = dk && dk.home.current, ca = dk && dk.away.current;
+        const oh = ref ? ref.home : dk && dk.home.open, oa = ref ? ref.away : dk && dk.away.open, ch = dk && dk.home.current, ca = dk && dk.away.current;
+        read.openerSource = ref ? 'owls_history' : 'espn';
+        read.openerPostedAt = ref ? ref.observed_at || null : null;
         const pOpen = novig(oh, oa), pNow = novig(ch, ca);
         if (pOpen == null) { reads.set(g.pk, { ...read, note: 'DraftKings has not posted an opener yet.' }); continue; }
         const key = String(g.pk);

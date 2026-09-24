@@ -25,6 +25,8 @@ const path = require('node:path');
 const { clientIp: resolvedClientIp } = require('../shared/client-ip');
 // Per-book openers (Owls history) and closes (Sharp closing) relayed by the terminal; additive on /api/odds/:pk.
 const Reference = require('../shared/reference-lines').subscribe('mlb', null);
+// League injury report + injured-list moves (ESPN, statsapi transactions) relayed by the terminal; additive.
+const Injuries = require('../shared/injuries').subscribe('mlb', null);
 // Merged engines accept the terminal's signed address only over loopback. Standalone engines resolve
 // their own direct/Railway ingress. These are existing process settings, never request headers.
 const CLIENT_IP_OPTIONS = process.env.BASE_PATH && process.env.TELEMETRY_PEER_SECRET
@@ -83,7 +85,10 @@ const CONTENT_FIELDS = 'highlights,items,guid,headline,duration,playbacks,name,u
 
 const log = (...a) => console.log(new Date().toTimeString().slice(0, 8), ...a);
 // Research model (mlb/research; parity-tested Node port): DraftKings-opener gap rule + live closing-line record.
-const Vas = require('./lib/vas-service').create({ dir: path.join(require('./lib/util').DATA, 'mlb-vas'), log });
+const Vas = require('./lib/vas-service').create({ dir: path.join(require('./lib/util').DATA, 'mlb-vas'), log,
+  // DraftKings' timestamped moneyline opener from the terminal's reference lines (Owls history), when present.
+  reference: g => { const ml = Reference.lookup(g.names?.away, g.names?.home, g.start)?.open?.dk?.ml;
+    return ml?.prices?.every(Number.isFinite) ? { home: ml.prices[0], away: ml.prices[1], observed_at: ml.observed_at?.[0] || null } : null; } });
 const num = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
 const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
 
@@ -1358,7 +1363,8 @@ async function oddsRoutes(req, res, url, uid) {
     const o = Odds.game(Number(om[1]));
     let reference = null;
     try { const G = gameOf(Number(om[1])); const nm = t => String(t?.full || t?.name || t?.short || '').trim(); if (G) reference = Reference.lookup(nm(G.away), nm(G.home), G.start); } catch {}
-    if (!o) sendJSON(res, 404, { error: 'No odds for that game.' }); else sendJSON(res, 200, { ...o, reference });
+    let injuryReport = null; try { const G = gameOf(Number(om[1])); const nm = t => String(t?.full || t?.name || t?.short || '').trim(); if (G) injuryReport = Injuries.forTeams(nm(G.away), nm(G.home)); } catch {}
+    if (!o) sendJSON(res, 404, { error: 'No odds for that game.' }); else sendJSON(res, 200, { ...o, reference, injuryReport });
     return true;
   }
   if (p === '/api/keys' && M === 'GET') {
