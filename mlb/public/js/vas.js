@@ -9,7 +9,7 @@ async function mlbVasLoad() {
   try {
     // Every cached read (today and tomorrow): the board's Model column needs whichever day is on screen.
     const r = await fetch('api/vas', { headers: { accept: 'application/json' } });
-    if (r.ok) { const d = await r.json(); MLBVAS.reads = d.reads || []; MLBVAS.ready = !!d.ready; MLBVAS.at = Date.now(); if (typeof oddsRepaint === 'function') oddsRepaint(); }
+    if (r.ok) { const d = await r.json(); const fresh = d.reads || [], keep = new Set(fresh.map((x) => Number(x.pk))); MLBVAS.reads = fresh.concat(MLBVAS.reads.filter((x) => x.past && !keep.has(Number(x.pk)))); MLBVAS.ready = !!d.ready; MLBVAS.at = Date.now(); if (typeof oddsRepaint === 'function') oddsRepaint(); }
   } catch { /* the board works without it */ }
 }
 function mlbVasBlock(games) {
@@ -22,6 +22,19 @@ function mlbVasBlock(games) {
     : hits.length ? hits.map((r) => `<div class="vas-row"><span class="vas-tag">💎 DIAMOND</span><div><b>${esc(team(r))} ML ${esc(odds(r.price))} at DraftKings</b><small>${esc(r.matchup)} · model ${Math.round((r.side === 'home' ? r.pHome : 1 - r.pHome) * 100)}% vs DraftKings opener ${Math.round((r.side === 'home' ? r.market : 1 - r.market) * 100)}% · opener seen ${esc(ago(r.openerSeenAt))} ago</small></div></div>`).join('')
     : '<p class="vas-quiet">No game clears the proven gap right now. That is normal: it fires about once a day, usually within two hours of DraftKings posting its openers.</p>';
   return `<div class="card vas-card"><div class="vas-head"><b>VAS model</b><span>DraftKings opener gap · proven on 2024-26 back-tests · every signal is scored against the close</span></div>${body}</div>`;
+}
+// An earlier day on screen: fetch that day's completed-game reads once and merge them in.
+const MLBVAS_DAYS = new Set();
+function mlbVasWantDate(day) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day || '') || MLBVAS_DAYS.has(day)) return;
+  if (MLBVAS.reads.some((r) => r.day === day)) { MLBVAS_DAYS.add(day); return; }
+  MLBVAS_DAYS.add(day);
+  fetch('api/vas?date=' + day, { headers: { accept: 'application/json' } }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+    if (!d || !Array.isArray(d.reads) || !d.reads.length) return;
+    const have = new Set(MLBVAS.reads.map((r) => Number(r.pk)));
+    MLBVAS.reads = MLBVAS.reads.concat(d.reads.filter((r) => !have.has(Number(r.pk)))); MLBVAS.at = Date.now();
+    if (typeof oddsRepaint === 'function') oddsRepaint();
+  }).catch(() => {});
 }
 setInterval(mlbVasLoad, 2 * 60e3);
 setTimeout(mlbVasLoad, 1500);

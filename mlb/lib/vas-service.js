@@ -31,6 +31,7 @@ function create({ dir, now = Date.now, log = () => {}, ua = 'THE.BOARD/1.0', fet
   const saveSeen = () => { try { const t = seenFile + '.tmp'; fs.writeFileSync(t, JSON.stringify(seen)); fs.renameSync(t, seenFile); } catch {} };
   let state = null, hist = null, builtAt = null, building = false, lastError = null, info = null;
   const reads = new Map();   // pk -> read
+  let past = new Map();      // pk -> read for a completed game this season (earlier days' Model column)
 
   async function refreshHistory() {
     if (building || !MODEL) return; building = true;
@@ -38,6 +39,16 @@ function create({ dir, now = Date.now, log = () => {}, ua = 'THE.BOARD/1.0', fet
       hist = await data.history({ maxFetch: 600, concurrency: 3 });
       state = E.build(hist, MODEL.config || E.DEFAULT_CFG);
       builtAt = new Date(now()).toISOString(); info = { games: hist.games.length, complete: hist.complete, ...(hist.info || {}) }; lastError = null;
+      // Completed games keep a Model column: the walk's features for each game use only the state before its day.
+      const season = new Date(now()).getUTCFullYear(), next = new Map();
+      for (const g of hist.games) {
+        if (g.season !== season) continue;
+        const f = state.flatten(g.pk); if (!f) continue;
+        const p = E.predict(f, MODEL); if (!(p > 0 && p < 1)) continue;
+        const t = MODEL.tot ? E.predictTotal(f, MODEL) : null;
+        next.set(Number(g.pk), { pk: g.pk, day: g.day, start: g.start, status: 'OK', past: true, pHome: p, total: Number.isFinite(t) ? Math.round(t * 100) / 100 : null });
+      }
+      past = next;
     } catch (e) { lastError = String(e.message || e).slice(0, 160); log('[mlb-vas] history failed: ' + lastError); }
     finally { building = false; }
   }
@@ -117,7 +128,14 @@ function create({ dir, now = Date.now, log = () => {}, ua = 'THE.BOARD/1.0', fet
   return {
     refreshHistory: async () => { await refreshHistory(); settle(); }, refreshSlate,
     read: pk => reads.get(Number(pk)) || null,
-    forDate: date => [...reads.values()].filter(r => !date || r.day === date),
+    // Live reads for the day, plus completed games' reads for any game without one. With no date: the live reads and
+    // the last three days of completed games (the board's default days).
+    forDate: date => {
+      const live = [...reads.values()].filter(r => !date || r.day === date), have = new Set(live.map(r => Number(r.pk)));
+      const since = new Date(now() - 3 * 86400e3).toISOString().slice(0, 10);
+      const done = [...past.values()].filter(r => !have.has(Number(r.pk)) && (date ? r.day === date : r.day >= since));
+      return live.concat(done);
+    },
     summary: () => record.summary(),
     status: () => ({ model: MODEL && MODEL.version, builtAt, building, history: info, data: data.status(), lastError, reads: reads.size, proven: provenRows(), tiers: MODEL && MODEL.ml && MODEL.ml.tiers }),
   };

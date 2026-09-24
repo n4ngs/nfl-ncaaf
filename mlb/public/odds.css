@@ -586,3 +586,9 @@ html[data-theme="dark"] .odds-view,html[data-theme="dark"] .odds-sheet{--odds-go
   .ostrip-sec{margin:12px 0 0}
   .ostrip-card{gap:4px;padding:8px 12px}
 }
+
+/* Game sheet: injury report and openers/closes (odds.js oddsExtraHTML). */
+.odds-inj { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.inj-r { margin: 6px 0; font-size: 13px; line-height: 1.35; }
+.odds-ref { width: 100%; border-collapse: collapse; font-size: 13px; }
+.odds-ref th, .odds-ref td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--line, rgba(128,128,128,.2)); }

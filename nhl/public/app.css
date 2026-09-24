@@ -211,3 +211,8 @@ button.px:hover,a.px:hover{border-color:var(--brand)}
   .nb-hd,.nb-r{grid-template-columns:minmax(0,1fr) 76px 76px;padding-inline:12px}
   .nb-nm span{display:none}
 }
+
+/* Game room: injury report and openers/closes. */
+.inj-r { margin: 6px 0; font-size: 13px; line-height: 1.35; }
+.ref-t { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ref-t th, .ref-t td { padding: 6px 8px; text-align: left; border-bottom: 1px solid rgba(128,128,128,.2); }

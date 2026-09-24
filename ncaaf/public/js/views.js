@@ -515,10 +515,11 @@ function marketKey(g, mkt) {
 }
 
 // The model's fair line from the cached model read (lib/vas-service.js). margin = home minus away, so the favourite
-// is home when margin > 0; shown as that team laying the points, e.g. "MISS −1.0". Pregame only.
+// is home when margin > 0; shown as that team laying the points, e.g. "MISS −1.0". Shown before kickoff and on
+// finished games (earlier weeks keep the model's pregame number); hidden while a game is in play.
 function modelMargin(g) {
   const m = g.model && (Number.isFinite(g.model.margin) ? g.model.margin : g.model.move && g.model.move.margin);
-  return isPre(g) && Number.isFinite(m) ? m : null;
+  return (isPre(g) || isFinal(g)) && Number.isFinite(m) ? m : null;
 }
 // The model's number for one side of the board's current market. Spread and 1st half come from the margin
 // (1st half = half of it, a derived estimate), the total from the model's own total-points stage, the

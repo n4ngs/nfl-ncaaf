@@ -105,7 +105,13 @@ function create({ dir, getBody, now = Date.now, log = console.log, fetchBuffer }
     const day = g.date || String(g.start).slice(0, 10);
     const rk = `${g.id}|${home}|${away}|${day}`;
     let rd = reads.get(rk);
-    if (!rd) { const f0 = state.featuresFor({ home, away, season: Math.floor(Number(g.id) / 1e6) || seasonOf(new Date(g.start)), day }); rd = { f: f0, p: E.predict(f0, MODEL) }; reads.set(rk, rd); }
+    if (!rd) {
+      // A finished game uses the walk's features for it (team and goalie state strictly before its day), so earlier
+      // days keep their Model column without the result leaking in; an upcoming game uses today's state.
+      const done = g.final ? state.featured.get(Number(g.id)) : null;
+      const f0 = done || state.featuresFor({ home, away, season: Math.floor(Number(g.id) / 1e6) || seasonOf(new Date(g.start)), day });
+      rd = { f: f0, p: E.predict(f0, MODEL), past: !!done }; if (!g.final || done) reads.set(rk, rd);
+    }
     const f = rd.f, p = rd.p;   // pHome also feeds the board's Model column (fair moneyline)
     const out = { status: 'OK', model: MODEL.version, pHome: p, goalies: { home: goalieCard('home', f), away: goalieCard('away', f) },
       goalieEdge: Math.round((f._home.gsax100 - f._away.gsax100) * 100) / 100, lineupEdge: f.d_lineup, confirmed: confirmed.get(String(g.id)) || null };

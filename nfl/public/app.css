@@ -890,3 +890,7 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
 .br-f .mdl-b{display:inline-flex;align-items:baseline;gap:5px}
 .br-f .mdl-b i{font-style:normal;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
 .br-f .mdl-b b{color:var(--ink);font-weight:650}
+
+/* Injury report rows in the game sheet (sheets.js injuryReportPanel). */
+.inj-r { margin: 6px 0; font-size: 13px; line-height: 1.35; }
+.inj-r small { color: var(--muted, #8a8f98); }

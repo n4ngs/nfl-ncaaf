@@ -522,7 +522,9 @@ const ODDS_MODEL_TIP = {
 };
 let oddsModelIdx = { at: -1, map: new Map() };
 function oddsModelRead(g) {
-  if (!g || !oddsIsPre(g) || typeof MLBVAS === 'undefined') return null;
+  // Before first pitch and on finished games (the pregame number); hidden while a game is in play.
+  if (!g || !(oddsIsPre(g) || g.state === 'Final') || typeof MLBVAS === 'undefined') return null;
+  if (typeof mlbVasWantDate === 'function' && typeof S !== 'undefined' && S.date) mlbVasWantDate(S.date);
   if (oddsModelIdx.at !== MLBVAS.at) oddsModelIdx = { at: MLBVAS.at, map: new Map((MLBVAS.reads || []).map((r) => [Number(r.pk), r])) };
   const r = oddsModelIdx.map.get(Number(g.pk));
   return r && Number.isFinite(r.pHome) && r.pHome > 0 && r.pHome < 1 ? r : null;
@@ -887,6 +889,8 @@ async function oddsLoadHist(pk) {
     if (ODDS.sheetPk !== pk || S.dlgKind !== 'odds') return;
     if (d.odds) oddsPut(d.odds, false);
     ODDS.sheetHist = d.hist || { b: {} };
+    ODDS.sheetExtra = { pk, reference: d.reference || null, injuryReport: d.injuryReport || null };
+    const x = document.getElementById('oddsExtra'); if (x) x.innerHTML = oddsExtraHTML(pk);
   } catch {
     if (ODDS.sheetPk !== pk) return;
     ODDS.sheetHist = { b: {}, failed: true };
@@ -1081,6 +1085,7 @@ function oddsSheetHTML(pk) {
     ${oddsFiveHTML(pk)}
     ${oddsSplitsHTML(pk)}
     ${oddsWxHTML(pk)}
+    <div id="oddsExtra">${oddsExtraHTML(pk)}</div>
     ${oddsKeysHTML(pk)}
     ${pre ? oddsCounterHTML(pk) : ''}
     <section class="dlg-sec" aria-label="Nevada sportsbooks">
@@ -1090,6 +1095,30 @@ function oddsSheetHTML(pk) {
     ${g ? `<div class="links"><button type="button" class="lbtn" data-game="${pk}">Scores and every at-bat</button></div>` : ''}
     <p class="odds-note">Source clocks determine quote status. A recent app check does not make an old price current. Recorded prices remain available as historical context.</p>
   </div>`;
+}
+// Injury report (full league list and injured-list moves) and each book's opener and close (server: shared/injuries.js,
+// shared/reference-lines.js). Moneyline only, which is what the MLB board prices.
+function oddsExtraHTML(pk) {
+  const X = ODDS.sheetExtra; if (!X || X.pk !== pk) return '';
+  const g = S.games.get(pk), away = oddsTeam(g, 'away'), home = oddsTeam(g, 'home');
+  const parts = [];
+  const R = X.injuryReport;
+  if (R && (R.away?.length || R.home?.length || R.ilMoves)) {
+    const side = (s, t) => {
+      const rows = (R[s] || []).slice(0, 12), moves = (R.ilMoves?.[s] || []).slice(0, 4);
+      return `<div><h4 class="sub-h">${esc(t.abbr || t.name || s)}</h4>${rows.length ? rows.map((r) => `<p class="inj-r"><b>${esc(r.status || '')}</b> ${esc(r.name)}${r.pos ? ` <small>${esc(r.pos)}</small>` : ''}${r.comment ? `<br><small>${esc(r.comment)}</small>` : ''}</p>`).join('') : '<p class="muted">No one listed.</p>'}${moves.map((m) => `<p class="inj-r"><small>${esc(m.date || '')} · ${esc(m.text)}</small></p>`).join('')}</div>`;
+    };
+    parts.push(`<section class="dlg-sec" aria-label="Injury report"><h3 class="sub-h">Injury report<span>Full league list and injured-list moves</span></h3><div class="odds-inj">${side('away', away)}${side('home', home)}</div></section>`);
+  }
+  const F = X.reference;
+  const books = F ? [...new Set([...Object.keys(F.open || {}), ...Object.keys(F.close || {})])].filter((k) => F.open?.[k]?.ml || F.close?.[k]?.ml) : [];
+  if (books.length) {
+    const ml = (M) => (M?.prices ? `${esc(oddsFmt(M.prices[1]))} / ${esc(oddsFmt(M.prices[0]))}` : '—');
+    const when = (t) => { const x = Date.parse(t); return Number.isFinite(x) ? new Date(x).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; };
+    const rows = books.map((k) => `<tr><td>${esc(oddsBookFull(k))}</td><td class="num">${ml(F.open?.[k]?.ml)}</td><td><small>${esc(when(F.open?.[k]?.ml?.observed_at?.[0]))}</small></td><td class="num">${ml(F.close?.[k]?.ml)}</td></tr>`).join('');
+    parts.push(`<section class="dlg-sec" aria-label="Openers and closes"><h3 class="sub-h">Openers and closes by book<span>Moneyline ${esc(away.abbr || '')} / ${esc(home.abbr || '')}</span></h3><div style="overflow-x:auto"><table class="odds-ref"><thead><tr><th>Book</th><th>Opened</th><th>Posted</th><th>Closed</th></tr></thead><tbody>${rows}</tbody></table></div></section>`);
+  }
+  return parts.join('');
 }
 function oddsSheetMoveHTML(pk) {
   const g = S.games.get(pk), O = oddsGame(pk);

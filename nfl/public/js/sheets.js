@@ -90,6 +90,8 @@ function gameSheet() {
     ${isLive(g) ? `<div class="gs-sec">${fieldSVG(g, true)}<div class="situ"><span>${g.sit?.text ? `<b>${esc(g.sit.text)}</b>` : ''}${g.last ? ` ${esc(g.last.slice(0, 120))}` : ''}</span>${g.sit?.rz ? '<span class="rz">Red zone</span>' : ''}</div></div>` : ''}
     ${typeof vasPanel === 'function' ? vasPanel(g) : ''}
     ${typeof modelPanel === 'function' ? modelPanel(g) : ''}
+    ${injuryReportPanel(g)}
+    ${refLinesPanel(g)}
     <div class="gs-grid gs-sec">
       <div>
         <div class="sub-h">Line movement <span class="seg" style="padding:2px" role="group" aria-label="Chart market"><button type="button" data-cm="s" aria-pressed="${mkt === 's'}" style="height:28px">Spread</button><button type="button" data-cm="t" aria-pressed="${mkt === 't'}" style="height:28px">Total</button></span></div>
@@ -835,4 +837,36 @@ async function openPhone() {
   sc.onload = draw;
   sc.onerror = () => $('#qr')?.remove();
   document.head.appendChild(sc);
+}
+
+// Openers and closes by book (server: shared/reference-lines.js). The opener is the first price the provider saw that
+// book post, with its time; the close is that book's last pregame price, frozen by the provider at kickoff.
+function refLinesPanel(g) {
+  const R = S.game && S.game.reference;
+  if (!R) return '';
+  const books = [...new Set([...Object.keys(R.open || {}), ...Object.keys(R.close || {})])];
+  if (!books.length) return '';
+  const pts = (v) => (v == null ? '' : v === 0 ? 'PK' : `${v > 0 ? '+' : MINUS}${Math.abs(v)}`);
+  const spread = (M) => (M && M.line != null ? `${esc(g.home.abbr)} ${pts(M.line)} <small>${esc(fmtOdds(M.prices?.[0]))}</small>` : '—');
+  const total = (M) => (M && M.line != null ? `${M.line} <small>o ${esc(fmtOdds(M.prices?.[0]))}</small>` : '—');
+  const when = (t) => { const x = Date.parse(t); return Number.isFinite(x) ? new Date(x).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; };
+  const rows = books.map((k) => {
+    const o = R.open?.[k] || {}, c = R.close?.[k] || {};
+    const at = o.s?.observed_at?.[0] || o.t?.observed_at?.[0] || o.ml?.observed_at?.[0];
+    return `<tr><td><div class="bk">${esc(bookName(k))}</div></td><td class="num">${spread(o.s)}</td><td class="num">${total(o.t)}</td><td><small>${esc(when(at))}</small></td><td class="num">${spread(c.s)}</td><td class="num">${total(c.t)}</td></tr>`;
+  }).join('');
+  return `<div class="gs-sec"><div class="sub-h">Openers and closes by book <span class="bt-note">opener: when the book posted it · close: its last price before kickoff</span></div><div class="card" style="overflow-x:auto;padding-top:14px"><table class="btable"><thead><tr><th>Book</th><th>Opened</th><th>Open total</th><th>Posted</th><th>Closed</th><th>Close total</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+// The league's full injury report for both teams (server: shared/injuries.js), newest first. Players listed as
+// Active are left out. Each row says when it was last updated.
+function injuryReportPanel(g) {
+  const R = S.game && S.game.injuryReport;
+  if (!R || !(R.away?.length || R.home?.length)) return '';
+  const side = (s) => {
+    const rows = (R[s] || []).slice(0, 14);
+    if (!rows.length) return `<div><div class="k">${esc(g[s].abbr)}</div><p class="mr-quiet">No one listed.</p></div>`;
+    return `<div><div class="k">${esc(g[s].abbr)}</div>${rows.map((r) => `<p class="inj-r"><b>${esc(r.status || '')}</b> ${esc(r.name)}${r.pos ? ` <small>${esc(r.pos)}</small>` : ''}${r.comment ? `<br><small>${esc(r.comment)}</small>` : ''}${Number.isFinite(Date.parse(r.date)) ? ` <small>· ${esc(ago(Date.parse(r.date)))}</small>` : ''}</p>`).join('')}</div>`;
+  };
+  return `<div class="gs-sec"><div class="sub-h">Injury report <span class="bt-note">full league report, updated every minute</span></div><div class="gs-grid">${side('away')}${side('home')}</div></div>`;
 }

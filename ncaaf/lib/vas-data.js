@@ -282,4 +282,4 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, s
   return { history, closeSpreads, upcoming, season, status: () => JSON.parse(JSON.stringify(status)) };
 }
 
-module.exports = { create, compactSeason, closeFromOdds, crossBook, leads, median, splitCsv, csvRows, URLS, STAT };
+module.exports = { P5, NOTRE_DAME, create, compactSeason, closeFromOdds, crossBook, leads, median, splitCsv, csvRows, URLS, STAT };

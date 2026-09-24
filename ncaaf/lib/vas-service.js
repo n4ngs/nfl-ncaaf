@@ -28,6 +28,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
   }) });
   const record = Record.create({ file: path.join(dir, 'signals.json'), now, tiers: ['WEAK', 'THIN', 'SOLID'] });
   let state = null, upcoming = new Map(), builtAt = null, building = false, lastError = null, info = null, hist = null;
+  let past = new Map();   // gid -> the fair line for a completed game this season (earlier weeks' Model column)
   // forGame runs inside every board build and every push (dozens of times a minute across 70 games): everything that
   // only changes when the history is rebuilt is computed once per game per build, and the move read is cached per
   // (opener, current line) for a minute.
@@ -45,7 +46,22 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
       // A slow or failed scoreboard call must not throw away a good history build: keep the previous schedule.
       try { const up = await data.upcoming(season); upcoming = new Map(up.map(r => [String(r.gid), r])); }
       catch (e) { lastError = 'upcoming: ' + String(e.message || e).slice(0, 120); }
-      info = { season, games: h.games.length, complete: h.complete, upcoming: upcoming.size };
+      // This season's completed games keep a Model column. Each uses the walk's features for that game (team state
+      // strictly before its day, projected QB = the last game's starter), the same open-safe inputs a pregame read uses.
+      try {
+        const teams = ((await data.season(season, true)) || {}).teams || {};
+        const p5 = (id) => { const t = teams[id]; return !!t && t[0] === 1 && (Data.P5.has(t[1]) || id === Data.NOTRE_DAME); };
+        const next = new Map();
+        for (const g of h.games) {
+          if (g.season !== season) continue;
+          const f = state.featured.get(g.gid); if (!f) continue;
+          const x = E.withContext(f, g, { seasonType: g.stype, week: g.week, homeP5: p5(g.home_id), awayP5: p5(g.away_id) }, MODEL);
+          const margin = E.predict(x, MODEL), total = MODEL.totals ? E.predictTotal(x, MODEL) : null;
+          if (Number.isFinite(margin)) next.set(String(g.gid), { margin, total: Number.isFinite(total) ? total : null });
+        }
+        past = next;
+      } catch (e) { lastError = 'past: ' + String(e.message || e).slice(0, 120); }
+      info = { season, games: h.games.length, complete: h.complete, upcoming: upcoming.size, past: past.size };
     } catch (e) { lastError = String(e.message || e).slice(0, 160); log('[ncaaf-vas] refresh failed: ' + lastError); }
     finally { building = false; }
   }
@@ -59,7 +75,12 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
     if (!state) return { status: 'LOADING', note: 'Model history is loading.' };
     const row = upcoming.get(String(G.id));
     const started = G.state === 'in' || G.state === 'post' || Date.parse(G.start) <= now();
-    if (started) { closeOut(G, books); return null; }
+    if (started) {
+      closeOut(G, books);
+      const done = G.state === 'post' ? past.get(String(G.id)) : null;
+      return done ? { status: 'OK', past: true, model: MODEL.version, margin: done.margin, total: done.total, sd: SD, reads: [],
+        note: 'Finished game: the Model column shows the model\'s pregame number for it.' } : null;
+    }
     if (!row) return { status: 'OFF', note: 'Game not in the model schedule.' };
     // openers: every book's first recorded spread (all books, as in the research consensus), first-seen time
     const openers = {};

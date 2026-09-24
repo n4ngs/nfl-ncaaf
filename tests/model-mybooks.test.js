@@ -176,6 +176,8 @@ test('MLB Model column: fair moneyline and the model total; run line and first f
   assert.match(c.oddsBoardTable([g], 'ml'), /<span class="odds-px mdl"><span class="num">−150<\/span>/);
   // a game underway or a WAIT read shows no model number
   assert.equal(c.oddsModelSide({ ...g, state: 'Live' }, 'ml', 'home'), '');
+  // an earlier day: a finished game keeps its pregame number
+  assert.equal(c.oddsModelSide({ ...g, state: 'Final' }, 'ml', 'home'), '−150');
   c.MLBVAS.reads = [{ pk: 7, status: 'WAIT', note: 'Waiting for both probable starters.' }]; c.MLBVAS.at = 3;
   assert.equal(c.oddsModelFair(g, 'ml'), '');
 });
@@ -285,4 +287,24 @@ test('NHL page: latest-goal hero first, then the odds board (Model + My books), 
 test('NHL board: in play, a delayed or paused quote shows no number at all', () => {
   const src = fs.readFileSync(path.join(__dirname, '../nhl/public/app.js'), 'utf8');
   assert.match(src, /if\(g\.state==='in'&&!ok\)return '<span class="px na"/);
+});
+
+test('NHL Model column: before puck drop and on finished games, never in play', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../nhl/public/app.js'), 'utf8');
+  const line = src.match(/^function modelHome\b.*$/m)[0];
+  const c = {}; vm.createContext(c); vm.runInContext(line + '\nglobalThis.modelHome = modelHome;', c);
+  const vas = { status: 'OK', pHome: 0.58 };
+  assert.equal(c.modelHome({ state: 'pre', final: false, vas }), 0.58);
+  assert.equal(c.modelHome({ state: 'post', final: true, vas }), 0.58);
+  assert.equal(c.modelHome({ state: 'in', final: false, vas }), null);
+});
+
+test('NCAAF Model column: finished games keep the pregame fair line; in play shows nothing', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../ncaaf/public/js/views.js'), 'utf8');
+  const body = src.slice(src.indexOf('function modelMargin(g)'), src.indexOf('\n}', src.indexOf('function modelMargin(g)')) + 2);
+  const c = { isPre: (g) => g.state === 'pre', isFinal: (g) => g.state === 'post' };
+  vm.createContext(c); vm.runInContext(body + '\nglobalThis.modelMargin = modelMargin;', c);
+  const model = { status: 'OK', past: true, margin: -3.2 };
+  assert.equal(c.modelMargin({ state: 'post', model }), -3.2);
+  assert.equal(c.modelMargin({ state: 'in', model }), null);
 });
