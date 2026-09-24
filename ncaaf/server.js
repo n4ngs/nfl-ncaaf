@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 const { attachLink } = require('../shared/bet-links');
+const { dropOutliers } = require('../shared/book-outliers');
 /**
  * Hook & Ladder — live college football lines, scores and your bets.
  * Zero dependencies. Node 18+.
@@ -278,11 +279,12 @@ function mergeMarketBooks(sources, { half = false, live = false } = {}) {
 
 function mergedBooks(G, W) {
   const an = W.an.get(G.id), pin = W.pin.get(G.id);
-  return mergeMarketBooks([
+  // A book far off every other book is a mislabelled market, not a line: drop it before display and move detection.
+  return dropOutliers(mergeMarketBooks([
     ['sharp', W.sharp?.get(G.id)?.books], ['owls', W.owls?.get(G.id)?.books], ['an', an?.books], ['vsin', W.vs.get(G.id)?.books],
     ['an1', W.a1.get(G.id)?.books], ['pin', pin?.line ? { pin: pin.line } : null],
     ['espn', G.dk?.cur && (G.state === 'pre' || !an) ? { dk: G.dk.cur } : null],
-  ]);
+  ]));
 }
 
 function mergedHalf(G, W) {

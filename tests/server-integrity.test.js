@@ -16,7 +16,7 @@ function helpers(sport, integrity) {
   const source = fs.readFileSync(path.join(root, sport, 'server.js'), 'utf8');
   const start = source.indexOf('function retainObservation(');
   const end = source.indexOf('function weekSnapshot(');
-  const context = vm.createContext({ attachLink:require('../shared/bet-links').attachLink, integrity, freshness, Date, VSIN_AT: {}, BOOKS: [] });
+  const context = vm.createContext({ attachLink:require('../shared/bet-links').attachLink, dropOutliers:require('../shared/book-outliers').dropOutliers, integrity, freshness, Date, VSIN_AT: {}, BOOKS: [] });
   vm.runInContext(source.slice(start, end), context);
   return context;
 }

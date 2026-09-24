@@ -84,6 +84,14 @@ function suspectZeroSpreads(events,sport) {
   }
   return suspect;
 }
+// Observed upstream failure: Owls' BetMGM football `totals` market sometimes carries an alternate-ladder
+// rung (45.5 at -525/+360 on a 58.5 game) with nothing marking it as an alternate. A pregame main spread or
+// total is priced near even money on both sides; a -300 or +250 side means this is not the main line.
+// Football pregame only: MLB run lines and live markets legitimately carry long prices.
+function offMainLine(sport,market,live,candidates) {
+  if(market==='ml' || live===true || !['nfl','ncaaf'].includes(sport))return false;
+  return Object.values(candidates).some(q=>q.american_odds!==null && (q.american_odds<=-300 || q.american_odds>=250));
+}
 function normalizeBoard(payload,sport,options={}) {
   const grouped=new Map(),events=rawEvents(payload,sport),suspectZeros=suspectZeroSpreads(events,sport);
   for (const e of events) {
@@ -119,6 +127,8 @@ function normalizeBoard(payload,sport,options={}) {
         // A suspended market can have no priced outcomes; preserve its explicit withdrawal evidence.
         if(!Object.keys(candidates).length && state(m,b,e)!=='active') for(const side of sides) candidates[side]={line_value:null,american_odds:null,source_observed_at:sourceTime(m.last_update ?? b.last_update ?? e.lastUpdate),market_status:state(m,b,e),is_live:live,provider_event_id:String(e.id ?? ''),provider_channel:e.__owlsChannel || options.channel || 'odds'};
         if(!Object.keys(candidates).length) continue;
+        if(offMainLine(sport,market,live,candidates)) for(const q of Object.values(candidates))
+          Object.assign(q,{reported_line_value:q.reported_line_value ?? q.line_value,line_value:null,market_status:q.market_status==='active'?'unverified':q.market_status,reason_code:'OFF_MAIN_LINE_PRICE'});
         const L=event[group][book] ||= emptyLine(e,live), old=L.integrityMeta[market];
         const candidateScore=marketScore(candidates), oldScore=old?marketScore(old):-Infinity;
         if(old && candidateScore<oldScore) continue;

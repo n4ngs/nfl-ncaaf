@@ -30,7 +30,7 @@ function context(sport, games = [game()]) {
     lines: { record(id, book, L, t) { const before = previous.get(book); previous.set(book, L); return ['s', 't'].filter(m => L[m] != null && before?.[m] != null && L[m] !== before[m]).map(mkt => ({ mkt, book, from: before[mkt], to: L[mkt], t })); },
       detect(id, changes) { detected.push(...changes); return []; }, full: () => null, spark: () => null } };
   const source = fs.readFileSync(path.join(root, sport, 'server.js'), 'utf8');
-  const ctx = vm.createContext({ Date: Clock, attachLink:require('../shared/bet-links').attachLink, structuredClone, integrity: ledger, freshness, BOOKS: [], OWLS: require(`../${sport}/lib/owls`), tracked: () => [W],
+  const ctx = vm.createContext({ Date: Clock, attachLink:require('../shared/bet-links').attachLink, dropOutliers:require('../shared/book-outliers').dropOutliers, structuredClone, integrity: ledger, freshness, BOOKS: [], OWLS: require(`../${sport}/lib/owls`), tracked: () => [W],
     setTimeout: (fn, delay) => { timers.push({ fn, delay }); return { unref() {} }; }, clearTimeout() {},
     log() {}, emit: (...args) => events.push(args), emitBets() {}, emitSnapshot: () => events.push(['snapshot']), clients: new Set(),
   });

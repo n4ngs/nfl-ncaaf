@@ -28,7 +28,7 @@ function harness(sport, games = [game()]) {
   const W = { id: 'week-1', games: new Map(games.map(g => [g.id, g])), an: new Map(), a1: new Map(), vs: new Map(), pin: new Map(), owls: new Map(), sharp: new Map(), at: {}, sent: new Map(),
     lines: { full: () => null, record(id, book, row, t) { const prior = previous.get(book); previous.set(book, row); return ['s', 't'].filter(m => row[m] != null && prior?.[m] != null && row[m] !== prior[m]).map(mkt => ({ mkt, book, from: prior[mkt], to: row[mkt], t })); }, detect(id, changes) { moves.push(...changes); return []; } } };
   const source = fs.readFileSync(path.join(root, sport, 'server.js'), 'utf8');
-  const ctx = vm.createContext({ Date: Clock, attachLink:require('../shared/bet-links').attachLink, structuredClone, integrity: ledger, freshness,
+  const ctx = vm.createContext({ Date: Clock, attachLink:require('../shared/bet-links').attachLink, dropOutliers:require('../shared/book-outliers').dropOutliers, structuredClone, integrity: ledger, freshness,
     OWLS: require(`../${sport}/lib/owls`), SHARP: require(`../${sport}/lib/sharp`), BOOKS: [], tracked: () => [W], clients: new Set([{}]),
     emit: (type, data) => emissions.push({ type, data }), emitBets() {}, emitSnapshot: () => emissions.push({ type: 'snapshot' }), log() {},
     setTimeout: (fn, delay) => { const timer = { fn, delay, unref() {} }; timers.push(timer); return timer; }, clearTimeout() {},
