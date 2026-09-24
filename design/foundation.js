@@ -7,7 +7,7 @@
     const sportbar = document.getElementById('xsport'); if (sportbar) sportbar.after(nav); else document.body.prepend(nav);
     let account, focusTouched = false, regionTouched = false, applyingAccount = false, revision = 0, queue = Promise.resolve();
     const button = nav.querySelector('button');
-    const apply = enabled => { enabled = enabled === true; document.documentElement.classList.toggle('board-focus', enabled); button.setAttribute('aria-pressed', String(enabled)); button.textContent = enabled ? 'Focus on' : 'Focus mode'; try { localStorage.setItem('board.focus', enabled ? '1' : '0'); } catch { /* Storage optional. */ } };
+    const apply = enabled => { enabled = enabled === true; document.documentElement.classList.toggle('board-focus', enabled); button.setAttribute('aria-pressed', String(enabled)); button.textContent = enabled ? 'Exit focus' : 'Focus mode'; button.title = enabled ? 'Show everything again (F)' : 'Only the games, prices, model and your bets (F)'; try { localStorage.setItem('board.focus', enabled ? '1' : '0'); } catch { /* Storage optional. */ } };
     function persist(patch) {
       if (!account?.account) return;
       account.account.preferences = { ...account.account.preferences, ...patch }; const current = ++revision;
@@ -18,7 +18,10 @@
       }).catch(() => { button.title = 'Saved on this device. Account preference sync is unavailable.'; });
     }
     try { apply(localStorage.getItem('board.focus') === '1'); } catch { apply(false); }
-    button.addEventListener('click', () => { focusTouched = true; const enabled = button.getAttribute('aria-pressed') !== 'true'; apply(enabled); persist({ focusMode:enabled }); });
+    const toggleFocus = () => { focusTouched = true; const enabled = button.getAttribute('aria-pressed') !== 'true'; apply(enabled); persist({ focusMode:enabled }); };
+    button.addEventListener('click', toggleFocus);
+    // F turns focus mode on and off, except while typing.
+    document.addEventListener('keydown', event => { if (event.key !== 'f' && event.key !== 'F') return; if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return; const t = event.target; if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return; event.preventDefault(); toggleFocus(); });
     // My books (design/mybooks.js): a change on any board is saved to the account's preferences.books.
     document.addEventListener('board:my-books', event => { const books = event.detail?.books; if (Array.isArray(books)) persist({ books, booksSet: true }); });
     document.addEventListener('board:betting-state', event => { if (applyingAccount) return; const state = event.detail?.state; if (!/^[a-z]{2}$/.test(state || '')) return; regionTouched = true; persist({ region:state.toUpperCase() }); });
