@@ -200,3 +200,102 @@
   root.LinesBoard = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
+
+/* SheetNav: a game sheet you can move around in (NFL and NCAAF game sheets; any sheet with a .gs-h header and three or
+   more .sub-h section headings). A sheet runs thousands of pixels, so:
+     - a sticky "Jump to" bar of chips, one per section (VAS, Model, Injuries, Movement, Numbers, Books, ...), plus
+       "Collapse all" / "Expand all";
+     - every section heading folds its section (tap, Enter or Space), and the choice is remembered per sport on this
+       device (localStorage tb_sheetFold);
+     - the long reference sections start folded the first time (injury report text, Injury Matrix, public money, key
+       numbers, first half and team totals); jumping to a folded section opens it.
+   It works on the DOM the sheet already renders, and re-applies itself when the sheet repaints. */
+(function (root) {
+  const KEY = 'tb_sheetFold';
+  const SHORT = { 'VAS': 'VAS', 'Model read': 'Model', 'Injury Matrix': 'Matrix', 'Injury report': 'Injuries', 'Line movement': 'Movement',
+    'The numbers': 'Numbers', 'Every book': 'Books', 'Where the money is': 'Money', 'Key numbers': 'Keys', 'First half & team totals': '1st half',
+    'Your bets here': 'Your bets', 'Openers and closes': 'Openers', 'Opener read': 'Opener', 'Why the line moved': 'Why it moved' };
+  const SHUT_FIRST = new Set(['Injury report', 'Injury Matrix', 'Where the money is', 'Key numbers', 'First half & team totals']);
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const titleOf = (h) => (h.classList.contains('vas-head') ? 'VAS' : String((h.firstChild && h.firstChild.nodeType === 3 ? h.firstChild.textContent : h.textContent) || '').trim());
+  const shortOf = (t) => SHORT[t] || (t.length > 14 ? t.slice(0, 13) + '…' : t);
+  const isOpen = (saved, title) => (Object.prototype.hasOwnProperty.call(saved, title) ? saved[title] !== false : !SHUT_FIRST.has(title));
+  const api = { SHORT, SHUT_FIRST, shortOf, isOpen };
+  root.SheetNav = api;
+  if (typeof module !== 'undefined' && module.exports) { module.exports.SheetNav = api; }
+  if (!root.document || !root.MutationObserver) return;
+  const doc = root.document;
+  const sport = () => ((root.location && root.location.pathname.match(/^\/(nfl|ncaaf|mlb|nhl)\//)) || [])[1] || 'board';
+  const readAll = () => { try { const v = JSON.parse(root.localStorage.getItem(KEY) || '{}'); return v && typeof v === 'object' ? v : {}; } catch { return {}; } };
+  const saved = () => { const v = readAll()[sport()]; return v && typeof v === 'object' ? v : {}; };
+  const save = (m) => { try { const all = readAll(); all[sport()] = m; root.localStorage.setItem(KEY, JSON.stringify(all)); } catch { /* storage blocked: folds last this visit */ } };
+
+  function heads(body) { return [...body.querySelectorAll('.vas-panel > .vas-head, .sub-h')].filter((h) => titleOf(h)); }
+  function apply(body) {
+    if (!body) return;
+    const nav0 = body.querySelector(':scope > .tb-jump');
+    const hs = body.querySelector('.gs-h') ? heads(body) : [];
+    if (hs.length < 3) { if (nav0) nav0.remove(); return; }
+    const m = saved(), seen = new Set(), chips = [];
+    let anyOpen = false;
+    for (const h of hs) {
+      const title = titleOf(h), open = isOpen(m, title);
+      if (open) anyOpen = true;
+      if (!h.classList.contains('tb-fold-h')) { h.classList.add('tb-fold-h'); h.setAttribute('role', 'button'); h.tabIndex = 0; }
+      if (h.getAttribute('aria-expanded') !== String(open)) h.setAttribute('aria-expanded', String(open));
+      if (h.dataset.tbFold !== title) h.dataset.tbFold = title;
+      for (let n = h.nextElementSibling; n && !n.matches('.sub-h'); n = n.nextElementSibling) if (n.classList.contains('tb-fold-x') === open) n.classList.toggle('tb-fold-x', !open);
+      if (!seen.has(title)) { seen.add(title); chips.push(`<button type="button" class="tb-jump-c${open ? '' : ' is-shut'}" data-tb-jump="${esc(title)}">${esc(shortOf(title))}</button>`); }
+    }
+    const html = chips.join('') + `<button type="button" class="tb-jump-c tb-jump-all" data-tb-all="${anyOpen ? 'shut' : 'open'}">${anyOpen ? 'Collapse all' : 'Expand all'}</button>`;
+    let nav = nav0;
+    if (!nav) {
+      nav = doc.createElement('nav'); nav.className = 'tb-jump'; nav.setAttribute('aria-label', 'Jump to a section');
+      const meta = body.querySelector(':scope > .gs-meta') || body.querySelector(':scope > .gs-h');
+      if (meta) meta.after(nav); else body.prepend(nav);
+    }
+    if (nav.innerHTML !== html) nav.innerHTML = html;
+  }
+  function set(title, open) { const m = saved(); m[title] = open; save(m); }
+  function headFor(body, title) { return heads(body).find((h) => titleOf(h) === title) || null; }
+
+  let body = null, queued = false;
+  const later = () => { if (queued) return; queued = true; (root.requestAnimationFrame || setTimeout)(() => { queued = false; apply(body); }); };
+  const mo = new root.MutationObserver(later);
+  function attach() {
+    const b = doc.getElementById('dlgBody');
+    if (!b || b === body) return !!b;
+    body = b; mo.observe(b, { childList: true, subtree: true }); later(); return true;
+  }
+  if (!attach()) doc.addEventListener('DOMContentLoaded', attach, { once: true });
+
+  function toggle(h) {
+    const title = titleOf(h);
+    set(title, h.getAttribute('aria-expanded') !== 'true');
+    apply(body);
+  }
+  doc.addEventListener('click', (e) => {
+    if (!body || !e.target.closest) return;
+    const j = e.target.closest('[data-tb-jump]');
+    if (j && body.contains(j)) {
+      const title = j.dataset.tbJump;
+      if (!isOpen(saved(), title)) { set(title, true); apply(body); }
+      const h = headFor(body, title);
+      if (h) h.scrollIntoView({ behavior: root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+      return;
+    }
+    const all = e.target.closest('[data-tb-all]');
+    if (all && body.contains(all)) {
+      const open = all.dataset.tbAll === 'open', m = saved();
+      for (const h of heads(body)) m[titleOf(h)] = open;
+      save(m); apply(body); return;
+    }
+    const h = e.target.closest('.tb-fold-h');
+    // controls inside a heading (a market switch, a link) keep working; the rest of the heading folds
+    if (h && body.contains(h) && !e.target.closest('button, a, input, select, label, summary')) toggle(h);
+  });
+  doc.addEventListener('keydown', (e) => {
+    const h = e.target && e.target.classList && e.target.classList.contains('tb-fold-h') ? e.target : null;
+    if (h && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(h); }
+  });
+})(typeof window !== 'undefined' ? window : globalThis);

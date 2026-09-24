@@ -71,3 +71,17 @@ body.lb-lock { overflow: hidden; }
 .lb-tl-pick { fill: none; stroke: var(--lb-mark); stroke-width: 2.5; }
 .lb-tl-dot { fill: var(--lb-mark); stroke: var(--surface, #fff); stroke-width: 1.5; }
 .lb-empty { margin: 12px 0; font-size: 13px; color: var(--ink-3, #606D83); }
+
+/* SheetNav (linesboard.js): the game sheet's sticky "Jump to" bar and folding section headings */
+.tb-jump{position:sticky;top:0;z-index:6;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:8px calc(-1 * var(--gutter,16px)) 12px;padding:10px var(--gutter,16px);background:var(--bg);box-shadow:0 1px 0 var(--line)}
+.tb-jump::-webkit-scrollbar{display:none}
+.tb-jump-c{flex:none;min-height:34px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:inherit;font-size:12px;font-weight:600;line-height:1.1;cursor:pointer;touch-action:manipulation;white-space:nowrap}
+.tb-jump-c.is-shut{color:var(--ink-2)}
+.tb-jump-c:focus-visible,.tb-fold-h:focus-visible{outline:2px solid var(--brand,currentColor);outline-offset:2px}
+.tb-jump-all{margin-left:auto;background:transparent;color:var(--ink-2)}
+.tb-fold-h{cursor:pointer;scroll-margin-top:64px;user-select:none;-webkit-user-select:none}
+.tb-fold-h::after{content:"";flex:none;width:8px;height:8px;margin-left:6px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:translateY(-2px) rotate(45deg);opacity:.6;transition:transform .15s}
+.tb-fold-h[aria-expanded="false"]::after{transform:rotate(-45deg)}
+.tb-fold-x{display:none!important}
+@media (prefers-reduced-motion:reduce){.tb-fold-h::after{transition:none}}
+@media (min-width:1024px){.tb-jump{margin-inline:calc(-1 * var(--s5,32px));padding-inline:var(--s5,32px)}}
