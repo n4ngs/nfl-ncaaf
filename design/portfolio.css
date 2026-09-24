@@ -266,3 +266,8 @@ select.portfolio-sport,.portfolio-sport select{padding-right:8px;font-size:13px;
 .portfolio-actions [data-share-bet]:focus-visible{outline:2px solid var(--brand,currentColor);outline-offset:2px}
 .nh-share{min-height:36px;margin-left:8px;padding:6px 14px;border-radius:999px;border:1px solid var(--line);background:transparent;color:inherit;font:inherit;font-size:12px;font-weight:650;cursor:pointer;touch-action:manipulation}
 .nh-share:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+/* NHL: an empty slate says why and offers the next day with prices (nhl/public/app.js nhEmptyNote) */
+.nh-noprices{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:10px 0 14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;font-size:13px;line-height:1.45;color:var(--ink-2)}
+.nh-noprices b{color:var(--ink)}
+.nh-next-btn{min-height:36px;padding:6px 14px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--ink);font:inherit;font-size:12px;font-weight:650;cursor:pointer}
+.nh-next-btn:focus-visible{outline:2px solid currentColor;outline-offset:2px}

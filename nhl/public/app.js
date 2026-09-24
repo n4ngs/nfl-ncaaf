@@ -190,3 +190,18 @@ document.addEventListener('click',async e=>{const b=e.target.closest&&e.target.c
  const t=NH.bets.find(x=>x.id===b.dataset.nhShare),K=window.BoardPortfolioView&&BoardPortfolioView.share;if(!t||!K)return;const l=t.legs[0]||{},url=location.origin+'/nhl/';
  const text=K.text({pick:t.legs.length>1?t.legs.length+'-leg parlay':l.label,odds:Number.isFinite(t.odds)?american(t.odds):'',book:t.book,matchup:l.matchup||'',status:t.status==='open'?'':t.status.charAt(0).toUpperCase()+t.status.slice(1),url});
  const r=await K.send({title:'My bet',text});if(r==='shared'||r==='aborted')return;toastText(await K.copyText(text)?'Ticket copied. Paste it into Messages, Mail or a chat.':'Sharing isn’t available in this browser.');});
+
+// No prices today? Books post NHL lines a few days out and often skip preseason games entirely, so an empty slate
+// is the books, not the board. Say so, and offer the next day that has prices (looked up once per day, up to 10 ahead).
+const NH_NEXT={};
+async function nhNextPriced(from){if(NH_NEXT[from]!==undefined)return NH_NEXT[from];NH_NEXT[from]=null;const d0=Date.parse(from+'T12:00:00Z');
+ for(let i=1;i<=10;i++){const day=new Date(d0+i*86400000).toISOString().slice(0,10);try{const d=await request('api/day?date='+day);const gs=d.week?.games||[];const books=new Set(gs.flatMap(g=>Object.keys(g.books||{})));if(gs.length&&books.size>=3){NH_NEXT[from]={day,games:gs.length,books:books.size};break;}}catch{break;}}
+ return NH_NEXT[from];}
+async function nhEmptyNote(){const list=$('game-list');if(!list||!NH.date)return;const games=[...NH.games.values()],books=new Set(games.flatMap(g=>Object.keys(g.books||{})));let el=$('nh-noprices');
+ if(!games.length||books.size>=3||NH.view==='bets'){if(el)el.remove();return;}
+ const next=await nhNextPriced(NH.date);if(!el){el=document.createElement('div');el.id='nh-noprices';el.className='nh-noprices';list.before(el);}
+ const pre=games.some(g=>g.preseason),when=next?new Date(next.day+'T12:00:00Z').toLocaleDateString([], {weekday:'short',month:'short',day:'numeric',timeZone:'UTC'}):'';
+ const html='<b>'+(books.size?'Only '+books.size+' book has':'No books have')+' posted lines for '+(pre?'this preseason slate':'this slate')+' yet.</b> '+(pre?'Most books skip preseason games. ':'Books post NHL lines a few days out. ')+(next?'<button type="button" class="nh-next-btn" data-nh-day="'+esc(next.day)+'">'+esc(when)+': '+next.games+' games, '+next.books+' books →</button>':'');
+ if(el.dataset.html!==html){el.innerHTML=html;el.dataset.html=html;}}
+document.addEventListener('click',async e=>{const b=e.target.closest&&e.target.closest('[data-nh-day]');if(!b)return;e.preventDefault();NH.selected=b.dataset.nhDay;const inp=$('slate-date');if(inp)inp.value=NH.selected;try{setGames(await request('api/day?date='+NH.selected));}catch(err){toastText(err.message);}});
+setInterval(()=>{nhEmptyNote().catch(()=>{});},1500);
