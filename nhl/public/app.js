@@ -43,7 +43,10 @@ NH.phBook=(()=>{try{return localStorage.getItem('nh.phBook')||'mkt';}catch{retur
 function quoteOf(g,book,m,s){const q=g.books?.[book]?.integrity?.[m]?.[s];if(!q||!Number.isFinite(Number(q.american_odds)))return null;if(g.state==='in'&&q.is_live!==true)return null;return q;}
 function lineMain(m,s,q){if(m==='ml')return american(Number(q.american_odds));const v=Number(q.line_value);if(!Number.isFinite(v))return '—';return m==='t'?(s==='over'?'o':'u')+v:(v>0?'+':v<0?'−':'')+(v===0?'PK':Math.abs(v));}
 function betterQ(m,s,a,b){if(!b)return true;if(m!=='ml'){const la=Number(a.line_value),lb=Number(b.line_value);if(la!==lb)return m==='t'?(s==='over'?la<lb:la>lb):la>lb;}return dec(Number(a.american_odds))>dec(Number(b.american_odds));}
-function boardBooks(games){const have=new Set(games.flatMap(g=>Object.keys(g.books||{})));const order=NH.books.map(b=>b.key);return [...have].sort((a,b)=>(a==='pin'?-1:b==='pin'?1:0)||((order.indexOf(a)+1||999)-(order.indexOf(b)+1||999))||bookName(a).localeCompare(bookName(b)));}
+// Every book, always, as on the football boards (owner: "all books everywhere"): the same sportsbook columns as NFL
+// and NCAAF, with a dash where a book has no NHL price yet, plus any other book that does have one on this slate.
+const NH_BASE_BOOKS=['circa','pin','stn','boom','czr','mgm','sp','wg','wynn','dk','fd','bet365','betonline','hardrock','betr','bovada','novig','1xbet','ps3838','betrivers','betus','bet105','bookmaker','lowvig','mybookie','stake','thescore','thunderpick','versus'];
+function boardBooks(games){const have=new Set(games.flatMap(g=>Object.keys(g.books||{})));const order=NH.books.map(b=>b.key);const all=new Set([...NH_BASE_BOOKS.filter(k=>order.includes(k)),...have]);return [...all].sort((a,b)=>(a==='pin'?-1:b==='pin'?1:0)||((order.indexOf(a)+1||999)-(order.indexOf(b)+1||999))||bookName(a).localeCompare(bookName(b)));}
 function bestOf(g,m,s){let best=null;for(const book of Object.keys(g.books||{})){const q=quoteOf(g,book,m,s);if(!q||!fresh(q))continue;if(betterQ(m,s,q,best?.q))best={book,q};}return best;}
 // Market: the median fresh price (moneyline) or, for lines, the most common fresh line and the median price at it.
 function marketOf(g,m,s){const qs=Object.keys(g.books||{}).map(b=>quoteOf(g,b,m,s)).filter(q=>q&&fresh(q));if(!qs.length)return null;

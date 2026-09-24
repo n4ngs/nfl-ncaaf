@@ -31,7 +31,8 @@ for (const [key,name] of Object.entries({ps3838:'PS3838',bet365:'Bet365',betonli
 
 const { BOOK_NAMES: SHARP_BOOKS } = require('../../shared/sharp-books');
 for (const b of BOOKS) if (!['cons','open'].includes(b.key)) b.src = ['sharp', ...(b.src || [])];
-for (const [key,name] of Object.entries(SHARP_BOOKS)) if (!BOOKS.some(b=>b.key===key)) BOOKS.push({key,name,short:name,src:['sharp']});
+// Catalog-only books (exchanges and regional products the Sharp feed may carry) show only when they have a price.
+for (const [key,name] of Object.entries(SHARP_BOOKS)) if (!BOOKS.some(b=>b.key===key)) BOOKS.push({key,name,short:name,src:['sharp'],catalogOnly:true});
 
 const byKey = Object.fromEntries(BOOKS.map((b) => [b.key, b]));
 const AN_IDS = [...new Set(BOOKS.flatMap((b) => b.an || []))];

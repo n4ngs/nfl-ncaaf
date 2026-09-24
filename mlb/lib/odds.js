@@ -443,7 +443,9 @@ function bookList(D) {
   const fed = new Set();
   for (const G of Object.values(D?.games || {})) for (const k of Object.keys(G.books || {})) fed.add(k);
   if (D?.date === ctx?.today()?.date) for (const row of liveQuotes.values()) for (const key of Object.keys(row.books)) fed.add(key);
-  return BOOKS.filter(b=>fed.has(b.key) || b.nv || ['cons','open','pin','dk','fd'].includes(b.key)).map(({ key, name, short, nv, sharp, link, ios }) => ({ key, name, short, nv: !!nv, sharp: !!sharp, feed: fed.has(key), site: link || null, ios: ios || null }));
+  // Every sportsbook column the football boards show (owner: "just as many as football"), a dash where a book has no
+  // MLB price; catalog-only books appear once they carry one.
+  return BOOKS.filter(b=>fed.has(b.key) || !b.catalogOnly).map(({ key, name, short, nv, sharp, link, ios }) => ({ key, name, short, nv: !!nv, sharp: !!sharp, feed: fed.has(key), site: link || null, ios: ios || null }));
 }
 
 function sourceInfo() {
