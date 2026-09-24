@@ -98,11 +98,11 @@ body.lb-lock { overflow: hidden; }
 .mdl-flash{animation:mdl-flash 1.5s ease-out 1;border-radius:6px}
 @media (prefers-reduced-motion:reduce){.mdl-flash{animation:none;outline:2px solid var(--brand,#EDAA25);outline-offset:1px}}
 
-/* Best price, on every board: every book tied at the best number is marked, in green, so it no longer shares the gold
-   of the model and "my books" (and sharp books are red). */
-:root{--best:#15803D;--best-ink:#FFFFFF}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--best:#2FBF71;--best-ink:#03170B}}
-:root[data-theme="dark"]{--best:#2FBF71;--best-ink:#03170B}
+/* Best price, on every board: every book tied at the best number is marked, in violet, so it shares no color with the
+   model's gold, "my books", sharp books (red) or the model row (blue). */
+:root{--best:#6D28D9;--best-ink:#FFFFFF}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--best:#A78BFA;--best-ink:#140A2E}}
+:root[data-theme="dark"]{--best:#A78BFA;--best-ink:#140A2E}
 html .px.best,html button.odds-px.best,html a.odds-px.best,html span.odds-px.best,html .odds-tp.best{background:var(--best);color:var(--best-ink);border-color:var(--best);box-shadow:none}
 html .px.best small,html .odds-px.best small,html .odds-tp.best small,html .px.best .num,html .odds-px.best .num{color:var(--best-ink);opacity:.9}
 html button.px.best:hover,html a.px.best:hover,html button.odds-px.best:hover,html a.odds-px.best:hover{background:color-mix(in srgb,var(--best) 88%,#000)}
