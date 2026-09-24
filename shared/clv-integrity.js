@@ -148,12 +148,29 @@ function evaluateCLV(input = {}, entrySnapshot, resolution, options = {}) {
 }
 
 class IntegrityStore {
-  constructor({ dataDir, sport, config = {} }) {
+  /* Repeat compaction (2026-09-23). Feeds re-send an UNCHANGED price every ~2 minutes; journaling each one grew the
+     NCAAF journal to 5.4M rows / 4.8 GB in two days (97% exact repeats), held entirely in memory, and starved the
+     engine. A repeat of the same series (event, market, period, selection, book, source, pregame) with identical
+     values is now journaled only as a heartbeat every `repeatHeartbeatMs` (6 min), and always inside the final
+     `closeWindowMs` (15 min) before scheduled kickoff, so open, close (10 min budget) and freshness evidence keep
+     their meaning. The newest unjournaled sighting is kept in memory and overlaid on the current quote, so live
+     freshness is unchanged. Live quotes and any change of value are never compacted. The same rule collapses repeats
+     already on disk at load (the file itself is never rewritten), and any snapshot referenced by an entry, signal or
+     resolution is always kept. `repeatHeartbeatMs: 0` disables compaction. */
+  constructor({ dataDir, sport, config = {}, repeatHeartbeatMs = 6 * 60e3, closeWindowMs = 15 * 60e3 }) {
     if (!dataDir) throw new Error('IntegrityStore requires a dataDir');
     this.sport = sport || 'unknown'; this.config = configuration(config); this.dir = path.join(dataDir, 'integrity');
     fs.mkdirSync(this.dir, { recursive: true });
     this.snapshots = new Map(); this.signals = new Map(); this.entries = new Map(); this.resolutions = new Map(); this.errors = []; this.byEvent = new Map(); this.byMarket = new Map();
-    for (const [kind, map, id] of [['snapshots', this.snapshots, 'snapshot_id'], ['signals', this.signals, 'signal_id'], ['entries', this.entries, 'entry_id'], ['resolutions', this.resolutions, 'resolution_id']]) {
+    this.heartbeatMs = n(repeatHeartbeatMs) || 0; this.closeWindowMs = n(closeWindowMs) || 0;
+    this.lastKept = new Map(); this.seen = new Map(); this.compaction = { loaded_repeats_skipped: 0, repeats_not_journaled: 0 };
+    const referenced = new Set(); let loadingSnapshots = false;
+    for (const [kind, map, id] of [['entries', this.entries, 'entry_id'], ['signals', this.signals, 'signal_id'], ['resolutions', this.resolutions, 'resolution_id'], ['snapshots', this.snapshots, 'snapshot_id']]) {
+      if (kind === 'snapshots') {
+        loadingSnapshots = true;
+        for (const r of [...this.entries.values(), ...this.signals.values()]) if (r.entry_snapshot_id) referenced.add(r.entry_snapshot_id);
+        for (const r of this.resolutions.values()) for (const k of ['open_snapshot_id', 'close_snapshot_id', 'current_snapshot_id', 'latest_snapshot_id', 'rejected_snapshot_id']) if (r[k]) referenced.add(r[k]);
+      }
       const file = path.join(this.dir, `${kind}.jsonl`); if (!fs.existsSync(file)) continue;
       // Journals can exceed V8's single-string limit. Decode bounded chunks while
       // preserving every record, UTF-8 boundaries and original line numbers.
@@ -164,7 +181,8 @@ class IntegrityStore {
         try {
           const row = JSON.parse(text);
           if (!row[id] || (map.has(row[id]) && stable(map.get(row[id])) !== stable(row))) throw new Error('duplicate or missing identity');
-          if (!map.has(row[id])) map.set(row[id], immutable(row));
+          if (loadingSnapshots && !map.has(row[id]) && !referenced.has(row[id]) && this.redundant(row)) { this.noteRepeat(row); this.compaction.loaded_repeats_skipped++; return; }
+          if (!map.has(row[id])) { map.set(row[id], immutable(row)); if (loadingSnapshots) this.keep(row); }
         } catch { this.errors.push({ journal: kind, line, reason_code: 'INVALID_JOURNAL_RECORD' }); }
       };
       try {
@@ -181,6 +199,30 @@ class IntegrityStore {
     for (const q of this.snapshots.values()) this.index(q);
   }
   index(q) { const key = [q.canonical_event_id, q.market_type, q.selection, q.sportsbook, q.team || '-'].join('|'); if (!this.byEvent.has(q.canonical_event_id)) this.byEvent.set(q.canonical_event_id, []); this.byEvent.get(q.canonical_event_id).push(q); if (!this.byMarket.has(key)) this.byMarket.set(key, []); this.byMarket.get(key).push(q); }
+  seriesKey(q) { return [q.canonical_market_key || [q.canonical_event_id, q.market_type, q.period].join(':'), q.selection, q.sportsbook, q.source, q.is_live, q.team || '-'].join('|'); }
+  valueSig(q) { return stable([q.line_value, q.american_odds, q.market_status, q.validation_status, q.reason_code, !!q.conflict, q.fixtureId ?? null, q.optionId ?? null, q.optionMarketId ?? null, q.provider_event_id ?? null, q.scheduled_start_at ?? null, q.actual_start_at ?? null, q.actual_start_verified ?? null]); }
+  // True when q only re-observes the last journaled value of its series inside the heartbeat, away from kickoff.
+  redundant(q) {
+    if (!this.heartbeatMs || q.is_live !== false) return false;
+    const last = this.lastKept.get(this.seriesKey(q)); if (!last || last.sig !== this.valueSig(q)) return false;
+    const t = ms(q.source_observed_at), t0 = ms(last.q.source_observed_at), r = ms(q.received_at);
+    if (t === null || t0 === null || r === null || t < t0 || t - t0 >= this.heartbeatMs) return false;
+    const kick = ms(q.scheduled_start_at);
+    if (kick !== null && this.closeWindowMs && t >= kick - this.closeWindowMs) return false;
+    return true;
+  }
+  keep(q) { this.lastKept.set(this.seriesKey(q), { q, sig: this.valueSig(q) }); this.seen.delete(this.seriesKey(q)); }
+  noteRepeat(q) {
+    const k = this.seriesKey(q), prev = this.seen.get(k);
+    if (!prev || ms(q.source_observed_at) >= ms(prev.source_observed_at)) this.seen.set(k, { source_observed_at: q.source_observed_at, received_at: q.received_at });
+  }
+  // The kept (journaled) snapshot with the times of its newest identical, unjournaled sighting.
+  overlay(q) {
+    if (!q) return q;
+    const k = this.seriesKey(q), s = this.seen.get(k), last = this.lastKept.get(k);
+    if (!s || !last || last.q.snapshot_id !== q.snapshot_id || ms(s.source_observed_at) <= ms(q.source_observed_at)) return q;
+    return { ...q, source_observed_at: s.source_observed_at, received_at: s.received_at, observed_repeat_of: q.snapshot_id };
+  }
   append(kind, value) {
     if (this.errors.length) throw new Error('Integrity journal requires repair; refusing to append to ambiguous evidence');
     if (this.pendingBatch) { if (!this.pendingBatch.has(kind)) this.pendingBatch.set(kind, []); this.pendingBatch.get(kind).push(value); return immutable(value); }
@@ -217,7 +259,8 @@ class IntegrityStore {
     q.provenance_hash = input.provenance_hash || input.payload_fingerprint || hash(input.payload || identity);
     q.snapshot_id = hash({ ...identity, provenance_hash: q.provenance_hash });
     if (this.snapshots.has(q.snapshot_id)) return this.snapshots.get(q.snapshot_id);
-    const saved = this.append('snapshots', q); this.snapshots.set(q.snapshot_id, saved); this.index(saved); return saved;
+    if (this.redundant(q)) { this.noteRepeat(q); this.compaction.repeats_not_journaled++; const kept = this.lastKept.get(this.seriesKey(q)).q; return immutable(this.overlay(kept)); }
+    const saved = this.append('snapshots', q); this.snapshots.set(q.snapshot_id, saved); this.index(saved); this.keep(saved); return saved;
   }
   snapshot(id) { return this.snapshots.get(id) || null; }
   observeLine(event, book, L, metadata = {}) {
@@ -242,11 +285,27 @@ class IntegrityStore {
     return (this.byEvent.get(e.canonical_event_id) || []).filter((q) => q.market_type === marketType(market) && (!selection || q.selection === selection) && (!book || q.sportsbook === book) && (team === undefined || q.team === team));
   }
   resolve(event, market, selection, book, now = Date.now()) {
-    const e = eventInfo(event), rows = this.rows(e, market, selection, book, e.team).filter((q) => !e.quote_source || q.source === e.quote_source), k = kickoff(e), time = ms(now);
-    const usable = rows.filter((q) => valid(q) && ms(q.source_observed_at) <= time && ms(q.received_at) <= time).sort((a, b) => ms(a.source_observed_at) - ms(b.source_observed_at) || a.snapshot_id.localeCompare(b.snapshot_id));
-    const pre = usable.filter((q) => q.is_live === false && (k.at === null || ms(q.source_observed_at) < k.at));
+    const e = eventInfo(event), all = this.rows(e, market, selection, book, e.team), k = kickoff(e), time = ms(now);
     const live = e.is_live === true || e.state === 'in';
-    const latest = rows.filter((q) => q.is_live === live && ms(q.received_at) <= time).sort((a, b) => (ms(a.source_observed_at) ?? ms(a.received_at)) - (ms(b.source_observed_at) ?? ms(b.received_at))).at(-1) || null;
+    // Journals are append-only, so a series whose row count has not changed has nothing new. Cache the filtered and
+    // sorted views per query and reuse them while no row is added and `now` is past every row's timestamps (then the
+    // time filters exclude nothing, exactly as when the cache was built). Before this, every board refresh re-sorted
+    // every market's full history.
+    const ck = [e.canonical_event_id, marketType(market), selection, book, e.team || '-', e.quote_source || '', k.at, live].join('|');
+    let c = this.resolveCache && this.resolveCache.get(ck);
+    if (!c || c.n !== all.length || c.source !== all || time === null || time < c.maxT) {
+      const rows = all.filter((q) => !e.quote_source || q.source === e.quote_source);
+      const usableAll = rows.filter((q) => valid(q) && ms(q.source_observed_at) <= time && ms(q.received_at) <= time).sort((a, b) => ms(a.source_observed_at) - ms(b.source_observed_at) || a.snapshot_id.localeCompare(b.snapshot_id));
+      const latestAll = rows.filter((q) => q.is_live === live && ms(q.received_at) <= time).sort((a, b) => (ms(a.source_observed_at) ?? ms(a.received_at)) - (ms(b.source_observed_at) ?? ms(b.received_at))).at(-1) || null;
+      let maxT = -Infinity; for (const q of rows) maxT = Math.max(maxT, ms(q.source_observed_at) ?? -Infinity, ms(q.received_at) ?? -Infinity);
+      c = { n: all.length, source: all, rows, usable: usableAll, latestRow: latestAll, maxT };
+      if (time !== null && time >= maxT) { if (!this.resolveCache) this.resolveCache = new Map(); this.resolveCache.set(ck, c); }
+    }
+    const rows = c.rows, usable = c.usable;
+    const pre = usable.filter((q) => q.is_live === false && (k.at === null || ms(q.source_observed_at) < k.at));
+    const latestRow = c.latestRow;
+    const overlaid = this.overlay(latestRow);
+    const latest = overlaid && ms(overlaid.received_at) <= time ? overlaid : latestRow;
     const currentFreshness = freshness(latest, now, this.config);
     const currentConflict = latest && evidenceConflict(rows.filter((q) => q.source_observed_at === latest.source_observed_at && q.is_live === live));
     if (currentConflict) { currentFreshness.status = 'UNVERIFIED'; currentFreshness.reason_code = 'SOURCE_CONFLICT'; }
