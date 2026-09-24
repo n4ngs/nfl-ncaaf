@@ -261,7 +261,10 @@ test('scorecard CLV includes only verified evidence and comparable per-metric sa
     record('provisional', { eligibility_status: 'PROVISIONAL_CLV', price_clv_status: 'COMPARABLE', line_clv_points: 99, clv_fair_probability_pp: 99, clv_ev_pct: 99 }),
     record('conflict', { eligibility_status: 'SOURCE_CONFLICT', status: 'VERIFIED_CLV', price_clv_status: 'COMPARABLE', line_clv_points: 99 }), record('legacy', null)];
   const data = View.scorecardData(tickets);
-  assert.deepEqual(data.clv, { legs: 5, verified: 2, excluded: 3, fair: { count: 1, average: 0 }, ev: { count: 1, average: 0 } });
+  const { points, ...clvSummary } = data.clv;
+  assert.deepEqual(clvSummary, { legs: 5, verified: 2, excluded: 3, fair: { count: 1, average: 0 }, ev: { count: 1, average: 0 } });
+  assert.equal(points.length, 1, 'the CLV chart gets one point per comparable verified leg');
+  assert.equal(points[0].pp, 0);
   assert.deepEqual(data.groups[0].line, { count: 2, average: 1 });
   const html = View.renderScorecard(data);
   assert.match(html, /0 pp/); assert.match(html, /1 comparable verified legs/); assert.doesNotMatch(html, /999|99 pts/);
@@ -289,4 +292,16 @@ test('empty scorecard marks absent metrics unavailable and labels logged wagers 
   assert.match(html, /0 \/ 0/); assert.doesNotMatch(html, /NaN|Infinity/);
   const insight = View.insightData([]);
   assert.deepEqual(insight.scorecard, data); assert.match(View.renderInsights(insight), /Logged results/);
+});
+
+test('CLV chart: a bar per comparable leg (up when it beat the close), the running average, escaped labels', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '../design/portfolio-view.js'), 'utf8');
+  const body = src.slice(src.indexOf('  function clvChart(points) {'), src.indexOf('  function renderScorecard(model) {'));
+  const vm = require('node:vm'), c = {}; vm.createContext(c); vm.runInContext(body + '\nglobalThis.clvChart = clvChart;', c);
+  assert.equal(c.clvChart([{ t: 1, pp: 2, label: 'x' }]), '', 'one leg is not a chart');
+  const html = c.clvChart([{ t: 1, pp: 2.5, label: '<b>GB</b>', book: 'dk' }, { t: 2, pp: -1, label: 'KC', book: 'fd' }, { t: 3, pp: 1.5, label: 'SF' }]);
+  assert.equal((html.match(/pv-clv-bar up/g) || []).length, 2);
+  assert.equal((html.match(/pv-clv-bar down/g) || []).length, 1);
+  assert.match(html, /running average \(\+1 pp over 3 legs\)/);
+  assert.doesNotMatch(html, /<b>GB<\/b>/);
 });

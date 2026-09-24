@@ -47,7 +47,7 @@
     }
     let balance = 0, peak = 0, drawdown = 0;
     for (const [, net] of [...timeline].sort((a, b) => a[0] - b[0])) { balance += net; peak = Math.max(peak, balance); drawdown = Math.max(drawdown, peak - balance); }
-    const groups = new Map(), fair = [], ev = []; let legs = 0, verified = 0;
+    const groups = new Map(), fair = [], ev = [], points = []; let legs = 0, verified = 0;
     const group = (sport, market) => {
       const key = `${sport}:${market}`;
       if (!groups.has(key)) groups.set(key, { key, sport, market, label: `${names[sport] || sport} · ${marketLabels[market]}`, settled: 0, net: 0, knownNet: 0, roiStake: 0, roiNet: 0, roiSample: 0, legs: 0, verified: 0, lines: [], fair: [], ev: [] });
@@ -69,7 +69,8 @@
         row.verified++; verified++;
         if (Number.isFinite(i.line_clv_points) && !['ml', 'f5ml', 'unknown'].includes(row.market)) row.lines.push(i.line_clv_points);
         if (i.price_clv_status === 'COMPARABLE') {
-          if (Number.isFinite(i.clv_fair_probability_pp)) { row.fair.push(i.clv_fair_probability_pp); fair.push(i.clv_fair_probability_pp); }
+          if (Number.isFinite(i.clv_fair_probability_pp)) { row.fair.push(i.clv_fair_probability_pp); fair.push(i.clv_fair_probability_pp);
+            points.push({ t: Date.parse(t.placedAt) || Date.parse(t.createdAt) || 0, pp: i.clv_fair_probability_pp, label: l.label || l.matchup || '', book: t.book || '' }); }
           if (Number.isFinite(i.clv_ev_pct)) { row.ev.push(i.clv_ev_pct); ev.push(i.clv_ev_pct); }
         }
       }
@@ -77,10 +78,32 @@
     return { settled: settled.length,
       roi: { value: risk > 0 ? 100 * matchedNet / risk : null, sample: matched.length, excluded: settled.length - matched.length, stake: risk, net: matchedNet },
       drawdown: { value: dated ? drawdown : null, sample: dated, excluded: settled.length - dated },
-      clv: { legs, verified, excluded: legs - verified, fair: average(fair), ev: average(ev) },
+      clv: { legs, verified, excluded: legs - verified, fair: average(fair), ev: average(ev), points: points.sort((a, b) => a.t - b.t) },
       groups: [...groups.values()].sort((a, b) => a.label.localeCompare(b.label)).map((r) => ({ key: r.key, label: r.label, sport: r.sport, market: r.market, settled: r.settled, net: r.knownNet ? r.net : null, knownNet: r.knownNet,
         roi: r.roiStake > 0 ? 100 * r.roiNet / r.roiStake : null, roiSample: r.roiSample, roiStake: r.roiStake, roiNet: r.roiNet, legs: r.legs, verified: r.verified, line: average(r.lines), fair: average(r.fair), ev: average(r.ev), unit: r.sport === 'mlb' ? 'runs' : r.sport === 'nhl' ? 'goals' : 'pts' })) };
   }
+  // Closing-line value per verified leg, oldest first: a bar up when the bet beat the no-vig close, down when it did
+  // not, with the running average as a line. Diverging pair (blue beat / orange worse), shape (up/down) and the
+  // table above carry the same numbers, so it never depends on colour alone.
+  function clvChart(points) {
+    if (!points || points.length < 2) return '';
+    const W = 720, H = 220, L = 44, R = 12, T = 12, B = 22, n = points.length;
+    const vals = points.map((p) => p.pp); let run = 0; const avg = points.map((p, i) => (run += p.pp) / (i + 1));
+    const top = Math.max(1, ...vals, ...avg), bot = Math.min(-1, ...vals, ...avg), span = top - bot;
+    const y = (v) => T + (top - v) / span * (H - T - B), bw = Math.max(2, Math.min(18, (W - L - R) / n - 2));
+    const x = (i) => L + (i + 0.5) * (W - L - R) / n;
+    const step = span > 20 ? 10 : span > 8 ? 5 : span > 4 ? 2 : 1, ticks = [];
+    for (let v = Math.ceil(bot / step) * step; v <= top; v += step) ticks.push(v);
+    const esc2 = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const grid = ticks.map((v) => `<line class="pv-clv-grid${v === 0 ? ' zero' : ''}" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="pv-clv-tick" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v > 0 ? '+' : ''}${v}</text>`).join('');
+    const bars = points.map((p, i) => { const y0 = y(0), y1 = y(p.pp), h = Math.max(1, Math.abs(y1 - y0));
+      return `<rect class="pv-clv-bar ${p.pp >= 0 ? 'up' : 'down'}" x="${x(i) - bw / 2}" y="${Math.min(y0, y1)}" width="${bw}" height="${h}" rx="${Math.min(2, bw / 2)}"><title>${esc2(p.label)}${p.book ? ' · ' + esc2(p.book) : ''}: ${p.pp > 0 ? '+' : ''}${Math.round(p.pp * 100) / 100} pp vs the close${p.t ? ' · ' + esc2(new Date(p.t).toLocaleDateString()) : ''}</title></rect>`; }).join('');
+    const line = avg.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join('');
+    return `<figure class="pv-clv"><figcaption><b>Closing-line value, bet by bet</b><span>Up: your price beat the no-vig close. Line: running average (${avg[n - 1] > 0 ? '+' : ''}${Math.round(avg[n - 1] * 100) / 100} pp over ${n} legs).</span></figcaption>` +
+      `<div class="pv-clv-legend"><span><i class="up"></i>Beat the close</span><span><i class="down"></i>Worse than the close</span><span><i class="avg"></i>Running average</span></div>` +
+      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Closing-line value per verified bet, oldest first, with the running average">${grid}${bars}<path class="pv-clv-avg" d="${line}"/></svg></figure>`;
+  }
+
   function renderScorecard(model) {
     if (!model) return '';
     const metric = (value, unit = '%') => Number.isFinite(value) ? `${value > 0 ? '+' : ''}${Math.round(value * 100) / 100}${unit}` : '—';
@@ -88,6 +111,7 @@
     return `<section class="portfolio-trend portfolio-scorecard" aria-label="Logged results scorecard"><div class="portfolio-insight-heading"><h2>Logged results</h2><span>Saved wagers · loaded logs</span></div>
       <div class="portfolio-values"><div><small>Settled ROI</small><strong>${metric(roi.value)}</strong><small>${roi.sample} tickets · ${money(roi.stake)} matched stake${roi.excluded ? ` · ${roi.excluded} excluded` : ''}</small></div><div><small>Maximum drawdown</small><strong>${money(drawdown.value)}</strong><small>${drawdown.sample} dated results${drawdown.excluded ? ` · ${drawdown.excluded} excluded` : ''}</small></div><div><small>Verified CLV coverage</small><strong>${clv.verified} / ${clv.legs}</strong><small>Logged legs with verified entry and close</small></div></div>
       <div class="portfolio-values"><div><small>Average no-vig CLV</small><strong>${metric(clv.fair.average, ' pp')}</strong><small>${clv.fair.count} comparable verified legs</small></div><div><small>Average closing-fair EV</small><strong>${metric(clv.ev.average)}</strong><small>${clv.ev.count} comparable verified legs</small></div></div>
+      ${clvChart(clv.points)}
       <p class="portfolio-insight-note">ROI uses the same settled tickets for known net and positive recorded stake. Drawdown uses dated known profits in settlement order; equal timestamps are combined. Excluded records can change the full result. These are logged wager results, not a model track record.</p>
       ${model.groups.length ? `<div class="portfolio-insight-table"><table><caption>By sport and market. Parlays retain their own ticket results; CLV samples count individual legs.</caption><thead><tr><th scope="col">Sport · market</th><th scope="col">Known net</th><th scope="col">ROI</th><th scope="col">Verified CLV legs</th><th scope="col">Average line CLV</th></tr></thead><tbody>${model.groups.map((r) => `<tr><th scope="row">${esc(r.label)}</th><td>${money(r.net, true)}<small> ${r.knownNet}/${r.settled} results</small></td><td>${metric(r.roi)}<small> n=${r.roiSample}</small></td><td>${r.verified}/${r.legs}</td><td>${metric(r.line.average, ' ' + r.unit)}<small> n=${r.line.count}</small></td></tr>`).join('')}</tbody></table></div>` : '<p class="portfolio-insight-note">Log tickets to build a results scorecard. Unavailable CLV stays out of the averages.</p>'}</section>`;
   }
