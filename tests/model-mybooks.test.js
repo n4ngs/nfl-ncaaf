@@ -280,3 +280,7 @@ test('NHL page: latest-goal hero first, then the odds board (Model + My books), 
   assert.match(js, /class="nb-table has-model"/);
   assert.match(js, /<th class="mdl-th"/);
 });
+test('NHL board: in play, a delayed or paused quote shows no number at all', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../nhl/public/app.js'), 'utf8');
+  assert.match(src, /if\(g\.state==='in'&&!ok\)return '<span class="px na"/);
+});
