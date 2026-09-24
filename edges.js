@@ -306,15 +306,15 @@ module.exports = function edges({ sports, ownerCookie, adminPath = '', interval 
       const t0 = now();
       const feeds = {}, errors = [];
       await Promise.all(keys.map(async (k) => { const d = await get(sports[k].port, '/api/edges', ownerCookie); if (d) feeds[k] = d; else errors.push(sports[k].label || k); }));
-      let evidence = state.evidence;
-      if (!evidenceAt || t0 - evidenceAt >= evidenceEvery) {
-        evidence = {};
-        await Promise.all(keys.map(async (k) => {
-          const [health, record] = await Promise.all([get(sports[k].port, '/api/health', ownerCookie), get(sports[k].port, '/api/vas/record', ownerCookie)]);
-          evidence[k] = evidenceFor(k, health, record);
-        }));
-        evidenceAt = t0;
-      }
+      // Evidence is on a slower clock, except a board that has not answered with it yet (e.g. right after a deploy).
+      const evidence = { ...state.evidence }, all = !evidenceAt || t0 - evidenceAt >= evidenceEvery;
+      const want = keys.filter((k) => all || !evidence[k] || !evidence[k].holdout);
+      await Promise.all(want.map(async (k) => {
+        const [health, record] = await Promise.all([get(sports[k].port, '/api/health', ownerCookie), get(sports[k].port, '/api/vas/record', ownerCookie)]);
+        const next = evidenceFor(k, health, record);
+        if (next.holdout || !evidence[k]) evidence[k] = next;
+      }));
+      if (all) evidenceAt = t0;
       const built = buildRows(feeds, t0);
       state = { ...built, evidence, at: t0, errors };
       // Render once per refresh, per audience. Requests only send these strings.

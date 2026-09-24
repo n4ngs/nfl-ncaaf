@@ -95,7 +95,7 @@ test('evidence picks the holdout row at the live threshold and the live record t
 
 test('requests are served from the cache: engines are read once per refresh, never per request', async () => {
   let calls = 0;
-  const data = { '/api/edges': (port) => ({ 5064: nhlFeed, 5063: mlbFeed, 5062: ncaafFeed, 5061: nflFeed })[port], '/api/health': () => null, '/api/vas/record': () => null };
+  const data = { '/api/edges': (port) => ({ 5064: nhlFeed, 5063: mlbFeed, 5062: ncaafFeed, 5061: nflFeed })[port], '/api/health': (port) => (port === 5061 ? null : { vas: { proven: { '0.08': { bets: 1 }, '0.3': { bets: 1 }, '1.5': { bets: 1 } } } }), '/api/vas/record': () => null };
   const E = createEdges({ sports: { nhl: { port: 5064 }, mlb: { port: 5063 }, ncaaf: { port: 5062 }, nfl: { port: 5061 } }, ownerCookie: 'x', adminPath: '/entry-0123456789abcdef0123456789',
     now: () => NOW, get: async (port, p) => { calls++; return data[p](port); }, log: () => {} });
   const call = (role, qs = '', method = 'GET', p = '/edges') => { const res = { writeHead(s, h) { this.status = s; this.headers = h; }, end(b) { this.body = b; } }; const handled = E.handle({ method }, res, p, qs, role); return { handled, ...res }; };
@@ -106,7 +106,7 @@ test('requests are served from the cache: engines are read once per refresh, nev
   for (let i = 0; i < 25; i++) call(i % 2 ? 'owner' : 'guest');
   assert.equal(calls, after, 'no engine call per request');
   await E.refresh();
-  assert.equal(calls, after + 4, 'later refreshes read only the feeds; evidence is on its own slower clock');
+  assert.equal(calls, after + 4 + 2, 'later refreshes read the feeds, plus evidence only for a board that has not answered with it (NFL here)');
   const g = call('guest');
   assert.equal(g.status, 200); assert.match(g.headers['content-security-policy'], /frame-ancestors 'none'/); assert.equal(g.headers['cache-control'], 'no-store');
   assert.match(g.body, /<!doctype html>/); assert.match(g.body, /aria-current="page">Edges/);
