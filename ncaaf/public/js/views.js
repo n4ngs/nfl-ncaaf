@@ -505,9 +505,44 @@ function marketKey(g, mkt) {
 
 // The model's fair line from the cached model read (lib/vas-service.js). margin = home minus away, so the favourite
 // is home when margin > 0; shown as that team laying the points, e.g. "MISS −1.0". Pregame only.
-function modelFair(g) {
+function modelMargin(g) {
   const m = g.model && (Number.isFinite(g.model.margin) ? g.model.margin : g.model.move && g.model.move.margin);
-  if (!isPre(g) || !Number.isFinite(m)) return '';
+  return isPre(g) && Number.isFinite(m) ? m : null;
+}
+// The model's number for one side of the board's current market. Spread and 1st half come from the margin
+// (1st half = half of it, a derived estimate), the total from the model's own total-points stage, the
+// moneyline from the margin's win probability (normal, the model's margin SD) as a no-vig fair price.
+const r1 = (v) => Math.round(v * 10) / 10;
+const MODEL_TIP = {
+  s: "The model's own fair spread (team fundamentals). An estimate, not a pick.",
+  t: "The model's own total points (team fundamentals). An estimate, not a pick.",
+  ml: "The model's fair moneyline: its win chance from the fair spread, with no vig. An estimate, not a pick.",
+  h1: "Half the model's full-game spread. A derived estimate: the model is not fitted on first halves.",
+};
+function modelPoints(v) { return Math.abs(v) < 0.05 ? 'PK' : `${v > 0 ? '+' : MINUS}${Math.abs(v).toFixed(1)}`; }
+function modelWinHome(g) {
+  const m = modelMargin(g), sd = g.model && g.model.sd;
+  return m == null ? null : ncdf(m / (Number.isFinite(sd) && sd > 0 ? sd : SIGMA));
+}
+function fairAmerican(p) {
+  if (!(p > 0 && p < 1)) return '';
+  const v = p >= 0.5 ? -100 * p / (1 - p) : 100 * (1 - p) / p;
+  return Math.abs(v) > 2500 ? '' : fmtOdds(Math.round(v));   // past ±2500 the price is noise, not a number to read
+}
+function modelSide(g, side, mkt = 's') {
+  const m = modelMargin(g);
+  if (m == null) return '';
+  if (mkt === 't') { const t = g.model.total; return Number.isFinite(t) ? `${side === 'over' ? 'o' : 'u'}${r1(t).toFixed(1)}` : ''; }
+  if (mkt === 'ml') { const p = modelWinHome(g); return fairAmerican(side === 'home' ? p : 1 - p); }
+  const mm = mkt === 'h1' ? m / 2 : m;
+  return modelPoints(side === 'home' ? -r1(mm) : r1(mm));
+}
+function modelFair(g, mkt = 's') {
+  const m0 = modelMargin(g);
+  if (m0 == null) return '';
+  if (mkt === 't') return Number.isFinite(g.model.total) ? `o/u ${r1(g.model.total).toFixed(1)}` : '';
+  if (mkt === 'ml') { const p = modelWinHome(g); const fav = p >= 0.5 ? 'home' : 'away'; const px = fairAmerican(fav === 'home' ? p : 1 - p); return px ? `${g[fav].abbr} ${px}` : ''; }
+  const m = mkt === 'h1' ? m0 / 2 : m0;
   const fav = m > 0 ? g.home : g.away;
   return Math.abs(m) < 0.05 ? 'PK' : `${fav.abbr} ${MINUS}${Math.abs(m).toFixed(1)}`;
 }
@@ -525,6 +560,8 @@ function boardRow(g, mkt) {
   const moved = mkt === 't' ? (g.open?.t != null && g.mkt?.t != null ? g.mkt.t - g.open.t : null) : (g.open?.s != null && g.mkt?.s != null ? g.mkt.s - g.open.s : null);
   const sp = mkt === 't' ? g.splits?.t : g.splits?.s;
   const bits = [];
+  const mf = modelFair(g, mkt);
+  if (mf) bits.push(`<span class="mdl-b"><i>Model</i><b class="num">${esc(mf)}</b></span>`);
   bits.push(isLive(g) ? `<span class="hot">${esc(clockLabel(g))}</span>` : isFinal(g) ? `<b>${esc(clockLabel(g))}</b>` : `<b>${esc(timeLabel(g.start))}</b>`);
   if (g.tv && !isFinal(g)) bits.push(esc(g.tv));
   if (r) bits.push(`<b>${esc(mkt === 't' ? r.t : r.s)}</b>`);
@@ -534,13 +571,13 @@ function boardRow(g, mkt) {
   if ((g.moves || []).some((m) => m.kind === 'steam' && serverNow() - m.t < 3 * 3600e3)) bits.push('<span class="hot">Steam</span>');
   if (S.bets.some((b) => b.status === 'open' && b.legs.some((l) => l.gid === g.id))) bits.push('<b>Your bet</b>');
   const spark = mkt === 't' ? g.spark?.t : g.spark?.s;
-  const mf = modelFair(g);
-  return `<div class="br" data-open="${g.id}">${row(g.away, 'away', s1)}${row(g.home, 'home', s2)}${mf ? `<div class="br-mdl" data-open="${g.id}">Model <b class="num">${esc(mf)}</b></div>` : ''}<button type="button" class="br-f" data-open="${g.id}" aria-label="${esc(`${g.away.short} at ${g.home.short}: open the game`)}">${bits.join('<span class="sep"></span>')}<span class="spk">${isPre(g) ? sparkSVG(spark) : ''}</span></button></div>`;
+  return `<div class="br" data-open="${g.id}">${row(g.away, 'away', s1)}${row(g.home, 'home', s2)}<button type="button" class="br-f" data-open="${g.id}" aria-label="${esc(`${g.away.short} at ${g.home.short}: open the game`)}">${bits.join('<span class="sep"></span>')}<span class="spk">${isPre(g) ? sparkSVG(spark) : ''}</span></button></div>`;
 }
 
 function boardTable(games, mkt, books = visibleBooks()) {
   const [s1, s2] = sideKeys(mkt);
-  const head = `<thead><tr><th class="l stk">Matchup</th><th class="mdl-th" title="The research model's own fair line (team fundamentals). An estimate, not a pick.">Model</th><th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}" title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}">${b.color ? `<i class="bkdot" style="background:${esc(b.color)}"></i>` : ''}${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
+  const withModel = true;
+  const head = `<thead><tr><th class="l stk">Matchup</th>${withModel ? `<th class="mdl-th" title="${esc(MODEL_TIP[mkt] || MODEL_TIP.s)}">Model</th>` : ''}<th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}" title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}">${b.color ? `<i class="bkdot" style="background:${esc(b.color)}"></i>` : ''}${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
   const rows = games.map((g, i) => {
     const lead = (g.home.score ?? 0) > (g.away.score ?? 0) ? 'home' : 'away';
     const trail = !isPre(g) && g.home.score !== g.away.score ? (lead === 'home' ? 'trail0' : 'trail1') : '';
@@ -566,7 +603,7 @@ function boardTable(games, mkt, books = visibleBooks()) {
     return `<tr class="${i ? '' : 'g0'}" data-open="${g.id}">
       <td class="l stk"><div class="mu"><div class="meta">${status}${esc(g.tv || '')}${r ? `<br><span class="w">${esc(mkt === 't' ? r.t : r.s)}</span>` : ''}${wind ? `<br>${wind}` : ''}</div>
         <div class="tm2 ${trail}"><div><span class="rt">${rotOf(g, 'away') ?? ''}</span>${logo(g.away)}<span class="nm">${rankTag(g.away)}${esc(teamName(g.away))}<small>${esc(g.away.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : g.away.score ?? ''}</span></div><div><span class="rt">${rotOf(g, 'home') ?? ''}</span>${logo(g.home)}<span class="nm">${rankTag(g.home)}${esc(teamName(g.home))}<small>${esc(g.home.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : g.home.score ?? ''}</span></div></div></div></td>
-      <td class="mdl-td">${modelFair(g) ? `<span class="mdl-fair num">${esc(modelFair(g))}</span>` : '<span class="faint">—</span>'}</td>
+      ${withModel ? `<td class="mdl-td">${modelMargin(g) != null ? `<div class="st2"><span class="px num mdl">${esc(modelSide(g, s1, mkt) || '—')}</span><span class="px num mdl">${esc(modelSide(g, s2, mkt) || '—')}</span></div>` : '<span class="px na">—</span>'}</td>` : ''}
       <td><div class="st2">${open(s1)}${open(s2)}</div></td>
       <td><div class="st2">${mk ? pxCell(g, mkt, s1, mk, null) : '<span class="px na">—</span>'}${mk ? pxCell(g, mkt, s2, mk, null) : '<span class="px na">—</span>'}</div></td>
       <td><div class="meta mvc">${isPre(g) ? sparkSVG(mkt === 't' ? g.spark?.t : g.spark?.s, 48, 18) : ''}${moved ? `<span>${moved > 0 ? '▲' : '▼'} ${trim(Math.abs(moved))}</span>` : isPre(g) ? '<span class="faint">steady</span>' : ''}</div></td>
@@ -574,7 +611,7 @@ function boardTable(games, mkt, books = visibleBooks()) {
       <td><div class="spl">${a != null ? `<div class="bar2" title="Tickets: ${esc(aw)} ${a}% / ${esc(hm)} ${100 - a}%"><i style="width:${Math.max(a, 18)}%">${a}%</i><i>${100 - a}%</i></div>` : ''}${am != null ? `<div class="bar2 m" style="margin-top:4px" title="Money: ${esc(aw)} ${am}% / ${esc(hm)} ${100 - am}%"><i style="width:${Math.max(am, 18)}%">${am}%</i><i>${100 - am}%</i></div>` : ''}${a == null ? '<span class="faint">—</span>' : ''}</div></td>
     </tr>`;
   }).join('');
-  return `<div class="bt-wrap" tabindex="0" role="region" aria-label="Sportsbook odds comparison. Scroll horizontally for all books."><table class="bt has-model">${head}<tbody>${rows}</tbody></table></div>`;
+  return `<div class="bt-wrap" tabindex="0" role="region" aria-label="Sportsbook odds comparison. Scroll horizontally for all books."><table class="bt${withModel ? ' has-model' : ''}">${head}<tbody>${rows}</tbody></table></div>`;
 }
 
 // "Lines checked 12s ago": how fresh the board is, updated every tick without redrawing it.

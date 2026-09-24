@@ -73,11 +73,12 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
     if (!fc) {
       const f = state.featuresFor(row, { late: {} });
       const x0 = E.withContext(f, row, { seasonType: row.seasonType, week: row.week, homeP5: row.homeP5, awayP5: row.awayP5 }, MODEL);
-      fc = { x: x0, margin: E.predict(x0, MODEL) }; featCache.set(row.gid, fc);
+      fc = { x: x0, margin: E.predict(x0, MODEL), total: MODEL.totals ? E.predictTotal(x0, MODEL) : null }; featCache.set(row.gid, fc);
     }
     const x = fc.x, margin = fc.margin;
+    const fair = { total: Number.isFinite(fc.total) ? fc.total : null, sd: SD };   // board's Model column: total + margin SD for the moneyline
     const move = explain(row, x, margin, openOf(published, cb), books);
-    if (!cb || cb.n < 3) return { status: 'OK', note: 'Waiting for at least three books to open.', move, margin };
+    if (!cb || cb.n < 3) return { status: 'OK', note: 'Waiting for at least three books to open.', move, margin, ...fair };
     const reads = [];
     for (const b of Object.keys(cb.books)) {
       if (NV.size && !NV.has(b)) continue;                          // Nevada books only
@@ -91,7 +92,7 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
       track(G, b, sig.side, tier, cb.books[b].open, price, cb.openCons, books);
     }
     reads.sort((a, b) => Math.abs(b.clv) - Math.abs(a.clv));
-    return { status: 'OK', model: MODEL.version, books: cb.n, consensusOpen: cb.openCons, reads, move, margin };
+    return { status: 'OK', model: MODEL.version, books: cb.n, consensusOpen: cb.openCons, reads, move, margin, ...fair };
   }
 
   // Why the line moved (model variant E): consensus opener -> consensus now, split into what the model can see.
