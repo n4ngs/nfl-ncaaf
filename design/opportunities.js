@@ -14,7 +14,7 @@
   const acked = new Set(), requestedId = new URLSearchParams(location.search).get('opportunity') || new URLSearchParams(location.search).get('id');
   let requestedShown = false, requestedQueued = false;
   const clock = () => serverClock.at + performance.now() - serverClock.local;
-  const selected = () => data.rows.filter(r => r.expiresAt > clock() && (filters.sport === 'all' || r.sport === filters.sport) && (filters.book === 'all' || r.book === filters.book) && r.evPct >= filters.ev);
+  const selected = () => pairOnce(data.rows.filter(r => r.expiresAt > clock() && (filters.sport === 'all' || r.sport === filters.sport) && (filters.book === 'all' || r.book === filters.book) && r.evPct >= filters.ev));
   const inspecting = () => pointer || $('op-list').contains(document.activeElement) || $('op-chart').contains(document.activeElement);
   const timeLabel = value => { const time = new Date(value); return Number.isFinite(time.getTime()) ? time.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : 'Time unavailable'; };
   function validRow(r) {
@@ -41,9 +41,27 @@
     $('op-book').value = filters.book;
   }
   for (const state of STATES) if (![...$('op-region').options].some(o => o.value === state)) $('op-region').add(new Option(state.toUpperCase(), state));
+  // Both sides of the same number cleared the bar at different books (shared/opportunities.js markTwoWay). That is a
+  // price disagreement between books, not a lean: say so on the card, and show the pair once.
+  const twoWay = r => r.twoWay && typeof r.twoWay === 'object' && typeof r.twoWay.label === 'string' && Number.isFinite(r.twoWay.odds) && Number.isFinite(r.twoWay.evPct) ? r.twoWay : null;
+  function twoWayNote(r) {
+    const o = twoWay(r); if (!o) return '';
+    const both = Number.isFinite(o.bothPct) && o.bothPct > 0 ? ` Taking both at these prices returns about +${o.bothPct.toFixed(1)}% whichever side wins, if both prices hold.` : '';
+    return `<p class="op-twoway"><b>Both sides show a gap.</b> ${esc(o.label)} at ${esc(o.bookName || o.book)} ${price(o.odds)} is also +${o.evPct.toFixed(1)}%. The books disagree with each other; on its own neither side is a lean, it is close to a coin flip.${both}</p>`;
+  }
+  // One card per pair: keep the better-priced side, drop its mirror when both are on screen.
+  function pairOnce(rows) {
+    const shown = new Set(rows.map(r => r.id)), out = [], dropped = new Set();
+    for (const r of rows) {
+      if (dropped.has(r.id)) continue;
+      const o = twoWay(r); if (o && typeof o.id === 'string' && shown.has(o.id)) dropped.add(o.id);
+      out.push(r);
+    }
+    return out;
+  }
   function card(r, oldVersion) {
     const href = `/api/opportunities/go?id=${encodeURIComponent(r.id)}&v=${encodeURIComponent(r.version)}&state=${encodeURIComponent(filters.region)}`;
-    return `<article class="op-card${oldVersion && oldVersion !== r.version ? ' op-changed' : ''}${requestedShown && requestedId === r.id ? ' is-selected' : ''}" tabindex="-1" id="op-${esc(r.id)}" data-id="${esc(r.id)}" data-version="${esc(r.version)}"><div class="op-card-top"><span class="op-tag">${esc(r.sport.toUpperCase())} · ${r.live ? 'Live' : 'Pregame'} · ${r.market === 'ml' ? 'Moneyline' : r.market === 's' ? 'Spread' : 'Total'}</span><strong class="op-edge">+${r.evPct.toFixed(1)}% <small>EV</small></strong></div><h3>${esc(r.label)}</h3><p>${esc(r.away)} at ${esc(r.home)}</p><div class="op-price-row"><div><span class="op-price">${price(r.odds)}</span><span class="op-book">${esc(r.bookName)}</span></div><a class="op-action" ${r.handoff === true ? `href="${esc(href)}"` : 'aria-disabled="true"'}>${r.handoff === true ? 'Check & open bet ↗' : 'Link unavailable'}</a></div><div class="op-expiry"><span data-expiry="${r.expiresAt}">Checking expiry</span><span>${r.observedAt ? 'Quote observed' : 'Delivery timestamp only'}</span></div><details><summary>Price evidence</summary><p>Reference: ${esc(r.references.map(q => q.book === 'pin' ? 'Pinnacle' : 'Circa').join(' + '))} · ${Math.round(r.probability * 1000) / 10}% estimated fair probability.</p><p>${r.observedAt ? 'Source observed ' + esc(timeLabel(r.observedAt)) : 'Provider delivered ' + esc(timeLabel(r.deliveredAt)) + '. Source observation time was not supplied.'}</p><p>${esc(r.provider === 'sharp' ? 'WebSocket API' : 'Additional Coverage')} · Full game · Final price checked on click. Sportsbook confirmation is still required.</p></details></article>`;
+    return `<article class="op-card${oldVersion && oldVersion !== r.version ? ' op-changed' : ''}${requestedShown && requestedId === r.id ? ' is-selected' : ''}" tabindex="-1" id="op-${esc(r.id)}" data-id="${esc(r.id)}" data-version="${esc(r.version)}"><div class="op-card-top"><span class="op-tag">${esc(r.sport.toUpperCase())} · ${r.live ? 'Live' : 'Pregame'} · ${r.market === 'ml' ? 'Moneyline' : r.market === 's' ? 'Spread' : 'Total'}</span><strong class="op-edge">+${r.evPct.toFixed(1)}% <small>EV</small></strong></div><h3>${esc(r.label)}</h3><p>${esc(r.away)} at ${esc(r.home)}</p>${twoWayNote(r)}<div class="op-price-row"><div><span class="op-price">${price(r.odds)}</span><span class="op-book">${esc(r.bookName)}</span></div><a class="op-action" ${r.handoff === true ? `href="${esc(href)}"` : 'aria-disabled="true"'}>${r.handoff === true ? 'Check & open bet ↗' : 'Link unavailable'}</a></div><div class="op-expiry"><span data-expiry="${r.expiresAt}">Checking expiry</span><span>${r.observedAt ? 'Quote observed' : 'Delivery timestamp only'}</span></div><details><summary>Price evidence</summary><p>Reference: ${esc(r.references.map(q => q.book === 'pin' ? 'Pinnacle' : 'Circa').join(' + '))} · ${Math.round(r.probability * 1000) / 10}% estimated fair probability.</p><p>${r.observedAt ? 'Source observed ' + esc(timeLabel(r.observedAt)) : 'Provider delivered ' + esc(timeLabel(r.deliveredAt)) + '. Source observation time was not supplied.'}</p><p>${esc(r.provider === 'sharp' ? 'WebSocket API' : 'Additional Coverage')} · Full game · Final price checked on click. Sportsbook confirmation is still required.</p></details></article>`;
   }
   function expire() {
     const current = new Map(data.rows.map(r => [r.id, r]));

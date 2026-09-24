@@ -91,6 +91,26 @@ function scan(provider, sport, frame, now) {
       }
     }
   }
+  return markTwoWay(rows);
+}
+// Both sides of the SAME number can clear the bar at different books (Over 45.5 at one, Under 45.5 at another). That
+// is the books disagreeing with each other, not a lean: on its own each side is close to a coin flip. Each such row
+// carries `twoWay` (the best price on the other side, and what taking both at these prices returns) so the page can
+// show the pair as one price disagreement instead of two contradictory "edges".
+const numberKey = r => r.market === 'ml' ? 'ml' : r.market === 't' ? String(r.line) : String(r.side === 'home' ? r.line : -r.line);
+function markTwoWay(rows) {
+  const best = new Map();
+  for (const r of rows) {
+    const k = [r.eventId, r.live, r.market, numberKey(r), r.side].join('|'), cur = best.get(k);
+    if (!cur || r.evPct > cur.evPct) best.set(k, r);
+  }
+  for (const r of rows) {
+    const other = { home: 'away', away: 'home', over: 'under', under: 'over' }[r.side];
+    const o = best.get([r.eventId, r.live, r.market, numberKey(r), other].join('|'));
+    if (!o) continue;
+    const both = 1 / decimal(r.odds) + 1 / decimal(o.odds);
+    r.twoWay = { side: o.side, label: o.label, book: o.book, bookName: o.bookName, odds: o.odds, evPct: o.evPct, id: o.id, bothPct: 100 * (1 / both - 1) };
+  }
   return rows;
 }
 class OpportunityService extends EventEmitter {

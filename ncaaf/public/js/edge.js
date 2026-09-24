@@ -265,6 +265,16 @@ function edgeRows(all = false) {
     if (!r) groups.set(k, { ...e, books: [e.book] });
     else { r.books.push(e.book); if (e.onlyBook === false) r.onlyBook = false; r.onlyBook = r.onlyBook && r.books.length === 1; }
   }
+  // Both sides of the same number showing a gap (Over 45.5 at one book, Under 45.5 at another) is the books disagreeing
+  // with each other, not a lean: each side alone is close to a coin flip. Mark both rows so they say so.
+  const num = (e) => (e.mkt === 'ml' ? 'ml' : e.mkt === 't' ? e.line : e.side === 'home' ? e.line : -e.line);
+  const OTHER = { home: 'away', away: 'home', over: 'under', under: 'over' };
+  const bySide = new Map();
+  for (const r of groups.values()) { const k = `${r.gid}|${r.mkt}|${num(r)}|${r.side}`; const b = bySide.get(k); if (!b || r.ev > b.ev) bySide.set(k, r); }
+  for (const r of groups.values()) {
+    const o = bySide.get(`${r.gid}|${r.mkt}|${num(r)}|${OTHER[r.side]}`);
+    r.twoWay = o ? { pick: edgePick(o), odds: o.odds, ev: o.ev, books: o.books, both: 1 / (1 / dec(r.odds) + 1 / dec(o.odds)) - 1 } : null;
+  }
   const rank = { solid: 0, thin: 1, weak: 2 };
   return [...groups.values()].sort((a, b) => Date.parse(a.g.start) - Date.parse(b.g.start) || a.gid.localeCompare(b.gid) || rank[a.conf] - rank[b.conf]);
 }
@@ -291,6 +301,7 @@ function edgeReadTxt(e) {
 // What could make this reading wrong, in plain words. At most three, most important first.
 function edgeCaveats(e) {
   const c = [];
+  if (e.twoWay) c.push(`Other side too: ${e.twoWay.pick} ${fmtOdds(e.twoWay.odds)} at ${e.twoWay.books.map(bookName).join(', ')}, books disagree, a coin flip alone`);
   if (e.evMkt != null && e.evMkt < 0) c.push('Other books disagree');
   if (e.mktN < 2) c.push('Few books to compare');
   if (e.onlyBook) c.push('Only book at this price');

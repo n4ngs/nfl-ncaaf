@@ -139,3 +139,17 @@ test('provider keys beginning with a digit survive saved filters and quote valid
   assert.equal(f.elements.get('op-book').value,'1xbet');f.emit({rows:[quote({book:'1xbet',bookName:'1xBet'})]});
   assert.equal(f.elements.get('op-total').textContent,1);assert.ok(f.elements.get('op-price-one'));
 });
+
+test('both sides of the same number show once, as a price disagreement, not two contradictory edges', () => {
+  const f=fixture();
+  const over=quote({id:'over',label:'Over 45.5',market:'t',side:'over',evPct:1.7,odds:105,twoWay:{id:'under',label:'Under 45.5',book:'dk',bookName:'DraftKings',odds:105,evPct:1.7,bothPct:2.4}});
+  const under=quote({id:'under',label:'Under 45.5',market:'t',side:'under',book:'dk',bookName:'DraftKings',evPct:1.7,odds:105,twoWay:{id:'over',label:'Over 45.5',book:'mgm',bookName:'BetMGM',odds:105,evPct:1.7,bothPct:2.4}});
+  f.emit({rows:[over,under,quote({id:'solo',evPct:3})]});
+  const html=f.elements.get('op-list').innerHTML;
+  assert.deepEqual(f.elements.get('op-list').children.map(x=>x.dataset.id),['solo','over']);
+  assert.match(html,/Both sides show a gap\.<\/b> Under 45\.5 at DraftKings \+105 is also \+1\.7%/);
+  assert.match(html,/close to a coin flip\. Taking both at these prices returns about \+2\.4%/);
+  assert.equal((html.match(/op-twoway/g)||[]).length,1,'the lone price carries no pair note');
+  // filtered to one book: the other side is off screen, so the card still explains it
+  f.input('op-book','dk');assert.deepEqual(f.elements.get('op-list').children.map(x=>x.dataset.id),['under']);assert.match(f.elements.get('op-list').innerHTML,/Over 45\.5 at BetMGM/);
+});
