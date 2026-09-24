@@ -46,12 +46,16 @@
     return out;
   }
 
-  function chart(m, rows, home, away, W = 720, left = 120, cls = 'lb-svg') {
-    const vals = rows.flatMap((r) => [axisValue(m, r.open), axisValue(m, r.now), axisValue(m, r.close)]).filter(Number.isFinite);
+  // The model's own number on the same axis (data.model: { s: home spread, t: total, ml: home win chance 0-1 }).
+  const modelValue = (m, model) => { const v = model && model[m]; return !Number.isFinite(v) ? null : m === 'ml' ? v * 100 : v; };
+  const modelText = (m, v, home) => (v == null ? '' : m === 'ml' ? `${Math.round(v * 10) / 10}%` : m === 's' ? `${home} ${pts(Math.round(v * 10) / 10)}` : String(Math.round(v * 10) / 10));
+  function chart(m, rows, home, away, W = 720, left = 120, cls = 'lb-svg', model = null) {
+    const mv = modelValue(m, model);
+    const vals = rows.flatMap((r) => [axisValue(m, r.open), axisValue(m, r.now), axisValue(m, r.close)]).concat(mv == null ? [] : [mv]).filter(Number.isFinite);
     if (!vals.length) return '';
     let lo = Math.min(...vals), hi = Math.max(...vals);
     const pad = Math.max((hi - lo) * 0.08, m === 'ml' ? 1 : 0.5); lo -= pad; hi += pad;
-    const rowH = 30, top = 28, right = W < 500 ? 14 : 24, H = top + rows.length * rowH + 8;
+    const rowH = 30, top = 28, right = W < 500 ? 14 : 24, H = top + rows.length * rowH + 8 + (mv == null ? 0 : 24);
     const x = (v) => left + (v - lo) / (hi - lo) * (W - left - right);
     const ticks = niceTicks(lo, hi, W < 500 ? 4 : 5);
     const fmt = (v) => (m === 'ml' ? `${v}%` : m === 's' ? pts(v) : String(v));
@@ -72,7 +76,9 @@
         `<text class="lb-book" x="${left - 10}" y="${y + 4}" text-anchor="end">${esc(r.name)}</text>${seg}${ring}${now}${endMark}${same}</g>`;
     }).join('');
     const axisName = m === 'ml' ? `${esc(home)} win chance (no vig)` : m === 's' ? `${esc(home)} spread` : 'Total points';
-    return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${axisName}: each book's opener and latest number">${grid}${body}</svg>`;
+    // the model: a blue line down the chart at its fair number, labelled, so every book reads against it
+    const mline = mv == null ? '' : `<g class="lb-model"><title>${esc(`Model (mine): ${modelText(m, mv, home)}. An estimate, not a price.`)}</title><line x1="${x(mv)}" x2="${x(mv)}" y1="${top - 4}" y2="${H - 22}"/><rect x="${x(mv) - 44}" y="${H - 20}" width="88" height="18" rx="9"/><text x="${x(mv)}" y="${H - 7.5}" text-anchor="middle">Model ${esc(modelText(m, mv, '').trim())}</text></g>`;
+    return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${axisName}: each book's opener and latest number${mv == null ? '' : ', and the model at ' + esc(modelText(m, mv, home))}">${grid}${mline}${body}</svg>`;
   }
   // A move in words: spreads say which side the number moved toward, totals up/down, moneylines the home win chance.
   function moveText(m, d, home, away) {
@@ -134,12 +140,12 @@
     if (state.book && !S.some((x) => x.key === state.book)) state.book = null;
     const chips = S.map((x) => `<button type="button" class="lb-chip" data-lb-b="${esc(x.key)}" aria-pressed="${x.key === state.book}">${esc(x.name)}</button>`).join('');
     const ranges = [[1, '24 h'], [3, '3 days'], [7, '7 days'], [0, 'All']].map(([v, l]) => `<button type="button" class="lb-tab" data-lb-r="${v}" aria-pressed="${state.range === v}">${l}</button>`).join('');
-    const legend = `<div class="lb-legend"><span><svg width="18" height="10" aria-hidden="true"><line class="lb-tl-med" x1="1" x2="17" y1="5" y2="5"/></svg>Market median</span>${state.book ? `<span><svg width="18" height="10" aria-hidden="true"><line class="lb-tl-pick" x1="1" x2="17" y1="5" y2="5"/></svg>${esc(S.find((x) => x.key === state.book)?.name || '')}</span>` : ''}<span><svg width="18" height="10" aria-hidden="true"><line class="lb-tl-ctx" x1="1" x2="17" y1="5" y2="5"/></svg>Each book</span></div>`;
+    const legend = `<div class="lb-legend"><span><svg width="18" height="10" aria-hidden="true"><line class="lb-tl-med" x1="1" x2="17" y1="5" y2="5"/></svg>Market median</span>${state.book ? `<span><svg width="18" height="10" aria-hidden="true"><line class="lb-tl-pick" x1="1" x2="17" y1="5" y2="5"/></svg>${esc(S.find((x) => x.key === state.book)?.name || '')}</span>` : ''}<span><svg width="18" height="10" aria-hidden="true"><line class="lb-tl-ctx" x1="1" x2="17" y1="5" y2="5"/></svg>Each book</span>${modelValue(m, d.model) != null ? '<span><svg width="14" height="14" aria-hidden="true"><line class="lb-model-key" x1="7" x2="7" y1="1" y2="13"/></svg>Model (mine)</span>' : ''}</div>`;
     return `<div class="lb-tlctl"><div class="lb-tabs" role="group" aria-label="Time range">${ranges}</div><div class="lb-chips" role="group" aria-label="Highlight a book">${chips}</div></div>${legend}` +
       `<div class="lb-chart">${timeline(m, d, rows, 720, 'lb-svg')}${timeline(m, d, rows, 360, 'lb-svg lb-svg-n')}${timeline(m, d, rows, 1200, 'lb-svg lb-svg-w')}</div>`;
   }
 
-  function tiles(m, rows, home, away) {
+  function tiles(m, rows, home, away, model = null) {
     const med = (k) => median(rows.map((r) => axisValue(m, r[k])));
     const o = med('open'), n = med('now'), c = med('close');
     const fmt = (v) => (v == null ? '—' : m === 'ml' ? `${Math.round(v * 10) / 10}%` : m === 's' ? `${esc(home)} ${pts(Math.round(v * 2) / 2)}` : String(Math.round(v * 2) / 2));
@@ -147,7 +153,10 @@
     const top = movers[0];
     const moveTxt = top && Math.abs(top.d) > 1e-9 ? `${esc(top.r.name)} <small>${esc(moveText(m, top.d, home, away))}</small>` : 'No moves';
     const t = (k, v, sub) => `<div class="lb-tile"><div class="lb-k">${k}</div><div class="lb-v">${v}</div>${sub ? `<div class="lb-s">${sub}</div>` : ''}</div>`;
-    return `<div class="lb-tiles">${t('Market opened', fmt(o), 'median of the books')}${t(c != null ? 'Market closed' : 'Market now', fmt(c ?? n), c != null ? 'last price before kickoff' : 'median of the books')}${t('Biggest mover', moveTxt, 'open to latest')}${t('Books', String(rows.length), '')}</div>`;
+    const mv = modelValue(m, model), cur = c ?? n;
+    const gap = mv != null && cur != null ? (m === 's' ? `${Math.abs(Math.round((mv - cur) * 10) / 10)} pts from the market` : m === 't' ? `${Math.abs(Math.round((mv - cur) * 10) / 10)} pts ${mv > cur ? 'over' : 'under'} the market` : `${Math.abs(Math.round((mv - cur) * 10) / 10)} pts vs the market`) : 'an estimate, not a price';
+    const modelTile = mv == null ? '' : `<div class="lb-tile lb-tile-model"><div class="lb-k">Model <span>mine</span></div><div class="lb-v">${esc(modelText(m, mv, home))}</div><div class="lb-s">${esc(gap)}</div></div>`;
+    return `<div class="lb-tiles${modelTile ? ' has-model' : ''}">${t('Market opened', fmt(o), 'median of the books')}${t(c != null ? 'Market closed' : 'Market now', fmt(c ?? n), c != null ? 'last price before kickoff' : 'median of the books')}${modelTile}${t('Biggest mover', moveTxt, 'open to latest')}${t('Books', String(rows.length), '')}</div>`;
   }
 
   function table(m, rows, home, away) {
@@ -170,10 +179,10 @@
     const hasHist = !!(d.history && Object.keys(d.history).length);
     if (!hasHist) state.view = 'books';
     const views = hasHist ? `<div class="lb-tabs" role="group" aria-label="View"><button type="button" class="lb-tab" data-lb-v="books" aria-pressed="${state.view === 'books'}">By book</button><button type="button" class="lb-tab" data-lb-v="time" aria-pressed="${state.view === 'time'}">Over time</button></div>` : '';
-    const legend = `<div class="lb-legend"><span><svg width="14" height="14" aria-hidden="true"><circle class="lb-open" cx="7" cy="7" r="5"/></svg>Opened</span><span><svg width="14" height="14" aria-hidden="true"><circle class="lb-now" cx="7" cy="7" r="5.5"/></svg>Now</span><span><svg width="14" height="14" aria-hidden="true"><rect class="lb-close" x="2" y="2" width="10" height="10" rx="1.5" transform="rotate(45 7 7)"/></svg>Closed (last price before kickoff)</span></div>`;
+    const legend = `<div class="lb-legend"><span><svg width="14" height="14" aria-hidden="true"><circle class="lb-open" cx="7" cy="7" r="5"/></svg>Opened</span><span><svg width="14" height="14" aria-hidden="true"><circle class="lb-now" cx="7" cy="7" r="5.5"/></svg>Now</span><span><svg width="14" height="14" aria-hidden="true"><rect class="lb-close" x="2" y="2" width="10" height="10" rx="1.5" transform="rotate(45 7 7)"/></svg>Closed (last price before kickoff)</span>${modelValue(m, d.model) != null ? '<span><svg width="14" height="14" aria-hidden="true"><line class="lb-model-key" x1="7" x2="7" y1="1" y2="13"/></svg>Model (mine)</span>' : ''}</div>`;
     return `<div class="lb-head"><div><h3 class="lb-title">Openers and closes <span>${rows.length} books</span></h3><p class="lb-sub">Where every book opened, when it posted, and where it is now or closed.</p></div>` +
       `<div class="lb-ctl">${views}<div class="lb-tabs" role="group" aria-label="Market">${tabs}</div><button type="button" class="lb-wide" data-lb-wide aria-pressed="${state.wide}">${state.wide ? 'Close' : 'Expand'}</button></div></div>` +
-      `${tiles(m, rows, d.home, d.away)}${state.view === 'time' ? timelineBlock(m, d, rows) + table(m, rows, d.home, d.away) : `${legend}<div class="lb-chart">${chart(m, rows, d.home, d.away)}${chart(m, rows, d.home, d.away, 360, 78, 'lb-svg lb-svg-n')}${chart(m, rows, d.home, d.away, 1200, 150, 'lb-svg lb-svg-w')}</div>${table(m, rows, d.home, d.away)}`}`;
+      `${tiles(m, rows, d.home, d.away, d.model)}${state.view === 'time' ? timelineBlock(m, d, rows) + table(m, rows, d.home, d.away) : `${legend}<div class="lb-chart">${chart(m, rows, d.home, d.away, 720, 120, 'lb-svg', d.model)}${chart(m, rows, d.home, d.away, 360, 78, 'lb-svg lb-svg-n', d.model)}${chart(m, rows, d.home, d.away, 1200, 150, 'lb-svg lb-svg-w', d.model)}</div>${table(m, rows, d.home, d.away)}`}`;
   }
 
   function html(id, data) {
@@ -364,4 +373,127 @@
   const later = () => { if (queued) return; queued = true; (root.requestAnimationFrame || setTimeout)(run); };
   const start = () => { new root.MutationObserver(later).observe(doc.body, { childList: true, subtree: true, characterData: true }); root.addEventListener('resize', later); later(); };
   if (doc.body) start(); else doc.addEventListener('DOMContentLoaded', start, { once: true });
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* BoardGrid, on all four boards (the owner's reference: a strip of games across the top, sortable columns, heat pills):
+   1. Game strip. One chip per game (both logos, day and time) above the board; tap one to jump to that game, which
+      flashes. Built from the board the page already drew, rebuilt only when the games change.
+   2. Sort by gap. The Model column header sorts each table by how far the model sits from the market (largest first);
+      tap again to go back to kickoff order. Remembered per sport on this device.
+   3. Heat. The model's number is shaded by that gap, so the big disagreements stand out without reading every cell. */
+(function (root) {
+  const MINUS = /[−–]/g;
+  const num = (t) => { const m = String(t || '').replace(MINUS, '-').match(/[+-]?\d+(?:\.\d+)?/); return m ? Number(m[0]) : (/\bPK\b/.test(t || '') ? 0 : null); };
+  const prob = (a) => (a < 0 ? -a / (100 - a) : 100 / (100 + a));
+  // gap between the model and the market in one side's cell; kind from the column's content
+  function gap(modelText, marketText) {
+    const a = num(modelText), b = num(marketText);
+    if (a == null || b == null) return null;
+    const isOdds = Math.abs(a) >= 100 && Math.abs(b) >= 100;
+    return isOdds ? Math.abs(prob(a) - prob(b)) * 100 : Math.abs(a - b);
+  }
+  // heat level 0-3: points for spreads/totals (1.5 / 3 / 5), percentage points of win chance for moneylines (3 / 6 / 10)
+  const heat = (g, isOdds) => (g == null ? 0 : isOdds ? (g >= 10 ? 3 : g >= 6 ? 2 : g >= 3 ? 1 : 0) : (g >= 5 ? 3 : g >= 3 ? 2 : g >= 1.5 ? 1 : 0));
+  const api = { num, gap, heat };
+  root.BoardGrid = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports.BoardGrid = api;
+  if (!root.document || !root.MutationObserver) return;
+  const doc = root.document;
+  const HOST = '#boardBody, .odds-boards, #game-list';
+  const TABLE = '.bt, .odds-bt, .nb-table';
+  const idOf = (el) => el.getAttribute('data-open') || el.getAttribute('data-odds-open') || el.getAttribute('data-game-row');
+  const sport = () => ((root.location && root.location.pathname.match(/^\/(nfl|ncaaf|mlb|nhl)\//)) || [])[1] || 'board';
+  const SORT_KEY = 'tb_boardSort';
+  const readSort = () => { try { return (JSON.parse(root.localStorage.getItem(SORT_KEY) || '{}') || {})[sport()] || 'time'; } catch { return 'time'; } };
+  const saveSort = (v) => { try { const all = JSON.parse(root.localStorage.getItem(SORT_KEY) || '{}') || {}; all[sport()] = v; root.localStorage.setItem(SORT_KEY, JSON.stringify(all)); } catch { /* storage blocked */ } };
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function colIndex(table, test) { const h = table.tHead && table.tHead.rows[0]; if (!h) return -1; return [...h.cells].findIndex(test); }
+  function sideTexts(cell) {
+    if (!cell) return [];
+    const parts = [...cell.querySelectorAll('.px, .odds-px')];
+    return (parts.length ? parts : [cell]).map((p) => (p.querySelector('.num') || p).firstChild ? (p.querySelector('.num') || p).textContent.trim().split(/\s+/)[0] : '');
+  }
+  function shade(table) {
+    const mi = colIndex(table, (c) => c.classList.contains('mdl-th')), ki = colIndex(table, (c) => /^market$/i.test(c.textContent.trim()));
+    if (mi < 0 || ki < 0) return;
+    for (const tr of table.tBodies[0] ? table.tBodies[0].rows : []) {
+      const mc = tr.cells[mi], kc = tr.cells[ki];
+      const m = sideTexts(mc)[0], k = sideTexts(kc)[0];
+      const g = gap(m, k), lvl = heat(g, Math.abs(num(m) || 0) >= 100);
+      tr.dataset.gap = g == null ? '' : String(Math.round(g * 10) / 10);
+      if (mc && mc.dataset.heat !== String(lvl)) mc.dataset.heat = String(lvl);
+    }
+  }
+  function sortTable(table, mode) {
+    const body = table.tBodies[0]; if (!body) return;
+    const rows = [...body.rows];
+    rows.forEach((r, i) => { if (r.dataset.ord == null) r.dataset.ord = String(i); });
+    const want = rows.slice().sort((a, b) => mode === 'gap' ? ((Number(b.dataset.gap) || -1) - (Number(a.dataset.gap) || -1)) || (a.dataset.ord - b.dataset.ord) : a.dataset.ord - b.dataset.ord);
+    if (want.some((r, i) => r !== rows[i])) for (const r of want) body.appendChild(r);
+    const th = table.tHead && [...table.tHead.rows[0].cells].find((c) => c.classList.contains('mdl-th'));
+    if (th) {
+      if (!th.hasAttribute('data-tb-sort')) { th.setAttribute('data-tb-sort', ''); th.tabIndex = 0; th.setAttribute('role', 'button'); }
+      const label = mode === 'gap' ? 'Sorted by the model’s gap to the market. Tap for kickoff order.' : 'Sort by the model’s gap to the market';
+      if (th.getAttribute('aria-sort') !== (mode === 'gap' ? 'descending' : 'none')) th.setAttribute('aria-sort', mode === 'gap' ? 'descending' : 'none');
+      if (th.getAttribute('aria-label') !== label) th.setAttribute('aria-label', label);
+      th.classList.toggle('is-sorted', mode === 'gap');
+    }
+  }
+
+  function chips(host) {
+    const seen = new Map();
+    for (const el of host.querySelectorAll('tr[data-open], tr[data-odds-open], tr[data-game-row], .br[data-open], .nb-card[data-game-id], .odds-br[data-odds-open]')) {
+      const id = idOf(el) || el.getAttribute('data-game-id'); if (!id || seen.has(id)) continue;
+      const imgs = [...el.querySelectorAll('img')].filter((i) => !i.classList.contains('lg-d')).slice(0, 2).map((i) => i.getAttribute('src'));
+      const b = el.querySelector('.meta b, .odds-bt-st b, .nb-st b');
+      // phone cards: the time is one of the footer's own bits (a node whose whole text is a time, Final or Live)
+      const TIME = /^(\d{1,2}:\d{2}\s?[AP]M|Final.*|Time TBA|Q\d.*|Half.*|Top \d.*|Bot \d.*|P\d.*|Live)$/i;
+      const bit = [...el.querySelectorAll('span, b, small')].find((x) => !x.children.length && TIME.test(x.textContent.replace(/\s+/g, ' ').trim()));
+      const time = (b || bit) ? (b || bit).textContent.replace(/\s+/g, ' ').trim() : '';
+      let day = '', p = el.closest('.bt-wrap, .odds-btwrap, .nb-wrap, .card, .odds-brd, table') || el;
+      for (let s = p.previousElementSibling; s; s = s.previousElementSibling) { const h = s.matches('.win-h, .odds-grp, .nb-grp') ? s : null; if (h) { day = (h.querySelector('h2, h3') || h).textContent.trim().split(/[\s,·]+/)[0]; break; } }
+      const live = !!el.querySelector('.hot, .dot, .nb-live, .odds-br-live');
+      seen.set(id, { id, imgs, time, day, live });
+    }
+    return [...seen.values()];
+  }
+  function strip(host) {
+    const list = chips(host);
+    let bar = host.querySelector(':scope > .tb-strip');
+    if (list.length < 2) { if (bar) bar.remove(); return; }
+    const sig = list.map((c) => `${c.id}|${c.time}|${c.live}`).join(',');
+    if (bar && bar.dataset.sig === sig) return;
+    const html = list.map((c) => `<button type="button" class="tb-chip${c.live ? ' is-live' : ''}" data-tb-go="${esc(c.id)}"><span class="tb-lg">${c.imgs.map((s) => `<img src="${esc(s)}" alt="" loading="lazy">`).join('')}</span><span class="tb-tt"><small>${esc(c.live ? 'Live' : c.day)}</small>${esc(c.live ? '' : c.time)}</span></button>`).join('');
+    if (!bar) { bar = doc.createElement('nav'); bar.className = 'tb-strip'; bar.setAttribute('aria-label', 'Jump to a game'); host.prepend(bar); }
+    bar.dataset.sig = sig; bar.innerHTML = html;
+  }
+  let hl = null;   // the game just jumped to: its highlight survives a board repaint for a moment
+  const rowsFor = (id) => [...doc.querySelectorAll(`[data-open="${CSS.escape(id)}"], [data-odds-open="${CSS.escape(id)}"], [data-game-row="${CSS.escape(id)}"], [data-game-id="${CSS.escape(id)}"]`)]
+    .filter((el) => el.matches('tr, .br, .nb-card, .odds-br') && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+  function apply() {
+    if (hl && Date.now() < hl.until) for (const el of rowsFor(hl.id)) el.classList.add('tb-hl'); else hl = null;
+    const mode = readSort();
+    for (const t of doc.querySelectorAll(TABLE)) { shade(t); sortTable(t, mode); }
+    for (const h of doc.querySelectorAll(HOST)) strip(h);
+  }
+  let queued = false, busy = false;
+  const later = () => { if (queued || busy) return; queued = true; (root.requestAnimationFrame || setTimeout)(() => { queued = false; busy = true; try { apply(); } catch { /* display only */ } finally { setTimeout(() => { busy = false; }, 0); } }); };
+  const start = () => { new root.MutationObserver(later).observe(doc.body, { childList: true, subtree: true }); later(); };
+  if (doc.body) start(); else doc.addEventListener('DOMContentLoaded', start, { once: true });
+
+  function jump(id) {
+    const el = rowsFor(id)[0]; if (!el) return;
+    hl = { id, until: Date.now() + 1800 };
+    el.scrollIntoView({ behavior: root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+    el.classList.remove('tb-hl'); void el.offsetWidth; el.classList.add('tb-hl');
+    setTimeout(() => { hl = null; for (const x of doc.querySelectorAll('.tb-hl')) x.classList.remove('tb-hl'); }, 1900);
+  }
+  doc.addEventListener('click', (e) => {
+    const g = e.target.closest && e.target.closest('[data-tb-go]');
+    if (g) { e.preventDefault(); e.stopPropagation(); jump(g.getAttribute('data-tb-go')); return; }
+    const th = e.target.closest && e.target.closest('th[data-tb-sort]');
+    if (th) { e.preventDefault(); saveSort(readSort() === 'gap' ? 'time' : 'gap'); apply(); }
+  }, true);
+  doc.addEventListener('keydown', (e) => { const th = e.target && e.target.closest && e.target.closest('th[data-tb-sort]'); if (th && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); saveSort(readSort() === 'gap' ? 'time' : 'gap'); apply(); } });
 })(typeof window !== 'undefined' ? window : globalThis);

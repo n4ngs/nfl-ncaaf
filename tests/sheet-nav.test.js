@@ -26,3 +26,24 @@ test('BoardFX: freezes past 3000 px, and only a real number-to-number change fla
   for (const t of ['—', '', '–']) assert.equal(BoardFX.isNum(t), false, t);
   assert.equal(BoardFX.isNum('PK'), true, 'a move to or from a pick is a change');
 });
+
+test('BoardGrid: model-vs-market gap in points or win-chance points, and its heat level', () => {
+  const { BoardGrid } = require('../design/linesboard');
+  assert.equal(BoardGrid.num('−8.2'), -8.2); assert.equal(BoardGrid.num('o42.7'), 42.7); assert.equal(BoardGrid.num('PK'), 0); assert.equal(BoardGrid.num('—'), null);
+  assert.ok(Math.abs(BoardGrid.gap('+8.2', '+5') - 3.2) < 1e-9);
+  assert.ok(Math.abs(BoardGrid.gap('−150', '−120') - (60 - 54.545) ) < 0.01, 'moneylines compare win chances');
+  assert.equal(BoardGrid.gap('—', '+5'), null);
+  assert.deepEqual([0.5, 1.5, 3.2, 6].map((g) => BoardGrid.heat(g, false)), [0, 1, 2, 3]);
+  assert.deepEqual([2, 3, 6, 12].map((g) => BoardGrid.heat(g, true)), [0, 1, 2, 3]);
+});
+
+test('LinesBoard: the model (mine) is a labelled blue line on the chart and a tile, on the same axis as the books', () => {
+  const LB = require('../design/linesboard');
+  const row = (k, o, c) => ({ key: k, name: k.toUpperCase(), open: { line: o, price: -110 }, now: { line: c, price: -110 } });
+  const html = LB.html('t1', { home: 'WSH', away: 'SEA', model: { s: 5.8, t: 44.1, ml: 0.34 }, markets: { s: { label: 'Spread', rows: [row('mgm', 0, 7), row('dk', 3.5, 7)] } } });
+  assert.match(html, /class="lb-model"/);
+  assert.match(html, /Model \+5\.8<\/text>/);
+  assert.match(html, /lb-tile-model[\s\S]*WSH \+5\.8[\s\S]*1\.2 pts from the market/);
+  const none = LB.html('t2', { home: 'WSH', away: 'SEA', markets: { s: { label: 'Spread', rows: [row('mgm', 0, 7)] } } });
+  assert.doesNotMatch(none, /lb-model|lb-tile-model/);
+});

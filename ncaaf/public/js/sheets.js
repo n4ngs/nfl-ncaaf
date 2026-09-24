@@ -865,7 +865,10 @@ function refLinesPanel(g) {
   };
   const rows = (m) => keys.map((k) => ({ key: k, name: bookName(k), open: q(R.open?.[k]?.[m]), now: now(cur[k], m), close: q(R.close?.[k]?.[m]) }))
     .filter((r) => r.open || r.close);
-  return LinesBoard.html(`g${g.id}`, { home: g.home.abbr, away: g.away.abbr, history: R.history || null, start: Date.parse(g.start),
+  // The model (mine) on the same axes: home spread = minus the fair margin, its total, its home win chance.
+  const mm = typeof modelMargin === 'function' ? modelMargin(g) : null;
+  const model = mm == null ? null : { s: -mm, t: typeof modelTotal === 'function' ? modelTotal(g) : (Number.isFinite(g.model?.total) ? g.model.total : null), ml: typeof modelWinHome === 'function' ? modelWinHome(g) : null };
+  return LinesBoard.html(`g${g.id}`, { home: g.home.abbr, away: g.away.abbr, history: R.history || null, start: Date.parse(g.start), model,
     markets: { s: { label: 'Spread', rows: rows('s') }, t: { label: 'Total', rows: rows('t') }, ml: { label: 'Moneyline', rows: rows('ml') } } });
 }
 
