@@ -195,7 +195,7 @@ function mlbHarness(myBooks) {
   c.state.games.set(7, { pk: 7, books: {} });
   return { c, g };
 }
-test('MLB Model column: fair moneyline and the model total; run line and first five are a dash with the reason', () => {
+test('MLB Model column: fair moneyline, the model total, and a derived run line and first five', () => {
   const { c, g } = mlbHarness(create({ storage: memStorage() }));
   c.MLBVAS.reads = [{ pk: 7, status: 'OK', pHome: 0.6, total: 8.734 }]; c.MLBVAS.at = 2;
   assert.equal(c.oddsModelSide(g, 'ml', 'home'), '−150');
@@ -203,13 +203,18 @@ test('MLB Model column: fair moneyline and the model total; run line and first f
   assert.equal(c.oddsModelFair(g, 'ml'), 'LAD −150');
   assert.equal(c.oddsModelSide(g, 't', 'over'), 'o8.7');
   assert.equal(c.oddsModelFair(g, 't'), 'o/u 8.7');
-  assert.equal(c.oddsModelSide(g, 'rl', 'home'), '');
-  assert.equal(c.oddsModelSide(g, 'f5', 'home'), '');
-  assert.match(c.ODDS_MODEL_TIP.rl, /no fair run line/);
-  assert.match(c.ODDS_MODEL_TIP.f5, /full games/);
+  // run line: the model's favourite (home, 60%) lays 1.5 at a fair price; the dog gets +1.5 at the mirror price
+  const fav = c.oddsModelSide(g, 'rl', 'home'), dog = c.oddsModelSide(g, 'rl', 'away');
+  assert.match(fav, /^−1\.5 \+1[0-9]{2}$/); assert.match(dog, /^\+1\.5 −1[0-9]{2}$/);
+  assert.equal(fav.split(' ')[1].slice(1), dog.split(' ')[1].slice(1), 'no vig: the two sides mirror');
+  assert.match(c.oddsModelFair(g, 'rl'), /^LAD −1\.5 \+1\d\d$/);
+  // first five: a smaller edge than the full game (fewer innings), tie pushes
+  const f5 = Number(c.oddsModelSide(g, 'f5', 'home').replace('−', '-'));
+  assert.ok(f5 < -100 && f5 > -150, String(f5));
+  assert.match(c.ODDS_MODEL_TIP.rl, /Derived/); assert.match(c.ODDS_MODEL_TIP.f5, /Derived/);
   const html = c.oddsBoardTable([g], 'rl');
   assert.match(html, /class="odds-bt has-model"/);
-  assert.match(html, /<th class="mdl-th" title="No model number/);
+  assert.match(html, /<span class="odds-px mdl"><span class="num">−1\.5 \+1\d\d<\/span>/);
   assert.match(c.oddsBoardTable([g], 'ml'), /<span class="odds-px mdl"><span class="num">−150<\/span>/);
   // a game underway or a WAIT read shows no model number
   assert.equal(c.oddsModelSide({ ...g, state: 'Live' }, 'ml', 'home'), '');

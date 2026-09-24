@@ -516,9 +516,9 @@ function oddsStripRender() {
    first five show a dash. Estimates, not picks. */
 const ODDS_MODEL_TIP = {
   ml: "The model's fair moneyline: its win chance for each side (team, lineup and starting-pitcher fundamentals) with no vig. An estimate, not a pick.",
-  rl: 'No model number: the MLB model predicts who wins, not by how many runs, so it has no fair run line.',
+  rl: "The model's fair run line, derived from its win chance and expected total runs (runs as two Poisson scores that reproduce both). Derived, not fitted on run lines. An estimate, not a pick.",
   t: "The model's own expected total runs (fundamentals). Its totals have not beaten the closing line in testing. An estimate, not a pick.",
-  f5: 'No model number: the MLB model is fitted on full games, not the first five innings.',
+  f5: "The model's fair first-five moneyline (a tie pushes), derived from its win chance and total scaled to five innings. Derived, not fitted on first fives. An estimate, not a pick.",
 };
 let oddsModelIdx = { at: -1, map: new Map() };
 function oddsModelRead(g) {
@@ -535,11 +535,58 @@ function oddsFairAm(p) {
   const v = p >= 0.5 ? -100 * p / (1 - p) : 100 * (1 - p) / p;
   return Math.abs(v) > 2500 ? null : Math.round(v);
 }
+/* Run line and first five from the model's two numbers. Home and away runs as negative-binomial scores (runs are
+   over-dispersed: variance about 2.2x the mean in MLB) whose means add up to the model's total and reproduce its win
+   chance (a tie after nine goes to extras, split by the means); the run line is then P(margin >= 2) for the -1.5 side,
+   and the first five uses 5/9 of each mean with a tie pushing. Derived, labelled so. Without the model's total, a
+   typical 8.6 runs is used.
+   Run line recalibration: the raw score model reads the favourite's -1.5 about 2.4 points off the books' no-vig run
+   lines (home teams skip the bottom of the ninth when ahead, which a two-score model cannot see). A three-number
+   logistic map, fitted to 700 book quotes on 45 games (Sep 21-24 2026) against the same books' moneyline and total,
+   brings that to about 1.0 point on each held-out day. It maps the model's inputs the way the market does. */
+const ODDS_MLB_TOTAL = 8.6, ODDS_RUN_DISP = 1.2;   // variance = mean + mean^2 / r with r = mean / 1.2  ->  2.2x the mean
+function oddsPois(l, n = 30) {
+  const r = l / ODDS_RUN_DISP, q = r / (r + l), p = [Math.pow(q, r)];
+  for (let k = 1; k <= n; k++) p.push(p[k - 1] * (k - 1 + r) / k * (1 - q));
+  return p;
+}
+function oddsMargin(lh, la) {       // [P(home - away = d)] as a map d -> p, d in -30..30
+  const ph = oddsPois(lh), pa = oddsPois(la), out = new Map();
+  for (let h = 0; h < ph.length; h++) for (let a = 0; a < pa.length; a++) out.set(h - a, (out.get(h - a) || 0) + ph[h] * pa[a]);
+  return out;
+}
+const oddsWinOf = (lh, la) => { const m = oddsMargin(lh, la); let w = 0, t = m.get(0) || 0; for (const [d, p] of m) if (d > 0) w += p; return w + t * (lh / (lh + la)); };
+function oddsRates(pHome, total) {
+  let lo = 0.02, hi = 0.98;
+  for (let i = 0; i < 50; i++) { const s = (lo + hi) / 2; if (oddsWinOf(total * s, total * (1 - s)) < pHome) lo = s; else hi = s; }
+  const s = (lo + hi) / 2; return [total * s, total * (1 - s)];
+}
+const oddsDerivedMemo = new Map();
+function oddsDerived(r) {
+  const T = Number.isFinite(r.total) && r.total > 3 ? r.total : ODDS_MLB_TOTAL, key = `${r.pHome.toFixed(4)}|${T}`;
+  if (oddsDerivedMemo.has(key)) return oddsDerivedMemo.get(key);
+  const [lh, la] = oddsRates(r.pHome, T);
+  const m = oddsMargin(lh, la); let home2 = 0, away2 = 0; for (const [d, p] of m) { if (d >= 2) home2 += p; if (d <= -2) away2 += p; }
+  const f = oddsMargin(lh * 5 / 9, la * 5 / 9); let fw = 0, fl = 0; for (const [d, p] of f) { if (d > 0) fw += p; else if (d < 0) fl += p; }
+  // favourite's -1.5 cover chance, recalibrated: logit(p) = 0.14 + 0.96 * logit(raw) - 0.20 * [home is the favourite]
+  const favHome = r.pHome >= 0.5, raw = favHome ? home2 : away2, lg = Math.log(raw / (1 - raw));
+  const cal = 1 / (1 + Math.exp(-(0.14 + 0.96 * lg - 0.20 * (favHome ? 1 : 0))));
+  const out = { homeRl: favHome ? cal : home2, awayRl: favHome ? away2 : cal, f5Home: fw / (fw + fl) };
+  if (oddsDerivedMemo.size > 500) oddsDerivedMemo.clear();
+  oddsDerivedMemo.set(key, out); return out;
+}
 function oddsModelSide(g, mkt, side) {
   const r = oddsModelRead(g);
   if (!r) return '';
   if (mkt === 'ml') { const v = oddsFairAm(side === 'home' ? r.pHome : 1 - r.pHome); return v == null ? '' : oddsFmt(v); }
   if (mkt === 't') return Number.isFinite(r.total) ? `${side === 'over' ? 'o' : 'u'}${r.total.toFixed(1)}` : '';
+  const D = oddsDerived(r);
+  if (mkt === 'rl') {
+    // the model's favourite lays 1.5: P(it wins by 2+); the other side +1.5 is everything else
+    const favHome = r.pHome >= 0.5, fav = favHome ? D.homeRl : D.awayRl, isFav = (side === 'home') === favHome;
+    const v = oddsFairAm(isFav ? fav : 1 - fav); return v == null ? '' : `${isFav ? '−1.5' : '+1.5'} ${oddsFmt(v)}`;
+  }
+  if (mkt === 'f5') { const v = oddsFairAm(side === 'home' ? D.f5Home : 1 - D.f5Home); return v == null ? '' : oddsFmt(v); }
   return '';
 }
 function oddsModelFair(g, mkt) {
@@ -547,6 +594,10 @@ function oddsModelFair(g, mkt) {
   if (!r) return '';
   if (mkt === 'ml') { const fav = r.pHome >= 0.5 ? 'home' : 'away'; const v = oddsFairAm(fav === 'home' ? r.pHome : 1 - r.pHome); return v == null ? '' : `${oddsTeam(g, fav).abbr} ${oddsFmt(v)}`; }
   if (mkt === 't') return Number.isFinite(r.total) ? `o/u ${r.total.toFixed(1)}` : '';
+  if (mkt === 'rl' || mkt === 'f5') {
+    const fav = r.pHome >= 0.5 ? 'home' : 'away', t = oddsModelSide(g, mkt, fav);
+    return t ? `${oddsTeam(g, fav).abbr} ${t}` : '';
+  }
   return '';
 }
 // My books (design/mybooks.js): the books this user starred; nothing is highlighted until they pick some.

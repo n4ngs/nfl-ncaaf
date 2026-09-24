@@ -425,11 +425,22 @@
       if (mc && mc.dataset.heat !== String(lvl)) mc.dataset.heat = String(lvl);
     }
   }
+  // The gap order is taken once, when you sort (or when a game joins the board), then held: a price that moves
+  // re-shades the model's number but never reshuffles the rows under you. Tap the header twice to re-sort.
+  let frozen = null;   // Map game id -> rank
   function sortTable(table, mode) {
     const body = table.tBodies[0]; if (!body) return;
     const rows = [...body.rows];
     rows.forEach((r, i) => { if (r.dataset.ord == null) r.dataset.ord = String(i); });
-    const want = rows.slice().sort((a, b) => mode === 'gap' ? ((Number(b.dataset.gap) || -1) - (Number(a.dataset.gap) || -1)) || (a.dataset.ord - b.dataset.ord) : a.dataset.ord - b.dataset.ord);
+    if (mode === 'gap') {
+      const ids = rows.map((r) => r.getAttribute('data-open') || r.getAttribute('data-odds-open') || r.getAttribute('data-game-row'));
+      if (!frozen || ids.some((id) => !frozen.has(id))) {
+        const all = [...doc.querySelectorAll('tr[data-gap]')].map((r) => ({ id: r.getAttribute('data-open') || r.getAttribute('data-odds-open') || r.getAttribute('data-game-row'), g: Number(r.dataset.gap) || -1 }));
+        frozen = new Map(all.sort((a, b) => b.g - a.g).map((x, i) => [x.id, i]));
+      }
+    } else frozen = null;
+    const rank = (r) => frozen.get(r.getAttribute('data-open') || r.getAttribute('data-odds-open') || r.getAttribute('data-game-row')) ?? 1e6;
+    const want = rows.slice().sort((a, b) => mode === 'gap' ? (rank(a) - rank(b)) || (a.dataset.ord - b.dataset.ord) : a.dataset.ord - b.dataset.ord);
     if (want.some((r, i) => r !== rows[i])) for (const r of want) body.appendChild(r);
     const th = table.tHead && [...table.tHead.rows[0].cells].find((c) => c.classList.contains('mdl-th'));
     if (th) {
@@ -496,4 +507,48 @@
     if (th) { e.preventDefault(); saveSort(readSort() === 'gap' ? 'time' : 'gap'); apply(); }
   }, true);
   doc.addEventListener('keydown', (e) => { const th = e.target && e.target.closest && e.target.closest('th[data-tb-sort]'); if (th && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); saveSort(readSort() === 'gap' ? 'time' : 'gap'); apply(); } });
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* BoardSteady, on all four boards: when prices update, the board stays where you left it.
+   The boards redraw their tables on every price change. That used to throw each table's sideways scroll back to the
+   first book and could shift rows under you. This keeps, across every redraw:
+     - each wide table's sideways scroll (by its place on the page),
+     - the game at the top of your screen, at the same height (the page scrolls to follow it if rows above changed),
+   and the stylesheet drops the price "pop" (a scale-up) and reserves room for a price's status line, so a price that
+   changes, or turns Aging, no longer changes the row's height. The flash of colour on a changed price stays. */
+(function (root) {
+  if (!root.document || !root.MutationObserver) return;
+  const doc = root.document;
+  const WRAPS = '.bt-wrap, .odds-btwrap, .nb-wrap';
+  const ROWS = 'tr[data-open], tr[data-odds-open], tr[data-game-row], .br[data-open], .nb-card[data-game-id], .odds-br[data-odds-open]';
+  const key = (el) => el.getAttribute('data-open') || el.getAttribute('data-odds-open') || el.getAttribute('data-game-row') || el.getAttribute('data-game-id');
+  let lefts = [], anchor = null, restoring = false;
+  const visible = (el) => el.getClientRects().length > 0;
+  function remember() {
+    lefts = [...doc.querySelectorAll(WRAPS)].map((w) => (visible(w) ? w.scrollLeft : 0));
+    anchor = null;
+    const band = 96;   // below the sticky headers
+    for (const el of doc.querySelectorAll(ROWS)) {
+      if (!visible(el)) continue;
+      const t = el.getBoundingClientRect().top;
+      if (t >= band) { anchor = { id: key(el), kind: el.tagName, top: t }; break; }
+    }
+  }
+  function restore() {
+    restoring = true;
+    try {
+      const ws = [...doc.querySelectorAll(WRAPS)];
+      ws.forEach((w, i) => { const want = lefts[i] || 0; if (want && visible(w) && Math.abs(w.scrollLeft - want) > 1) w.scrollLeft = want; });
+      if (anchor && !doc.querySelector('dialog[open]')) {
+        const el = [...doc.querySelectorAll(ROWS)].find((x) => key(x) === anchor.id && x.tagName === anchor.kind && visible(x));
+        if (el) { const d = el.getBoundingClientRect().top - anchor.top; if (Math.abs(d) >= 1) root.scrollBy(0, d); }
+      }
+    } finally { restoring = false; remember(); }
+  }
+  // restore in the observer callback: it runs after the redraw and before the browser paints, so nothing visibly jumps
+  const mo = new root.MutationObserver((list) => { if (list.some((m) => m.type === 'childList' && [...m.addedNodes].some((n) => n.nodeType === 1 && (n.matches?.(WRAPS + ',' + ROWS) || n.querySelector?.(WRAPS + ',' + ROWS))))) restore(); });
+  const start = () => { mo.observe(doc.body, { childList: true, subtree: true }); remember(); };
+  if (doc.body) start(); else doc.addEventListener('DOMContentLoaded', start, { once: true });
+  doc.addEventListener('scroll', () => { if (!restoring) remember(); }, { capture: true, passive: true });
+  root.addEventListener('resize', remember);
 })(typeof window !== 'undefined' ? window : globalThis);

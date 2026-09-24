@@ -138,3 +138,8 @@ html td[data-heat="1"] :is(.px,.odds-px).mdl{background:color-mix(in srgb,var(--
 html td[data-heat="2"] :is(.px,.odds-px).mdl{background:color-mix(in srgb,var(--model-c,#1D5FD1) 30%,transparent)!important}
 html td[data-heat="3"] :is(.px,.odds-px).mdl{background:color-mix(in srgb,var(--model-c,#1D5FD1) 48%,transparent)!important;font-weight:800}
 @media (prefers-reduced-motion:reduce){.tb-hl,.tb-hl td{animation:none;outline:2px solid var(--brand)}}
+
+/* BoardSteady (linesboard.js): prices that change do not move the board */
+html .px.tick,html .px.best.tick,html .odds-px.tick,html .odds-px.best.tick,html .odds-tp.tick{transform:none!important}
+html .bt .st2 .px{min-height:52px}
+.bt-wrap,.odds-btwrap,.nb-wrap{overflow-anchor:none}
