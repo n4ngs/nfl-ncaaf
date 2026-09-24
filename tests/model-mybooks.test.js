@@ -221,13 +221,14 @@ test('MLB Model column: fair moneyline and the model total; run line and first f
 test('MLB My books: no book lane by default; starred books get the lane; un-starring removes it', () => {
   const mb = create({ storage: memStorage() });
   const { c, g } = mlbHarness(mb);
-  const lanes = (html) => [...html.matchAll(/<th class="my-bk" title="([^"]+)"/g)].map((m) => m[1]);
+  const lanes = (html) => [...html.matchAll(/<th data-bk="[^"]+" data-bk-move tabindex="0" class="my-bk" title="([^"]+?) · drag, or Alt\+Arrow, to move this column"/g)].map((m) => m[1]);
   let html = c.oddsBoardTable([g], 'ml');
   assert.deepEqual(lanes(html), [], 'nothing highlighted by default, BetMGM included');
   assert.ok(!/<td class="my-bk">/.test(html));
   mb.toggle('dk'); mb.toggle('circa');
   html = c.oddsBoardTable([g], 'ml');
-  assert.deepEqual(lanes(html), ['Circa Sports · one of my books', 'DraftKings · one of my books']);
+  // starred books come first, in the order they were starred
+  assert.deepEqual(lanes(html), ['DraftKings · one of my books', 'Circa Sports · one of my books']);
   assert.equal((html.match(/<td class="my-bk">/g) || []).length, 2);
   mb.toggle('dk');
   html = c.oddsBoardTable([g], 'ml');

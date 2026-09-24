@@ -380,7 +380,7 @@ function oddsViewHTML() {
   const contextOpen = document.getElementById('oddsContext')?.open;
   return `${head}${oddsOverview(games, mkt)}<div class="odds-toolbar">${oddsMktSeg(mkt)}${oddsFilterBar(games)}</div>${typeof mlbVasBlock === 'function' ? mlbVasBlock(games) : ''}
     ${f?.error ? `<p class="odds-health" role="status">${esc(f.error)} <button type="button" class="odds-link" data-odds-refresh>Retry</button></p>` : oddsRefreshFeedback(refresh)}
-    <div class="odds-lay"><div class="odds-boards">
+    <div class="odds-lay"><div class="odds-boards">${typeof MyBooks !== 'undefined' && MyBooks.viewBarHTML ? `<div class="odds-bkv">${MyBooks.viewBarHTML([...ODDS.books, ...ODDS_BOOKS].filter((b, i, a) => a.findIndex((x) => x.key === b.key) === i))}</div>` : ''}
       ${section('Live', live)}${section(S.isToday ? 'Up next' : 'Scheduled', soon)}
       ${done.length ? `<details class="odds-done" id="oddsDone"${wasOpen || (!live.length && !soon.length) ? ' open' : ''}><summary class="odds-grp"><h2>Final & off board</h2><span>${done.length} · recorded prices ${ICON.chev}</span></summary>${block(done)}</details>` : ''}
       ${!shown.length ? `<div class="card empty"><b>No matching games</b>${ODDS.query ? `No team matches “${esc(ODDS.query)}”.` : 'This filter has no games on this day.'}<button type="button" class="lbtn" data-odds-reset>Clear filters</button></div>` : ''}
@@ -792,9 +792,11 @@ function oddsBoardTable(games, mkt) {
   if (!games.length) return '';
   const keys = [...new Set(games.flatMap((g) => Object.keys(oddsBooksFor(oddsGame(g.pk), mkt))))].filter((k) => k !== 'cons' && k !== 'open');
   // Every book, always (owner: "all books everywhere"); an unpriced book shows dashes instead of vanishing.
-  const books = [...ODDS.books, ...ODDS_BOOKS].map((b) => b.key).filter((k, i, a) => a.indexOf(k) === i && k !== 'cons' && k !== 'open');
+  const all = [...ODDS.books, ...ODDS_BOOKS].map((b) => b.key).filter((k, i, a) => a.indexOf(k) === i && k !== 'cons' && k !== 'open');
+  // My books (design/mybooks.js): "My books only" filters the columns; the order is yours, or your books first.
+  const books = typeof MyBooks !== 'undefined' && MyBooks.arrange ? MyBooks.arrange(all.map((key) => ({ key }))).map((b) => b.key) : all;
   const [s1, s2] = oddsSides(mkt);
-  const head = `<tr><th class="l stk">Matchup</th><th class="mdl-th" title="${esc(ODDS_MODEL_TIP[mkt] || ODDS_MODEL_TIP.ml)}">Model</th><th>Open</th><th>Market</th><th>Move</th>${books.map((k) => `<th${oddsMy(k) ? ' class="my-bk"' : ''} title="${esc(oddsBookFull(k))}${oddsMy(k) ? ' · one of my books' : ''}"><span class="odds-bt-bk">${oddsMyStar(k)}${esc(oddsBookName(k))}</span>${oddsBook(k).sharp ? '<span class="odds-sharp" aria-hidden="true">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th><th>Wind</th></tr>`;
+  const head = `<tr><th class="l stk">Matchup</th><th class="mdl-th" title="${esc(ODDS_MODEL_TIP[mkt] || ODDS_MODEL_TIP.ml)}">Model</th><th>Open</th><th>Market</th><th>Move</th>${books.map((k) => `<th data-bk="${esc(k)}" data-bk-move tabindex="0"${oddsMy(k) ? ' class="my-bk"' : ''} title="${esc(oddsBookFull(k))}${oddsMy(k) ? ' · one of my books' : ''} · drag, or Alt+Arrow, to move this column"><span class="odds-bt-bk">${oddsMyStar(k)}${esc(oddsBookName(k))}</span>${oddsBook(k).sharp ? '<span class="odds-sharp" aria-hidden="true">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th><th>Wind</th></tr>`;
   const rows = games.map((g) => {
     const O = oddsGame(g.pk);
     const pre = oddsIsPre(g);

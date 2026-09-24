@@ -63,3 +63,5 @@ th.bk-drag{opacity:.45;cursor:grabbing}
 th.bk-drop-l{box-shadow:inset 3px 0 0 var(--brand)!important}
 th.bk-drop-r{box-shadow:inset -3px 0 0 var(--brand)!important}
 @media (hover:none){.bkv-hint{display:none}}
+.odds-bkv{display:none}
+@media (min-width:1024px){.odds-bkv{display:block}}
