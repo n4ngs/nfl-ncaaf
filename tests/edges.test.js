@@ -131,3 +131,15 @@ test('engine feed: upcoming games only, owner Nevada books only, stale lines dro
   assert.deepEqual(Object.keys(out.games[0].books), ['mgm']);
   assert.deepEqual(Feed.NEVADA, ['mgm', 'czr', 'circa', 'stn', 'wg', 'sp']);
 });
+
+test('NFL evidence cites the replication on the owner\'s openers, untimed', () => {
+  const vas = { proven: { 'total ≥ 1.0 pts': { bets: 238, clv_ev_pct: 1.96, p: 0.036 } },
+    external: { rows: { 'AusSB 2017-22 · total ≥ 0.75 pts': { bets: 643 }, 'AusSB 2017-22 · total ≥ 1.0 pts': { bets: 416, clv_ev_pct: 3.47, p: 1.6e-10, seasons_pos: 6, by_season: { 2017: 6.3, 2018: 0.8, 2019: 2.5, 2020: 3.1, 2021: 1.1, 2022: 6.4 } },
+      'AusSB holdout 2019+2021 · total ≥ 1.0 pts': { bets: 122 } }, caveats: ['Openers are UNTIMED.'] } };
+  const e = evidenceFor('nfl', { vas }, null);
+  assert.equal(e.holdout.bets, 238); assert.equal(e.replication.bets, 416);
+  const html = render({ rows: [], status: {}, evidence: { nfl: e }, at: Date.now(), errors: [] }, { owner: false, adminPath: '' });
+  assert.match(html, /416 bets, CLV EV \+3\.47%, p &lt;0\.001, positive in 6 of 6 seasons/);
+  assert.match(html, /untimed/);
+  assert.equal(evidenceFor('nhl', { vas }, null).replication, null);
+});

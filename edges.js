@@ -38,7 +38,7 @@ const SIGNALS = {
     caveat: "Thin read: openers this far off the pack moved toward it in 2023-25 testing, but when books posted them can't be verified historically. Scored live against the close. An estimate, not advice." },
   nfl: { sport: 'NFL', name: 'NFL totals read', proven: false, football: true, market: 'Total', board: '/nfl/',
     rule: 'Model-expected move of the total of at least 1 point from the line posted once both teams last played.',
-    caveat: 'Provisional: beat the closing total in back-testing (+1.96% expected value, 238 games, 2016 and 2023-25) but is not yet statistically settled on recent seasons alone. Scored live against the close. An estimate, not advice.' },
+    caveat: "Provisional: beat the closing total in back-testing (+1.96% expected value, 238 games, 2016 and 2023-25) and held up, with nothing refit, on the owner's AusSportsBetting openers 2017-22 (+3.47%, 416 games, 6 of 6 seasons). Those openers are untimed (Pinnacle to Feb 2018, bet365 after), so it is not settled until the live record confirms it. Scored live against the close. An estimate, not advice." },
 };
 // Which holdout row is the live threshold, per sport (keys differ by engine; match on the number in the key).
 const THRESHOLD = { nhl: 0.08, mlb: 0.3, ncaaf: 1.5, nfl: 1 };
@@ -176,8 +176,15 @@ function evidenceFor(key, health, record) {
     const hit = Object.entries(p).find(([k]) => { const m = String(k).match(/(\d+(?:\.\d+)?)(?!.*\d)/); return m && Math.abs(parseFloat(m[1]) - want) < 1e-9; });
     if (hit) holdout = { label: hit[0], ...hit[1] };
   }
+  // Out-of-sample replication on other openers (NFL: the owner's AusSportsBetting file), the row at the live threshold.
+  let replication = null;
+  const x = vas && vas.external;
+  if (x && x.rows) {
+    const hit = Object.entries(x.rows).find(([k]) => /^AusSB 20\d\d-\d\d ·/.test(k) && Math.abs(parseFloat((String(k).match(/(\d+(?:\.\d+)?)(?!.*\d)/) || [])[1]) - THRESHOLD[key]) < 1e-9);
+    if (hit) replication = { label: hit[0], ...hit[1], caveat: (x.caveats || [])[0] || null };
+  }
   const t = record && record.tiers && record.tiers[RECORD_TIER[key]];
-  return { holdout, live: record ? { tier: RECORD_TIER[key], scored: t ? t.bets : 0, clvEvPct: t ? t.clvEvPct : null, beatCloseRate: t ? t.beatCloseRate : null, pending: record.pending || 0 } : null };
+  return { holdout, replication, live: record ? { tier: RECORD_TIER[key], scored: t ? t.bets : 0, clvEvPct: t ? t.clvEvPct : null, beatCloseRate: t ? t.beatCloseRate : null, pending: record.pending || 0 } : null };
 }
 
 /* ---------------------------------------------------------------- render */
@@ -250,10 +257,12 @@ function evidenceHTML(key, ev, owner, adminPath) {
   const kv = h ? `<div class="kv"><div><span>Holdout bets</span><strong>${esc(h.bets)}</strong></div><div><span>CLV EV vs close</span><strong class="${S.proven && h.clv_ev_pct > 0 ? 'g' : ''}">${esc(pct(h.clv_ev_pct))}</strong></div>`
     + `<div><span>p-value</span><strong>${h.p == null ? '—' : h.p < 0.001 ? '&lt;0.001' : esc((+h.p).toFixed(3))}</strong></div><div><span>Beat the close</span><strong>${h.beat_close == null ? '—' : Math.round(h.beat_close * 100) + '%'}</strong></div></div>`
     + `<p>By season: ${esc(Object.entries(h.by_season || {}).map(([s, v]) => s.replace(/_pre_july$/, ' pre-July').replace(/_/g, ' ') + ' ' + pct(v)).join(' · ') || '—')}. Threshold: ${esc(h.label)}.</p>` : '<p>Holdout numbers are not available from this board right now.</p>';
+  const r = ev && ev.replication;
+  const rep = r ? `<p>Replication (${esc(r.label)}, nothing refit): ${esc(r.bets)} bets, CLV EV ${esc(pct(r.clv_ev_pct))}, p ${r.p == null ? '—' : r.p < 0.001 ? '&lt;0.001' : esc((+r.p).toFixed(3))}, positive in ${esc(r.seasons_pos)} of ${esc(Object.keys(r.by_season || {}).length)} seasons. These openers are untimed (Pinnacle to Feb 2018, bet365 after), so the timing caveat stands.</p>` : '';
   const live = owner && l ? `<p>Live record (${esc(l.tier)}): ${l.scored ? `${esc(l.scored)} scored, CLV EV ${esc(pct(l.clvEvPct))}, beat the close ${Math.round((l.beatCloseRate || 0) * 100)}%` : 'none scored yet'}${l.pending ? `, ${esc(l.pending)} waiting for the close` : ''}.</p>` : '';
   const links = owner && adminPath ? `<div class="links"><a href="${esc(adminPath)}/proof">Proof page ›</a><a href="${esc(adminPath)}/research?sport=${key}">Research write-up ›</a><a href="${S.board}">${esc(S.sport)} board ›</a></div>`
     : `<div class="links"><a href="${S.board}">${esc(S.sport)} board ›</a></div>`;
-  return `<section class="evc" id="ev-${key}"><div class="meta">${S.proven ? '<span class="mk pv">Beat the close out-of-sample</span>' : '<span class="mk pr">Provisional</span>'}</div><h3>${esc(S.name)}</h3><p>${esc(S.rule)}</p>${kv}${live}${links}</section>`;
+  return `<section class="evc" id="ev-${key}"><div class="meta">${S.proven ? '<span class="mk pv">Beat the close out-of-sample</span>' : '<span class="mk pr">Provisional</span>'}</div><h3>${esc(S.name)}</h3><p>${esc(S.rule)}</p>${kv}${rep}${live}${links}</section>`;
 }
 
 function render({ rows, status, evidence, at, errors }, { owner, adminPath }) {

@@ -108,21 +108,27 @@ function nflModel() {
   const src = fs.readFileSync(path.join(__dirname, '../nfl/public/js/views.js'), 'utf8');
   const body = src.slice(src.indexOf('function modelMargin(g)'), src.indexOf('function boardRow(g, mkt)'));
   const c = { isPre: (g) => g.state === 'pre', isFinal: (g) => g.state === 'post', SIGMA: 13.5, MINUS: '−', BoardFair,
+    winFromSpread: (m) => BoardFair.ncdf(m / 11.3),
     fmtOdds: (o) => (o == null ? '—' : o > 0 ? `+${o}` : `−${Math.abs(o)}`), ncdf: BoardFair.ncdf };
   vm.createContext(c); vm.runInContext(body + '\nglobalThis.api = { modelSide, modelFair, modelMargin, MODEL_TIP };', c);
   return c.api;
 }
 test('NFL Model column: fair spread, own total, fair moneyline and a derived first half, one number per side', () => {
   const m = nflModel();
-  const g = { state: 'pre', home: { abbr: 'GB' }, away: { abbr: 'ATL' }, model: { status: 'OK', fairMargin: 8.16, fairTotal: 42.66, sd: 13.658 } };
+  const g = { state: 'pre', home: { abbr: 'GB' }, away: { abbr: 'ATL' }, model: { status: 'OK', fairMargin: 8.16, fairTotal: 42.66, sd: 13.658, winHome: 0.761 } };
   assert.equal(m.modelSide(g, 'home', 's'), '−8.2');
   assert.equal(m.modelSide(g, 'away', 's'), '+8.2');
   assert.equal(m.modelFair(g, 's'), 'GB −8.2');
   assert.equal(m.modelSide(g, 'over', 't'), 'o42.7');
   assert.equal(m.modelSide(g, 'under', 't'), 'u42.7');
   assert.equal(m.modelFair(g, 't'), 'o/u 42.7');
-  const p = BoardFair.winFromMargin(8.16, 13.658);
+  // the moneyline reads the model's key-number win chance, never a normal on its margin SD
+  const p = 0.761;
   assert.equal(m.modelSide(g, 'home', 'ml'), `−${Math.abs(BoardFair.american(p))}`);
+  // an older read without winHome falls back to the calibrated win-% sigma (11.3), not the margin SD
+  const q = BoardFair.ncdf(8.16 / 11.3), old = { ...g, model: { ...g.model, winHome: undefined } };
+  assert.equal(m.modelSide(old, 'home', 'ml'), `−${Math.abs(BoardFair.american(q))}`);
+  assert.notEqual(m.modelSide(old, 'home', 'ml'), `−${Math.abs(BoardFair.american(BoardFair.winFromMargin(8.16, 13.658)))}`);
   assert.equal(m.modelSide(g, 'away', 'ml'), `+${BoardFair.american(1 - p)}`);
   assert.match(m.modelFair(g, 'ml'), /^GB −\d+$/);
   assert.equal(m.modelSide(g, 'home', 'h1'), '−4.1');

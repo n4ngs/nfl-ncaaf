@@ -159,8 +159,14 @@ function ninv(p) {
   const q = p - 0.5, r = q * q;
   return ((((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q) / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
 }
-const SIGMA = 13.5; // spread of NFL final margins around the market, in points (approximate)
-const spreadFromWin = (pHome) => (pHome == null ? null : Math.round(-SIGMA * ninv(clamp(pHome, 0.005, 0.995)) * 10) / 10);
+const SIGMA = 13.5; // spread of NFL final margins around the market, in points: COVER math only (edge.js, coverChance on spreads)
+// Win chance from a spread uses its own, tighter sigma. Calibrated on TeamRankings closing lines 2003-25 (6,232 NFL
+// favorites): the best-fit normal is 11.33 (95% CI 10.64-12.10). At 13.5 favorites read 3-6 points low (a 7-9.5 point
+// favorite: 71.9% vs 76.2% won; at 11.3, 75.5%). Where the model has a read, the Model column uses its key-number
+// distribution instead (lib/vas-service.js winHome), which matched about as well. Win% only, never cover chances.
+const WIN_SIGMA = 11.3;
+const winFromSpread = (margin) => (Number.isFinite(margin) ? ncdf(margin / WIN_SIGMA) : null);  // P(home wins), margin = home minus away
+const spreadFromWin = (pHome) => (pHome == null ? null : Math.round(-WIN_SIGMA * ninv(clamp(pHome, 0.005, 0.995)) * 10) / 10);
 
 // ------------------------------------------------------------ lines
 // A line from one side's point of view: { line, odds } for spread / total / moneyline.
@@ -271,7 +277,7 @@ function coverChance(g, leg) {
   if (leg.mkt === 's' || leg.mkt === 'ml') {
     // expected final home margin
     let mu = live?.s != null ? -live.s : (h - a) + (-(closeOf(g)?.s ?? 0)) * left;
-    const sd = Math.max(0.6, SIGMA * Math.sqrt(left));
+    const sd = Math.max(0.6, (leg.mkt === 'ml' ? WIN_SIGMA : SIGMA) * Math.sqrt(left));   // ml = win chance, s = cover chance
     const need = leg.mkt === 'ml' ? 0 : -(leg.side === 'home' ? leg.line : -leg.line); // home margin must beat this
     let p = 1 - ncdf((need - mu) / sd);
     if (leg.side === 'away') p = 1 - p;

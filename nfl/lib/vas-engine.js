@@ -271,6 +271,16 @@ function fairMean(line, pOver, kd) {
   for (let i = 0; i < 200 && hi - lo > 1e-12; i++) { const m = (lo + hi) / 2, fm = f(m); if ((fm > 0) === (flo > 0)) { lo = m; flo = fm; } else hi = m; }
   return (lo + hi) / 2;
 }
+// Win chance (home) for a fair spread `spread` (home-favoured > 0), for the board's fair moneyline: the distribution whose
+// -110/-110 number is that spread (fairMean at 50%), then P(margin > 0) + half a tie. A discrete distribution only
+// resolves lines to the half point, so a spread between two half points is interpolated linearly between them.
+// Display only: nothing in the signal or CLV scoring uses it. Checked on TeamRankings closes 2003-25 (6,232 favorites).
+function winFromSpread(spread, kd) {
+  if (!Number.isFinite(spread) || !kd) return null;
+  const at = s => { const [o, p] = probs(fairMean(s, 0.5, kd), 0, kd); return o + p / 2; };
+  const lo = Math.floor(spread * 2) / 2, f = (spread - lo) * 2;
+  return f < 1e-9 ? at(lo) : (1 - f) * at(lo) + f * at(lo + 0.5);
+}
 // expected ROI of a bet at `line`/`price` if a distribution centred on muClose is the truth (pushes refund)
 function clvEv(muClose, line, price, sideOver, kd) {
   let [w, p] = probs(muClose, line, kd);
@@ -334,4 +344,4 @@ function injuryMatrix(state, teamCode, report, model) {
   }).sort((a, b) => b.weight - a.weight || cmp(String(a.name), String(b.name)));
 }
 
-module.exports = { DEFAULT_CONFIG, build, predict, signal, compactPlay, fairMean, clvEv, probs, noVig, injuryMatrix, normName, matchRegular, linear, fr, TEAM_KEYS, SIDE, GL };
+module.exports = { DEFAULT_CONFIG, build, predict, signal, compactPlay, fairMean, clvEv, probs, winFromSpread, noVig, injuryMatrix, normName, matchRegular, linear, fr, TEAM_KEYS, SIDE, GL };

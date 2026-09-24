@@ -5,7 +5,9 @@
 //  - TOTALS ONLY. Spreads did not beat the close in research, so no spread read is shown.
 //  - The totals read is PROVISIONAL: it passed the pre-set bar on the 2016 + 2023-25 holdout (+1.96% CLV EV,
 //    238 bets, Bonferroni p = 0.036) but on modern book opens alone it is not yet significant (p = 0.07).
-//    The live record below is what confirms or kills it.
+//    Replicated, with nothing refit, on the owner's AusSportsBetting openers 2017-22 (+3.47%, 416 bets, Bonferroni
+//    p < 0.001, 6/6 seasons; model file external_evidence). Those openers are untimed (Pinnacle to Feb 2018, bet365
+//    after), so the open-timing caveat stands. The live record below is what confirms or kills it.
 //  - Injury Matrix: display only. ESPN's headline injury list weighted by each player's snap share and the
 //    chance that status means a missed game. Never feeds the model.
 // Every PROVEN/LEAN totals read is logged at the OPEN price it was computed from and scored at kickoff with the
@@ -69,6 +71,11 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
     return w + p / american(entryOdds);
   }
 
+  // Win chance for a fair spread of `margin` (home minus away) through the key-number distribution (E.winFromSpread).
+  // On TeamRankings closes 2003-25 (6,232 NFL favorites) it tracks real win rates (a 7-9.5 point favorite: 75.2% vs
+  // 76.2% won), where a normal on the model's margin SD (13.66) read favorites 3-6 points low. Display only.
+  const winHome = margin => E.winFromSpread(margin, MODEL.keydist?.margin);
+
   // G: board game, open/cur: canonical lines ({s, so, t, to, integrity})
   function forGame(G, open, cur) {
     if (!MODEL) return null;
@@ -86,9 +93,10 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
       c = { f: f0, pred: E.predict(f0, MODEL) }; predCache.set(row.gid, c);
     }
     const f = c.f, pred = c.pred;
-    // fairMargin (home minus away) and fairTotal feed the board's Model column; sd is the model's own margin SD,
-    // used there for the fair moneyline (normal on the margin).
+    // fairMargin (home minus away) and fairTotal feed the board's Model column. winHome is the fair moneyline's win
+    // chance: fairMargin read as a fair spread, through the key-number margin distribution (winHome below).
     const out = { status: 'OK', model: MODEL.version, fairTotal: pred.total, fairMargin: pred.margin, sd: MODEL.keydist?.margin?.sd ?? null,
+      winHome: winHome(pred.margin),
       spread: { status: MODEL.status_by_market?.spread || 'UNPROVEN' } };
     const started = G.state === 'in' || G.state === 'post' || Date.parse(G.start) <= now();
     if (!anchors[G.id] && !started && cur && Number.isFinite(cur.t) && Number.isFinite(cur.to?.[0]) && Number.isFinite(cur.to?.[1])) {
@@ -141,6 +149,17 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
     return out;
   }
 
+  // Proof page / Edges evidence: the out-of-sample replication on the owner's openers, same row format as `proven`.
+  function external() {
+    const x = MODEL && MODEL.external_evidence; if (!x || !x.total) return null;
+    const row = (v) => v && { bets: v.bets, clv_ev_pct: v.clv_ev_pct, p: v.bonf_p, raw_p: v.p, beat_close: v.beat_close, by_season: v.by_season, seasons_pos: v.seasons_pos };
+    const rows = {}, add = (label, v) => { if (v) rows[label] = row(v); };
+    for (const k of ['0.75', '1.0', '1.5']) add(`AusSB 2017-22 · total ≥ ${k} pts`, x.total.strict_2017_22 && x.total.strict_2017_22[k]);
+    add('AusSB holdout 2019+2021 · total ≥ 1.0 pts', x.total.holdout_2019_2021 && x.total.holdout_2019_2021['1.0']);
+    add('SBRO 2017-21 (at -110) · total ≥ 1.0 pts', x.total.sbro_2017_21 && x.total.sbro_2017_21['1.0']);
+    return { what: x.what, source: x.source, caveats: x.caveats || [], rows };
+  }
+
   return {
     // Model vs market vs result for this season's completed games: the model's fair margin/total (pre-day features),
     // the closing line (nflverse) and what happened. For the owner's proof page; nothing here is a pick.
@@ -162,7 +181,7 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
       proven: MODEL && MODEL.holdout_report && MODEL.holdout_report.total ? Object.fromEntries(Object.entries(MODEL.holdout_report.total.thresholds).map(([k, v]) =>
         ['total ≥ ' + k + ' pts', { bets: v.bets, clv_ev_pct: v.clv_ev_pct, p: v.bonferroni_p, beat_close: v.beat_close,
           by_season: Object.fromEntries(Object.entries(v.by_season || {}).map(([s, x]) => [s, x.clv_ev_pct])) }])) : null,
-      tiers: MODEL && MODEL.tiers, statusByMarket: MODEL && MODEL.status_by_market }),
+      tiers: MODEL && MODEL.tiers, statusByMarket: MODEL && MODEL.status_by_market, external: external() }),
   };
 }
 module.exports = { create, code };

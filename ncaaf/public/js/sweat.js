@@ -37,7 +37,7 @@ function sweatChance(g, l) {
     const m = g.mkt || closeOf(g);
     if ((l.mkt === 's' || l.mkt === 'ml') && m?.s != null) {
       const need = l.mkt === 'ml' ? 0 : -(l.side === 'home' ? l.line : -l.line);
-      const p = 1 - ncdf((need - -m.s) / SIGMA);
+      const p = 1 - ncdf((need - -m.s) / (l.mkt === 'ml' ? WIN_SIGMA : SIGMA));   // ml = win chance (calibrated), s = cover chance
       return clamp(l.side === 'away' ? 1 - p : p, 0.005, 0.995);
     }
     if (l.mkt === 't' && m?.t != null) {

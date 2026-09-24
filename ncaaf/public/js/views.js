@@ -523,7 +523,7 @@ function modelMargin(g) {
 }
 // The model's number for one side of the board's current market. Spread and 1st half come from the margin
 // (1st half = half of it, a derived estimate), the total from the model's own total-points stage, the
-// moneyline from the margin's win probability (normal, the model's margin SD) as a no-vig fair price.
+// moneyline from the margin's win probability (normal, the calibrated win-% sigma) as a no-vig fair price.
 const r1 = (v) => Math.round(v * 10) / 10;
 const MODEL_TIP = {
   s: "The model's own fair spread (team fundamentals). An estimate, not a pick.",
@@ -532,9 +532,11 @@ const MODEL_TIP = {
   h1: "Half the model's full-game spread. A derived estimate: the model is not fitted on first halves.",
 };
 function modelPoints(v) { return Math.abs(v) < 0.05 ? 'PK' : `${v > 0 ? '+' : MINUS}${Math.abs(v).toFixed(1)}`; }
+// Win chance uses the calibrated win-% sigma (WIN_SIGMA, core.js), not the model's margin SD (~15.8, which stays in
+// the cover/CLV math): on TeamRankings closes 2003-25 a normal at 15.8 read favorites 1-3 points low.
 function modelWinHome(g) {
-  const m = modelMargin(g), sd = g.model && g.model.sd;
-  return m == null ? null : ncdf(m / (Number.isFinite(sd) && sd > 0 ? sd : SIGMA));
+  const m = modelMargin(g);
+  return m == null ? null : winFromSpread(m);
 }
 function fairAmerican(p) {
   if (!(p > 0 && p < 1)) return '';

@@ -524,21 +524,24 @@ function modelMargin(g) {
 }
 // The model's number for one side of the board's current market. Spread and 1st half come from the margin
 // (1st half = half of it, a derived estimate), the total from the model's own total-points stage, the
-// moneyline from the margin's win probability (normal, the model's margin SD) as a no-vig fair price.
+// moneyline from the margin's win probability (the model's key-number distribution) as a no-vig fair price.
 const r1 = (v) => Math.round(v * 10) / 10;
 const MODEL_TIP = {
   s: "The model's own fair spread (team fundamentals). Its spread stage has not beaten the closing line in testing. An estimate, not a pick.",
   t: "The model's own total points (team fundamentals). An estimate, not a pick.",
-  ml: "The model's fair moneyline: its win chance from the fair spread (normal, the model's margin SD), with no vig. An estimate, not a pick.",
+  ml: "The model's fair moneyline: its win chance from the fair spread (the model's key-number distribution), with no vig. An estimate, not a pick.",
   h1: "Half the model's full-game spread. A derived estimate: the model is not fitted on first halves.",
 };
 function modelPoints(v) { return Math.abs(v) < 0.05 ? 'PK' : `${v > 0 ? '+' : MINUS}${Math.abs(v).toFixed(1)}`; }
 function modelTotal(g) { const t = g.model && g.model.fairTotal; return modelMargin(g) != null && Number.isFinite(t) ? t : null; }
+// Win chance: the model's own key-number distribution centred on its fair margin (winHome, lib/vas-service.js) when the
+// read carries it, else a normal at the calibrated win-% sigma (WIN_SIGMA, core.js). Never the model's margin SD
+// (13.66): on TeamRankings closes 2003-25 that read favorites 3-6 points low.
 function modelWinHome(g) {
-  const m = modelMargin(g), sd = g.model && g.model.sd;
+  const m = modelMargin(g);
   if (m == null) return null;
-  const s = Number.isFinite(sd) && sd > 0 ? sd : SIGMA;
-  return typeof BoardFair !== 'undefined' ? BoardFair.winFromMargin(m, s) : ncdf(m / s);
+  const w = g.model && g.model.winHome;
+  return Number.isFinite(w) && w > 0 && w < 1 ? w : winFromSpread(m);
 }
 function fairAmerican(p) {
   if (!(p > 0 && p < 1)) return '';

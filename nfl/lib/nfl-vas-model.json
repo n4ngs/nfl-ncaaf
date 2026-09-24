@@ -1359,5 +1359,331 @@
    }
   }
  },
- "notes": "Stage-2 predicts the open->close move of the fair line in points; tiers are |predicted move| thresholds. PROVEN = passed every pre-set holdout criterion; LEAN = best candidate, NOT proven. Close = nflverse closing consensus line; open = ESPN Opening (2014-16) / ESPN BET or DraftKings open (2023+). CAVEATS: the totals pass is driven mostly by 2016; on 2023-25 book opens alone it is positive but not significant (see era_split); with every feature lagged one game the totals edge is not significant (lag1_sensitivity), so it depends on the open being posted after the previous game. Verify live with the app's own first-seen price before trusting it."
+ "notes": "Stage-2 predicts the open->close move of the fair line in points; tiers are |predicted move| thresholds. PROVEN = passed every pre-set holdout criterion; LEAN = best candidate, NOT proven. Close = nflverse closing consensus line; open = ESPN Opening (2014-16) / ESPN BET or DraftKings open (2023+). CAVEATS: the totals pass is driven mostly by 2016; on 2023-25 book opens alone it is positive but not significant (see era_split); with every feature lagged one game the totals edge is not significant (lag1_sensitivity), so it depends on the open being posted after the previous game. Verify live with the app's own first-seen price before trusting it. REPLICATION (external_evidence, evidence only, no refit): on the owner's AusSportsBetting openers 2017-22, seasons the research never had an opener for, the totals rule |pred move| >= 1.0 gave 416 bets, CLV EV +3.47%, Bonferroni p < 0.001, positive in 6/6 seasons; on the designated 2019+2021 holdout +1.74% (n=122, p = 0.019 raw, 0.27 Bonferroni). These openers are UNTIMED (Pinnacle 2014-Feb 2018, bet365 after), so the open-timing caveat stands. Spreads: still UNPROVEN.",
+ "external_evidence": {
+  "what": "Out-of-sample replication on the owner's real NFL openers. Evidence only: nothing was fit on these openers and the stage-1/stage-2 coefficients in this file are unchanged by it (nfl/research/external_proof.py).",
+  "source": "AusSportsBetting nfl.xlsx (owner's copy): open and close lines with decimal juice (converted to American). Book: Pinnacle 2014 to Feb 2018, bet365 after. Secondary cross-check: SBRO-format archive 2011-21 (lines only, priced at -110).",
+  "caveats": [
+   "Openers are UNTIMED: the export does not say when each open was posted, so whether it came before or after the teams' previous game is unknown. The live read waits for both previous games to be final; the live record is what confirms it.",
+   "The book changes mid-sample (Pinnacle to Feb 2018, bet365 after).",
+   "Truth is the nflverse consensus close (as in the research). Spreads stay UNPROVEN: negative in most seasons."
+  ],
+  "rules_tried": 14,
+  "total": {
+   "strict_2017_22": {
+    "0.75": {
+     "bets": 643,
+     "clv_ev_pct": 2.564,
+     "p": 8.88e-10,
+     "beat_close": 0.7726,
+     "clv_pts": 1.148,
+     "bonf_p": 1.24e-08,
+     "by_season": {
+      "2017": 5.054,
+      "2018": -0.246,
+      "2019": 0.935,
+      "2020": 3.02,
+      "2021": 0.139,
+      "2022": 5.855
+     },
+     "seasons_pos": 5
+    },
+    "1.0": {
+     "bets": 416,
+     "clv_ev_pct": 3.471,
+     "p": 1.15e-11,
+     "beat_close": 0.8095,
+     "clv_pts": 1.297,
+     "bonf_p": 1.61e-10,
+     "by_season": {
+      "2017": 6.257,
+      "2018": 0.79,
+      "2019": 2.549,
+      "2020": 3.073,
+      "2021": 1.098,
+      "2022": 6.395
+     },
+     "seasons_pos": 6
+    },
+    "1.5": {
+     "bets": 154,
+     "clv_ev_pct": 5.631,
+     "p": 9.8e-10,
+     "beat_close": 0.8462,
+     "clv_pts": 1.662,
+     "bonf_p": 1.37e-08,
+     "by_season": {
+      "2017": 8.344,
+      "2018": 3.653,
+      "2019": 8.136,
+      "2020": 3.149,
+      "2021": -2.637,
+      "2022": 11.002
+     },
+     "seasons_pos": 5
+    }
+   },
+   "shipped_2017_22": {
+    "0.75": {
+     "bets": 453,
+     "clv_ev_pct": 3.47,
+     "p": 1.89e-12,
+     "beat_close": 0.8068,
+     "clv_pts": 1.333,
+     "bonf_p": 2.65e-11,
+     "by_season": {
+      "2017": 6.088,
+      "2018": 1.557,
+      "2019": 1.171,
+      "2020": 2.952,
+      "2021": 0.41,
+      "2022": 7.461
+     },
+     "seasons_pos": 6
+    },
+    "1.0": {
+     "bets": 263,
+     "clv_ev_pct": 4.158,
+     "p": 1.09e-10,
+     "beat_close": 0.8333,
+     "clv_pts": 1.401,
+     "bonf_p": 1.53e-09,
+     "by_season": {
+      "2017": 7.815,
+      "2018": 1.57,
+      "2019": 2.13,
+      "2020": 3.061,
+      "2021": 0.93,
+      "2022": 8.366
+     },
+     "seasons_pos": 6
+    },
+    "1.5": {
+     "bets": 60,
+     "clv_ev_pct": 7.797,
+     "p": 3.27e-07,
+     "beat_close": 0.8929,
+     "clv_pts": 1.958,
+     "bonf_p": 4.57e-06,
+     "by_season": {
+      "2017": 11.495,
+      "2018": 8.667,
+      "2019": 5.811,
+      "2020": 1.587,
+      "2021": 0.652,
+      "2022": 16.863
+     },
+     "seasons_pos": 6
+    }
+   },
+   "holdout_2019_2021": {
+    "0.75": {
+     "bets": 204,
+     "clv_ev_pct": 0.49,
+     "p": 0.226,
+     "beat_close": 0.7399,
+     "clv_pts": 0.958,
+     "bonf_p": 1.0,
+     "by_season": {
+      "2019": 0.935,
+      "2021": 0.139
+     },
+     "seasons_pos": 2
+    },
+    "1.0": {
+     "bets": 122,
+     "clv_ev_pct": 1.74,
+     "p": 0.019,
+     "beat_close": 0.8,
+     "clv_pts": 1.189,
+     "bonf_p": 0.266,
+     "by_season": {
+      "2019": 2.549,
+      "2021": 1.098
+     },
+     "seasons_pos": 2
+    }
+   },
+   "sbro_2017_21": {
+    "0.75": {
+     "bets": 496,
+     "clv_ev_pct": 3.636,
+     "p": 1.49e-13,
+     "beat_close": 0.8072,
+     "clv_pts": 1.412,
+     "bonf_p": 2.09e-12,
+     "by_season": {
+      "2017": 3.095,
+      "2018": 0.332,
+      "2019": 4.571,
+      "2020": 6.969,
+      "2021": 3.897
+     },
+     "seasons_pos": 5
+    },
+    "1.0": {
+     "bets": 334,
+     "clv_ev_pct": 4.573,
+     "p": 1.74e-13,
+     "beat_close": 0.8322,
+     "clv_pts": 1.579,
+     "bonf_p": 2.44e-12,
+     "by_season": {
+      "2017": 4.158,
+      "2018": 1.251,
+      "2019": 5.863,
+      "2020": 8.151,
+      "2021": 4.233
+     },
+     "seasons_pos": 5
+    }
+   },
+   "sbro_2011_13_shipped": {
+    "0.75": {
+     "bets": 183,
+     "clv_ev_pct": 4.048,
+     "p": 3.45e-08,
+     "beat_close": 0.869,
+     "clv_pts": 1.495,
+     "bonf_p": 4.83e-07,
+     "by_season": {
+      "2011": 3.369,
+      "2012": 3.619,
+      "2013": 4.952
+     },
+     "seasons_pos": 3
+    },
+    "1.0": {
+     "bets": 100,
+     "clv_ev_pct": 5.788,
+     "p": 7.22e-08,
+     "beat_close": 0.9032,
+     "clv_pts": 1.81,
+     "bonf_p": 1.01e-06,
+     "by_season": {
+      "2011": 3.866,
+      "2012": 5.35,
+      "2013": 7.804
+     },
+     "seasons_pos": 3
+    }
+   },
+   "sensitivity_1.0": {
+    "flat_-110_open": {
+     "bets": 416,
+     "clv_ev_pct": 3.322,
+     "p": 7.662964298992966e-11,
+     "beat_close": 0.8095,
+     "clv_pts": 1.297
+    },
+    "overs": {
+     "bets": 140,
+     "clv_ev_pct": 2.397,
+     "p": 0.00570552079984665,
+     "beat_close": 0.7244,
+     "clv_pts": 1.043
+    },
+    "unders": {
+     "bets": 276,
+     "clv_ev_pct": 4.016,
+     "p": 4.0528330760698704e-11,
+     "beat_close": 0.8526,
+     "clv_pts": 1.426
+    },
+    "pinnacle_era_2017_to_feb_2018": {
+     "bets": 78,
+     "clv_ev_pct": 6.257,
+     "p": 7.68600059900482e-09,
+     "beat_close": 0.8676,
+     "clv_pts": 1.333
+    },
+    "bet365_era_2018_22": {
+     "bets": 338,
+     "clv_ev_pct": 2.828,
+     "p": 6.276854088013795e-07,
+     "beat_close": 0.7968,
+     "clv_pts": 1.288
+    },
+    "random_sides": {
+     "mean_ev_pct": -4.416,
+     "max_ev_pct": -2.073,
+     "perm_p": 0.001
+    }
+   }
+  },
+  "spread": {
+   "strict_2017_22": {
+    "0.5": {
+     "bets": 831,
+     "clv_ev_pct": -1.363,
+     "p": 1.0,
+     "beat_close": 0.6206,
+     "clv_pts": 0.398,
+     "bonf_p": 1.0,
+     "by_season": {
+      "2017": 0.15,
+      "2018": -2.753,
+      "2019": -1.667,
+      "2020": -2.645,
+      "2021": -1.609,
+      "2022": -0.019
+     },
+     "seasons_pos": 1
+    },
+    "1.0": {
+     "bets": 337,
+     "clv_ev_pct": -0.373,
+     "p": 0.739,
+     "beat_close": 0.6655,
+     "clv_pts": 0.506,
+     "bonf_p": 1.0,
+     "by_season": {
+      "2017": 1.55,
+      "2018": -1.702,
+      "2019": -1.82,
+      "2020": -1.585,
+      "2021": -1.005,
+      "2022": 1.974
+     },
+     "seasons_pos": 2
+    }
+   },
+   "shipped_2017_22": {
+    "0.5": {
+     "bets": 454,
+     "clv_ev_pct": -0.569,
+     "p": 0.887,
+     "beat_close": 0.6797,
+     "clv_pts": 0.54,
+     "bonf_p": 1.0,
+     "by_season": {
+      "2017": 1.309,
+      "2018": -1.851,
+      "2019": -1.245,
+      "2020": -2.457,
+      "2021": -1.205,
+      "2022": 1.772
+     },
+     "seasons_pos": 2
+    },
+    "1.0": {
+     "bets": 79,
+     "clv_ev_pct": 0.85,
+     "p": 0.246,
+     "beat_close": 0.7059,
+     "clv_pts": 0.646,
+     "bonf_p": 1.0,
+     "by_season": {
+      "2017": 4.577,
+      "2018": 2.551,
+      "2019": -2.546,
+      "2020": -1.839,
+      "2021": -2.057,
+      "2022": 5.142
+     },
+     "seasons_pos": 3
+    }
+   }
+  }
+ }
 }

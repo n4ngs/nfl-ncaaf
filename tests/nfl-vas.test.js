@@ -292,6 +292,9 @@ test('service: a completed game keeps its Model column read, from the pre-day fe
   const st = E.build(await Dl2.history(2025), MODEL.config);
   const expected = E.predict(st.featured.get('2025_01_KC_BUF'), MODEL);
   assert.equal(read.fairMargin, expected.margin); assert.equal(read.fairTotal, expected.total);
+  // The fair moneyline's win chance comes from the key-number distribution centred on the fair margin.
+  assert.equal(read.winHome, E.winFromSpread(expected.margin, MODEL.keydist.margin));
+  assert.equal(read.winHome > 0.5, read.fairMargin > 0);
   // The upcoming game still reads from today's team state.
   const next = svc.forGame({ id: '402', state: 'pre', start: '2025-09-14T20:25:00Z', seasonType: 2, home: { abbr: 'KC' }, away: { abbr: 'BUF' } }, null, null);
   assert.equal(next.status, 'OK');

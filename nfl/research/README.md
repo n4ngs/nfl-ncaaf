@@ -21,6 +21,8 @@ KERAS_BACKEND=torch .venv/bin/python nn.py tower & KERAS_BACKEND=torch .venv/bin
 .venv/bin/python open_timing.py                  # when is the ESPN "open" posted? (diagnostic)
 .venv/bin/python portable.py                     # the shipped linear model: holdout proof, tiers, final fit, export
 .venv/bin/python sensitivity.py                  # robustness of the portable result
+.venv/bin/python opens_external.py               # owner's AusSB / SBRO openers -> data/cache/nfl_open_close_clean.csv (needs data/external/)
+.venv/bin/python external_proof.py               # evidence only: the shipped rule on those openers (WRITE_MODEL=1 updates external_evidence)
 PARITY=2023 .venv/bin/python features.py         # Node parity fixture (history from 2023) -> data/cache/parity/
 .venv/bin/python portable.py                     # re-run once so parity/model_py.json matches the fixture
 cd ../.. && node --test tests/nfl-vas.test.js    # synthetic tests + exact parity (parity skips if the fixture is absent)
@@ -51,8 +53,21 @@ average, and its juice is real (only 4-37% of games at -110). The ESPN open cove
 | 2025 | ESPN BET, else DraftKings `open` | 285 |
 | 2026 wk 1-2 | DraftKings `open` | 32 |
 
-Other free open-line archives turned out to be unusable. SportsbookReviewsOnline's archive returns 404 everywhere.
-AusSportsBetting's `nfl.xlsx` sits behind a Cloudflare browser challenge, and I did not impersonate a browser to get past it.
+Other free open-line archives turned out to be unusable online: SportsbookReviewsOnline's archive returns 404 everywhere,
+and AusSportsBetting's `nfl.xlsx` sits behind a Cloudflare browser challenge (not bypassed). The owner supplied his own
+copies of both, which fill the 2017-22 gap as a second opener source (**AusSB**, see "Replication on the owner's openers").
+
+| seasons | AusSB open (`opens_external.py`) | clean spread / total rows |
+|---|---|---|
+| 2006-2013 | none (one line stored, it is not an opener) | 0 |
+| 2014-2024 | open + close, decimal juice → American; book Pinnacle to Feb 2018, bet365 after; **untimed** | 255-277 / 257-283 per season |
+| 2011-2021 | SBRO archive (secondary): lines only, no juice (priced at -110), untimed | 210-244 totals per season |
+
+Both files live outside git: put `nfl.xlsx` and `nfl_archive_10Y.json` in `data/external/` (or set `EXT_DIR`).
+`opens_external.py` matches them 1:1 to nflverse games (AusSB 3,811 games, SBRO 2,799), flags rows whose close is more
+than 1.5 pts off the nflverse close, favourite flips, >6 pt spread / >8 pt total moves and garbage numbers, and writes
+`data/cache/nfl_open_close_clean.csv` (1.2 MB, 2011-25; git-ignored like the rest of `data/`, rebuilt by the script).
+AusSB opens agree with ESPN's opens to 0.7-0.8 pts (spread MAE) in 2014-16 and about 1.0 in 2023-24.
 
 ## Data traps found (do not reintroduce)
 - **ESPN "... - Live Odds" providers are in-game prices.** Their spread MAE vs the final margin is 2.97-3.13, while every
@@ -151,6 +166,31 @@ How to read this: the totals rule clears the pre-set bar on the pooled holdout, 
 75% of the time, yet the EV is not significant (p = 0.07). **Treat it as a provisional, unconfirmed edge.** The spread
 model predicts the direction of the line move (61-66% beat-close, p < 1e-4) but never clears the vig. That is the same
 pattern as the NHL's looser thresholds.
+
+### Replication on the owner's openers (`external_proof.py`, evidence only)
+Seasons 2017-22 had no opener in the research, so they are a clean out-of-sample test. **Nothing is fit on these
+openers and the shipped coefficients are unchanged** (the script asserts it; parity is unaffected). Stage 1 is rolling
+as in `portable.py`; stage 2 is either *strict* (fit on ESPN 2014-16 only) or the *shipped* coefficients (fit on
+2014-16 + 2023-25, never saw a 2017-22 opener). Bets at the AusSB open number and open juice, scored against the
+nflverse consensus close. Bonferroni ×14 (the rules in the script).
+
+| test | rule | bets | CLV EV | p | Bonf. p | beat close | seasons + |
+|---|---|---|---|---|---|---|---|
+| **AusSB 2017-22, strict** | total ≥ 1.0 | **416** | **+3.47%** | 1e-11 | **<0.001** | 81% | **6/6** (+6.3 / +0.8 / +2.5 / +3.1 / +1.1 / +6.4) |
+| AusSB 2017-22, strict | total ≥ 0.75 | 643 | +2.56% | 9e-10 | <0.001 | 77% | 5/6 |
+| AusSB 2017-22, shipped coefficients | total ≥ 1.0 | 263 | +4.16% | 1e-10 | <0.001 | 83% | 6/6 |
+| AusSB 2019+2021 (holdout chosen before looking) | total ≥ 1.0 | 122 | +1.74% | 0.019 | 0.27 | 80% | 2/2 |
+| SBRO 2017-21 at -110 (cross-check) | total ≥ 1.0 | 334 | +4.57% | 2e-13 | <0.001 | 83% | 5/5 |
+| AusSB 2017-22, strict | spread ≥ 1.0 | 337 | −0.37% | 0.74 | 1 | 67% | 2/6 |
+
+Sensitivity of the totals ≥ 1.0 row: every open at a flat -110 +3.32% (p 8e-11); overs +2.40% (n=140), unders +4.02%
+(n=276); Pinnacle season 2017 +6.26% (n=78), bet365 2018-22 +2.83% (n=338, p 6e-7); random sides on the same games
+average −4.42% (max of 1,000 −2.07%, permutation p ≈ 0.001).
+
+How to read this: the totals rule replicates on seasons and a book it never saw. **Caveat: these openers are
+untimed.** The export does not say when each open was posted, so whether it came before or after the teams' previous
+game (the lag-1 caveat below) is still unknown, and the book changes in Feb 2018. The designated 2019+2021 holdout is
+positive but not significant after Bonferroni. Spreads stay **UNPROVEN**. The live first-seen record still decides.
 
 ### Which inputs carry it (`ablate.py`, portable ridge)
 - **Totals.** No single group is essential: dropping team EPA, scoring/ST, style, QB or venue leaves ≥1.0 at

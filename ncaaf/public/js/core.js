@@ -151,8 +151,13 @@ function ninv(p) {
   const q = p - 0.5, r = q * q;
   return ((((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q) / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
 }
-const SIGMA = 16; // spread of college football final margins around the market, in points (approximate)
-const spreadFromWin = (pHome) => (pHome == null ? null : Math.round(-SIGMA * ninv(clamp(pHome, 0.005, 0.995)) * 10) / 10);
+const SIGMA = 16; // spread of college football final margins around the market, in points: COVER math only (edge.js, coverChance on spreads)
+// Win chance from a spread uses its own, tighter sigma. Calibrated on TeamRankings closing lines 2003-25 (18,601 FBS
+// favorites): the best-fit normal is 14.44 (95% CI 14.05-14.84), flat across eras and spread sizes. At 16 a 7-point
+// favorite read 66.9% against 71.2% won in the 7-9.5 band; at 14.4 it reads 68.7%. Win% only, never cover chances.
+const WIN_SIGMA = 14.4;
+const winFromSpread = (margin) => (Number.isFinite(margin) ? ncdf(margin / WIN_SIGMA) : null);  // P(home wins), margin = home minus away
+const spreadFromWin = (pHome) => (pHome == null ? null : Math.round(-WIN_SIGMA * ninv(clamp(pHome, 0.005, 0.995)) * 10) / 10);
 
 // ------------------------------------------------------------ lines
 // A line from one side's point of view: { line, odds } for spread / total / moneyline.
@@ -258,7 +263,7 @@ function coverChance(g, leg) {
   if (leg.mkt === 's' || leg.mkt === 'ml') {
     // expected final home margin
     let mu = live?.s != null ? -live.s : (h - a) + (-(closeOf(g)?.s ?? 0)) * left;
-    const sd = Math.max(0.6, SIGMA * Math.sqrt(left));
+    const sd = Math.max(0.6, (leg.mkt === 'ml' ? WIN_SIGMA : SIGMA) * Math.sqrt(left));   // ml = win chance, s = cover chance
     const need = leg.mkt === 'ml' ? 0 : -(leg.side === 'home' ? leg.line : -leg.line); // home margin must beat this
     let p = 1 - ncdf((need - mu) / sd);
     if (leg.side === 'away') p = 1 - p;

@@ -8,7 +8,7 @@
    Gap = expected return per $1 at that price if the sharp price is right: P(win) × decimal odds + P(push) − 1.
    When a book hangs a different number than the sharp one, a model moves between numbers: a normal curve of final
    margins (SIGMA points; 16.5 for totals) fitted to the sharp price, bumped only at the margins that history supports
-   (3, 7, 10, 14). Moneylines remove the cut with the power method (proportional removal flatters underdogs).
+   (3, 7, 10, 14, 17, 21, 28). Moneylines remove the cut with the power method (proportional removal flatters underdogs).
 
    Every reading is an estimate, so each row says how sure it is:
      Solid      the gap is at least twice its uncertainty AND the rest of the market agrees (still +1% against the
@@ -27,7 +27,7 @@ const EDGE_MAX_GAP = 3;           // points between a book's line and the sharp 
 const EDGE_ML_LONG = 500;         // skip moneylines longer than +500
 const EDGE_TOTAL_SD = 16.5;       // spread of final totals around the market total, points
 const EDGE_SRC = ['pin', 'circa'];
-const EDGE_KEYS = [3, 7, 10, 14]; // the only margins with enough history to trust a bump
+const EDGE_KEYS = [3, 7, 10, 14, 17, 21, 28]; // bumped by last season's own frequency (edgeLumpOf); 17/21/28 land 1.9-2.8x a smooth curve (TeamRankings 2003-25)
 const EDGE_MKTS = new Set(['s', 't', 'ml', 'h1s']);
 
 // ------------------------------------------------------------ key-number shape from last season (spreads only)
