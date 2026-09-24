@@ -143,3 +143,21 @@ html td[data-heat="3"] :is(.px,.odds-px).mdl{background:color-mix(in srgb,var(--
 html .px.tick,html .px.best.tick,html .odds-px.tick,html .odds-px.best.tick,html .odds-tp.tick{transform:none!important}
 html .bt .st2 .px{min-height:52px}
 .bt-wrap,.odds-btwrap,.nb-wrap{overflow-anchor:none}
+
+/* Calm (owner, 2026-09-24: "your design is giving me epilepsy"). Nothing on a board flashes, pulses or slides any more.
+   A price that just moved keeps a thin static underline for a few seconds instead of a flash; the model's changed
+   number the same, in its blue; a game you jump to gets a steady outline. Best prices are a calm cyan tint with a
+   cyan edge instead of a solid bright block. Loading bars move slowly. */
+html .px.tick,html .px.best.tick,html .odds-px.tick,html .odds-px.best.tick,html .odds-tp.tick,html .px.tick small,html .odds-px.tick small,
+html .mdl-flash,html .tb-hl,html .tb-hl td,html .dot.pulse::after,html .rise,html .fresh,html .sw-card.sw-flash,html .fieldv .swp,
+html .dlg[open],html .toast,html .bkp,html .bkp.is-sheet{animation:none!important;transition:none!important}
+html .px.tick:not(.best),html .odds-px.tick:not(.best),html .odds-tp.tick:not(.best){box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--accent,#EE3A2E) 70%,transparent)!important;background-color:inherit}
+html .px.best.tick,html .odds-px.best.tick,html .odds-tp.best.tick{box-shadow:inset 0 -3px 0 var(--best)!important}
+html .mdl-flash{box-shadow:inset 0 -2px 0 var(--model-c,#1D5FD1)}
+html .tb-hl{outline:2px solid var(--brand);outline-offset:-2px}
+html .dot.pulse::after{display:none}
+html .wait::after{animation-duration:4s!important}
+html .px.best,html button.odds-px.best,html a.odds-px.best,html span.odds-px.best,html .odds-tp.best{background:color-mix(in srgb,var(--best) 20%,var(--surface))!important;color:var(--ink)!important;border-color:var(--best)!important;box-shadow:inset 0 0 0 1.5px var(--best)!important}
+html .px.best *,html .odds-px.best *,html .odds-tp.best *{color:var(--ink)!important}
+html .px.best small,html .odds-px.best small,html .odds-tp.best small{color:var(--ink-2)!important;opacity:1}
+html button.px.best:hover,html a.px.best:hover,html button.odds-px.best:hover,html a.odds-px.best:hover{background:color-mix(in srgb,var(--best) 30%,var(--surface))!important}

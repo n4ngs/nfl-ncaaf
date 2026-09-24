@@ -115,7 +115,7 @@
     list.querySelectorAll('details').forEach(el => { el.open = open.has(el.closest('[data-id]').dataset.id); });
     $('op-total').textContent = rows.length; $('op-best').textContent = rows.length ? '+' + Math.max(...rows.map(r => r.evPct)).toFixed(1) + '%' : '—';
     const bookCount = new Set(data.rows.map(r => r.book)).size;
-    $('op-count').textContent = `${data.rows.length} qualified ${data.rows.length === 1 ? 'price' : 'prices'} across ${bookCount} ${bookCount === 1 ? 'book' : 'books'}`; $('op-held').textContent = 'Sorted by estimated EV';
+    $('op-count').textContent = `${data.rows.length} qualified ${data.rows.length === 1 ? 'price' : 'prices'} across ${bookCount} ${bookCount === 1 ? 'book' : 'books'}`; $('op-held').textContent = 'Sorted by estimated EV' + (Number.isFinite(data.disagreements) && data.disagreements > 0 ? ` · ${data.disagreements} left out: both sides beat the reference (books disagree, not an edge)` : '');
     const metric = data.metrics || {}; $('op-metric-description').textContent = metric.description || 'Delivery measurements appear after rendered updates are acknowledged.'; $('op-p50').textContent = ms(metric.receiptToAckMs?.p50); $('op-p95').textContent = ms(metric.receiptToAckMs?.p95); $('op-samples').textContent = metric.sampleCount ? `${metric.sampleCount} samples · last hour` : 'Waiting for measured samples';
     data.rows.forEach(r => { if (![...$('op-book').options].some(o => o.value === r.book)) $('op-book').add(new Option(String(r.bookName || r.book), r.book)); }); syncControls();
     chart(rows); expire(); lastPaint = performance.now(); requestNotice(rows); acknowledge(packet, began, paintGeneration, rows);

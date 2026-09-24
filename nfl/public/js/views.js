@@ -458,9 +458,12 @@ function renderBoard(loading = false) {
   const block = (games) => `<div class="card brd m">${head}${games.map((g) => boardRow(g, mkt)).join('')}</div>${boardTable(games, mkt, cols)}`;
   const wasOpen = $('#doneGroup')?.open;
   const bkBar = myBooks()?.viewBarHTML ? myBooks().viewBarHTML(visibleBooks()) : '';
-  $('#boardBody').innerHTML = bkBar + groups.map((grp) => `
+  // Update in place (design/linesboard.js BoardMorph): only changed prices and rows touch the page, so scroll,
+  // focus, hover and an open menu stay exactly where they were when lines move.
+  const boardHTML = bkBar + groups.map((grp) => `
     <div class="win-h"><h3>${esc(grp.day)} · ${esc(grp.win)}</h3><span>${plural(grp.games.length, 'game')}</span></div>${block(grp.games)}`).join('')
     + (done.length ? `<details class="done" id="doneGroup"${wasOpen || !groups.length ? ' open' : ''}><summary class="win-h"><h3>Final</h3><span>${plural(done.length, 'game')} · closing lines and results ${ICON.chev}</span></summary>${block(done.sort((a, b) => Date.parse(b.start) - Date.parse(a.start)))}</details>` : '');
+  if (typeof BoardMorph === 'function') BoardMorph($('#boardBody'), boardHTML); else $('#boardBody').innerHTML = boardHTML;
 }
 
 // My books (design/mybooks.js): the books this user starred. Nothing is highlighted until they pick some; un-picking
@@ -759,6 +762,35 @@ function resultsView() {
 }
 
 // ------------------------------------------------------------ TOOLS
+// Line shopping: for every pregame price on this week's board (spread, total, moneyline, both sides), which books hang
+// the best number (ties count for each), and what your books cover. The one book that would add the most is named.
+function shopHTML() {
+  const games = allGames().filter((g) => isPre(g) && g.state !== 'off');
+  const books = visibleBooks().filter((b) => b.key !== 'cons' && b.key !== 'open');
+  const wins = new Map(books.map((b) => [b.key, new Set()]));
+  let total = 0;
+  for (const g of games) for (const [m, sides] of [['s', ['home', 'away']], ['t', ['over', 'under']], ['ml', ['home', 'away']]]) for (const side of sides) {
+    const best = bestOf(g.books, m, side);
+    if (!best) continue;
+    total++;
+    const id = `${g.id}|${m}|${side}`;
+    for (const b of books) {
+      const L = g.books?.[b.key], p = sideOf(L, m, side);
+      if (!p || p.odds == null || !quoteCanAct(L, null, m, side)) continue;
+      if (p.odds === best.odds && (m === 'ml' || p.line === best.line)) wins.get(b.key).add(id);
+    }
+  }
+  if (!total) return '<p class="note">No pregame prices on this week\'s board right now.</p>';
+  const mine = books.filter((b) => isMyBook(b.key)), mineSet = new Set(mine.flatMap((b) => [...wins.get(b.key)]));
+  const rows = books.map((b) => ({ b, n: wins.get(b.key).size })).filter((r) => r.n).sort((a, b) => b.n - a.n);
+  const add = books.filter((b) => !isMyBook(b.key)).map((b) => ({ b, n: [...wins.get(b.key)].filter((id) => !mineSet.has(id)).length })).sort((a, b) => b.n - a.n)[0];
+  const pct = (n) => Math.round(n / total * 100);
+  const head = mine.length
+    ? `<p class="shop-sum"><b>Your ${mine.length === 1 ? 'book has' : `${mine.length} books have`} the best number on ${mineSet.size} of ${total} prices (${pct(mineSet.size)}%).</b>${add && add.n ? ` Adding ${esc(add.b.name)} would add ${add.n} more.` : ''}</p>`
+    : `<p class="shop-sum"><b>${total} prices this week.</b> Star your books (Board › Choose my books) to see how much of the best number you can reach.</p>`;
+  const list = rows.slice(0, 12).map((r) => `<div class="shop-row${isMyBook(r.b.key) ? ' my-bk' : ''}"><span class="shop-bk">${myBkStar(r.b.key)}${esc(r.b.name)}</span><span class="shop-bar" aria-hidden="true"><i style="width:${Math.max(3, pct(r.n))}%"></i></span><span class="shop-n num">${r.n} · ${pct(r.n)}%</span></div>`).join('');
+  return head + `<div class="shop-list" role="list" aria-label="Best-number count by book">${list}</div>`;
+}
 let toolsState = { health: null, at: 0 };
 function renderTools() {
   if (Date.now() - toolsState.at > 15000) {
@@ -769,7 +801,7 @@ function renderTools() {
   const body = $('#toolsBody');
   if (body.dataset.built) { updateTools(); return; }
   body.dataset.built = '1';
-  body.innerHTML = `<div class="tools"><div class="card tool"><h3>CLV integrity</h3><div class="note" id="integrityHealth"></div><p>Quotes show source-observation freshness. Suspended, stale or unverified quotes remain visible and cannot produce an actionable edge. Feed polling below confirms connectivity only.</p><p class="note">VERIFIED uses actual kickoff; PROVISIONAL uses scheduled start. Open-to-close history is RETROSPECTIVE MARKET MOVE.</p></div>
+  body.innerHTML = `<div class="tools"><div class="card tool" id="shopTool"><h3>Line shopping</h3><p>Which books hang the best number on this week's games before kickoff (spreads, totals and moneylines; ties count for every book). Your books are starred.</p><div id="shopOut"></div></div>
     <div class="card tool"><h3>Odds converter</h3><p>American odds to decimal, implied chance and payout.</p>
       <div class="fgrid"><label class="fld">American odds<input class="inp" id="tOdds" inputmode="text" value="-110"></label><label class="fld">Stake<input class="inp" id="tStake" inputmode="decimal" value="${S.unit}"></label></div>
       <div class="out" id="tOddsOut"></div></div>
@@ -834,8 +866,8 @@ function updateTools() {
   if ($('#myBookTog')) $('#myBookTog').innerHTML = myBooksPicker();
   $('#bookTog').innerHTML = S.books.map((b) => `<button class="chip" type="button" data-hide="${b.key}" aria-pressed="${!S.hidden.has(b.key)}">${esc(b.short)}${b.sharp ? '<small>sharp</small>' : b.vegas ? '<small>NV</small>' : ''}</button>`).join('');
   const h = toolsState.health;
-  const ih = $('#integrityHealth');
-  if (ih) { const v = h?.integrity; ih.textContent = v ? `${v.ok ? 'Journal OK' : 'Journal unavailable'} · ${v.snapshots ?? '—'} snapshots · ${v.signals ?? '—'} signals · ${v.resolver_version || ''}` : 'Integrity journal health unavailable'; }
+  const so = $('#shopOut');
+  if (so) { const html = shopHTML(); if (so.dataset.html !== html) { so.innerHTML = html; so.dataset.html = html; } }
   const src = [
     ['ESPN', 'site.api.espn.com', 'Scores, field position, DraftKings, FPI'],
     ['Action Network', 'api.actionnetwork.com', 'Books, live lines, splits, rotation numbers'],

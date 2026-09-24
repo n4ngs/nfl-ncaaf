@@ -91,7 +91,11 @@ function scan(provider, sport, frame, now) {
       }
     }
   }
-  return markTwoWay(rows);
+  // Both sides of one number beating the reference is the books disagreeing (usually one stale price), not an edge
+  // on either side, so neither side qualifies. They are counted so the page can say how many were left out.
+  const marked = markTwoWay(rows), kept = marked.filter((r) => !r.twoWay);
+  Object.defineProperty(kept, 'disagreements', { value: new Set(marked.filter((r) => r.twoWay).map((r) => [r.eventId, r.live, r.market].join('|'))).size, enumerable: false });
+  return kept;
 }
 // Both sides of the SAME number can clear the bar at different books (Over 45.5 at one, Under 45.5 at another). That
 // is the books disagreeing with each other, not a lean: on its own each side is close to a coin flip. Each such row
@@ -123,6 +127,7 @@ class OpportunityService extends EventEmitter {
     if (cause) for (const [key, { provider, sport, frame }] of this.frames) if (provider === cause.provider && (cause.statusOnly || sport === cause.sport)) {
       const prior = new Map((this.frameRows.get(key) || []).map(row => [row.id, row]));
       const rows = scan(provider, sport, frame, now);
+      (this.disagreements ||= new Map()).set(key, rows.disagreements || 0);
       for (const row of rows) { const old = prior.get(row.id); if (!old) continue; const { receivedAt: oldReceipt, ...before } = old, { receivedAt, ...after } = row; if (JSON.stringify(before) === JSON.stringify(after)) row.receivedAt = oldReceipt; }
       this.frameRows.set(key, rows);
     }
@@ -132,7 +137,8 @@ class OpportunityService extends EventEmitter {
     this.rows = next;
     if (changed) { this.revision++; this.trace = causalChange ? { id: String(++this.traceSequence), provider: cause.provider, sport: cause.sport, receivedAt: cause.receivedAt, clockKind: 'OPPORTUNITY_ENGINE_RECEIPT' } : null; this.receivedAt = this.trace?.receivedAt ?? null; this.emit('update', this.snapshot()); }
   }
-  snapshot() { const now = this.now(); return { revision: this.revision, serverAt: now, receivedAt: this.receivedAt, trace: this.trace, rows: [...this.rows.values()].filter(r => r.expiresAt > now).sort((a, b) => b.evPct - a.evPct).slice(0, 400).map(({ link, ...r }) => r) }; }
+  snapshot() { const now = this.now(); return { revision: this.revision, serverAt: now, receivedAt: this.receivedAt, trace: this.trace,
+    disagreements: [...(this.disagreements || new Map()).values()].reduce((a, b) => a + b, 0), rows: [...this.rows.values()].filter(r => r.expiresAt > now).sort((a, b) => b.evPct - a.evPct).slice(0, 400).map(({ link, ...r }) => r) }; }
   validate(id, version) { this.rebuild(); const row = this.rows.get(id); if (!row || row.expiresAt <= this.now()) return { error: 'This opportunity expired. Return to the board for current prices.', status: 410 }; if (row.version !== version) return { error: 'The price or reference market changed. Review the current price before continuing.', status: 409 }; if (!row.link || !row.handoff) return { error: 'A verified selection link is unavailable for this price.', status: 422 }; return { row }; }
   close() { clearInterval(this.timer); this.removeAllListeners(); }
 }

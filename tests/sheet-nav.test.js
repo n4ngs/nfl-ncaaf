@@ -47,3 +47,4 @@ test('LinesBoard: the model (mine) is a labelled blue line on the chart and a ti
   const none = LB.html('t2', { home: 'WSH', away: 'SEA', markets: { s: { label: 'Spread', rows: [row('mgm', 0, 7)] } } });
   assert.doesNotMatch(none, /lb-model|lb-tile-model/);
 });
+

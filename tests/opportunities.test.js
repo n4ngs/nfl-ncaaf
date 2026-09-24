@@ -87,14 +87,14 @@ test('unsupported exchange and contract books cannot qualify across providers, p
   }finally{service.close();}
  }
 });
-test('both sides of the same number at different books are marked two-way, with what taking both returns',()=>{
+test('both sides of the same number at different books never qualify (books disagree), and are counted',()=>{
  for(const market of ['ml','s','t']){
   const f=fixture({market}),sides=market==='t'?['over','under']:['home','away'],B=f.events[0].books,m=B.mgm.integrityMeta[market];
   B.dk={integrityMeta:{[market]:{[sides[0]]:{...copy(m[sides[0]]),pair_id:'dk:'+market,american_odds:-130,provider_quote_id:'201',bet_link:null},[sides[1]]:{...copy(m[sides[1]]),pair_id:'dk:'+market,american_odds:110,provider_quote_id:'202',bet_link:null}}}};
-  const rows=scan('sharp','mlb',f,NOW),a=rows.find(r=>r.book==='mgm'&&r.side===sides[0]),b=rows.find(r=>r.book==='dk'&&r.side===sides[1]);
-  assert.ok(a&&b,market);assert.equal(a.twoWay.id,b.id);assert.equal(b.twoWay.id,a.id);assert.equal(a.twoWay.book,'dk');
-  assert.ok(Math.abs(a.twoWay.bothPct-(100/(2/2.1)-100))<1e-9,'+110 both sides returns 5% either way');
-  // one side alone: no two-way mark
-  delete B.dk;assert.equal(scan('sharp','mlb',f,NOW).find(r=>r.book==='mgm').twoWay,undefined);
+  const rows=scan('sharp','mlb',f,NOW);
+  assert.equal(rows.find(r=>r.book==='mgm'&&r.side===sides[0]),undefined,market);assert.equal(rows.find(r=>r.book==='dk'&&r.side===sides[1]),undefined,market);
+  assert.equal(rows.disagreements,1);
+  delete B.dk;const one=scan('sharp','mlb',f,NOW);assert.ok(one.find(r=>r.book==='mgm'),'one side alone still qualifies');assert.equal(one.disagreements,0);
  }
+ const s=new OpportunityService({now:()=>NOW});try{const f=fixture(),B=f.events[0].books,m=B.mgm.integrityMeta.ml;B.dk={integrityMeta:{ml:{home:{...copy(m.home),pair_id:'dk:ml',american_odds:-130,provider_quote_id:'201',bet_link:null},away:{...copy(m.away),pair_id:'dk:ml',american_odds:110,provider_quote_id:'202',bet_link:null}}}};s.update('sharp','mlb',f);assert.equal(s.snapshot().disagreements,1);assert.equal(s.snapshot().rows.length,0);}finally{s.close();}
 });

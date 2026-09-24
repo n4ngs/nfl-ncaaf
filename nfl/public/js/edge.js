@@ -270,6 +270,7 @@ function edgesFor(g, all = false) {
   return m.list.filter((e) => e.ev >= min && (all || edgeShowWeak() || e.conf !== 'weak'));
 }
 // Rows for the list: the same price at several books is one row. Sorted by kickoff, then game, never by size.
+let edgeLeftOut = 0;
 function edgeRows(all = false) {
   const groups = new Map();
   for (const e of allGames().filter(isPre).flatMap((g) => edgesFor(g, all))) {
@@ -288,8 +289,11 @@ function edgeRows(all = false) {
     const o = bySide.get(`${r.gid}|${r.mkt}|${num(r)}|${OTHER[r.side]}`);
     r.twoWay = o ? { pick: edgePick(o), odds: o.odds, ev: o.ev, books: o.books, both: 1 / (1 / dec(r.odds) + 1 / dec(o.odds)) - 1 } : null;
   }
+  // A pair is the books disagreeing, not an edge on either side: both sides are left out (counted for the sheet).
+  const rowsAll = [...groups.values()];
+  edgeLeftOut = new Set(rowsAll.filter((r) => r.twoWay).map((r) => `${r.gid}|${r.mkt}`)).size;
   const rank = { solid: 0, thin: 1, weak: 2 };
-  return [...groups.values()].sort((a, b) => Date.parse(a.g.start) - Date.parse(b.g.start) || a.gid.localeCompare(b.gid) || rank[a.conf] - rank[b.conf]);
+  return rowsAll.filter((r) => !r.twoWay).sort((a, b) => Date.parse(a.g.start) - Date.parse(b.g.start) || a.gid.localeCompare(b.gid) || rank[a.conf] - rank[b.conf]);
 }
 const edgeAll = () => edgeRows();
 
@@ -384,6 +388,7 @@ function edgeSheetHTML() {
   return `<h2 id="dlgTitle">Edge Finder</h2>
     <p class="lede">${esc(EDGE_EXPLAIN)}</p>
     <p class="edge-sizing">Pre-game prices, by kickoff. Showing gaps of +${min}% or more · <button type="button" class="edge-sizing-btn" data-kelly-settings>Change</button></p>
+    ${edgeLeftOut ? `<p class="note">${edgeLeftOut} ${edgeLeftOut === 1 ? 'market is' : 'markets are'} left out: both sides beat the sharp price at different books. That is the books disagreeing (usually one stale price), not an edge.</p>` : ''}
     <div class="chips edge-chips" role="group" aria-label="Market">${chips}</div>
     ${list.length ? `<div class="card edge-list">${list.map(edgeRow).join('')}</div>`
       : `<p class="edge-none">${rows.length ? `Nothing +${min}% or more from the sharp price in this market.` : `No prices are +${min}% or more from the sharp price right now. That’s normal most of the time.`}</p>`}

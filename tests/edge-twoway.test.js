@@ -17,14 +17,14 @@ for (const sport of ['nfl', 'ncaaf']) {
     const c = { allGames: () => [g], isPre: () => true, edgesFor: () => list, dec: (o) => (o > 0 ? 1 + o / 100 : 1 + 100 / -o), fmtOdds: (o) => (o > 0 ? '+' + o : String(o)), fmtTot: String, fmtPts: (v) => (v > 0 ? '+' + v : String(v)),
       bookName: (k) => k.toUpperCase(), serverNow: () => 0, trim: String, Map };
     c.edgePick = (e) => (e.mkt === 't' ? `${e.side === 'over' ? 'Over' : 'Under'} ${e.line}` : `${e.g[e.side].abbr} ${e.line}`);
-    vm.createContext(c); vm.runInContext(body + cav + '\nglobalThis.api = { edgeRows, edgeCaveats };', c);
+    vm.createContext(c); vm.runInContext('var edgeLeftOut = 0;\n' + body.replace('let edgeLeftOut = 0;', '') + cav + '\nglobalThis.api = { edgeRows, edgeCaveats };', c);
     const rows = c.api.edgeRows();
     const by = (side, line) => rows.find((r) => r.side === side && r.line === line);
-    assert.equal(by('over', 45.5).twoWay.pick, 'Under 45.5');
-    assert.equal(by('home', -3.5).twoWay.pick, 'BUF 3.5', 'a spread pairs with the opposite number');
-    assert.equal(by('over', 44.5).twoWay, null, 'a different number is not the same coin flip');
-    assert.ok(Math.abs(by('under', 45.5).twoWay.both - (1 / (2 / 2.05) - 1)) < 1e-12);
-    assert.match(c.api.edgeCaveats(by('over', 45.5))[0], /^Other side too: Under 45\.5 \+105 at DK, books disagree, a coin flip alone$/);
+    assert.equal(by('over', 45.5), undefined, 'both sides of 45.5 are left out');
+    assert.equal(by('under', 45.5), undefined);
+    assert.equal(by('home', -3.5), undefined, 'a spread pairs with the opposite number, and is left out');
+    assert.equal(by('over', 44.5).twoWay, null, 'a different number is not the same coin flip, and stays');
+    assert.equal(vm.runInContext('edgeLeftOut', c), 2);
   });
 }
 
@@ -40,9 +40,7 @@ test('MLB Edge Finder: both sides of the same number are marked, and say it is a
   c.oddsPick = (gg, mkt, side, line) => (mkt === 't' ? `${side === 'over' ? 'Over' : 'Under'} ${line}` : `${gg[side].abbr}${line == null ? ' ML' : ' ' + line}`);
   vm.createContext(c); vm.runInContext(body + cav + '\nglobalThis.api = { oddsEdgeRows, oddsEdgeCaveats };', c);
   const rows = c.api.oddsEdgeRows();
-  const over = rows.find((r) => r.side === 'over');
-  assert.equal(over.twoWay.pick, 'Under 8.5');
-  assert.match(c.api.oddsEdgeCaveats(over)[0], /^Other side too: Under 8\.5 \+105 at DK, books disagree, a coin flip alone$/);
+  assert.equal(rows.find((r) => r.mkt === 't'), undefined, 'both sides of 8.5 are left out');
   assert.equal(rows.find((r) => r.mkt === 'ml').twoWay, null);
   assert.equal(rows.find((r) => r.mkt === 'rl').twoWay, null);
 });

@@ -97,3 +97,14 @@ th.bk-drop-r{box-shadow:inset -3px 0 0 var(--brand)!important}
 .bkp-lock,.bkp-lock body{overflow:hidden}
 @keyframes bkp-up{from{transform:translateY(100%)}to{transform:none}}
 @media (prefers-reduced-motion:reduce){.bkp{animation:none}}
+
+/* Tools › Line shopping (views.js shopHTML) */
+.shop-sum{margin:0 0 12px;font-size:13px;line-height:1.45;color:var(--ink-2)}
+.shop-sum b{color:var(--ink)}
+.shop-list{display:grid;gap:6px}
+.shop-row{display:grid;grid-template-columns:minmax(90px,140px) 1fr auto;gap:10px;align-items:center;font-size:13px}
+.shop-bk{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.shop-bar{height:8px;border-radius:4px;background:var(--fill);overflow:hidden}
+.shop-bar i{display:block;height:100%;border-radius:4px;background:color-mix(in srgb,var(--ink) 40%,transparent)}
+.shop-row.my-bk .shop-bar i{background:var(--brand)}
+.shop-n{font-size:12px;color:var(--ink-2);white-space:nowrap}

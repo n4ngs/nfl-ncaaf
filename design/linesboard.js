@@ -552,3 +552,77 @@
   doc.addEventListener('scroll', () => { if (!restoring) remember(); }, { capture: true, passive: true });
   root.addEventListener('resize', remember);
 })(typeof window !== 'undefined' ? window : globalThis);
+
+/* BoardMorph: update a board in place instead of replacing it.
+   BoardMorph(el, html) makes el's content match html by patching what changed: a price's text and class, a new row,
+   a removed game. Everything that did not change stays the same DOM node, so there is no redraw at all: sideways and
+   page scroll, focus, an open menu, a running flash and a hover all survive a price update. Rows and columns are
+   matched by their game or book key (data-open, data-odds-open, data-game-row, data-bk, id), so a sorted or moved
+   column still lines up. What the page's own helpers add (the game strip, heat, sort order, frozen columns, flashes)
+   is kept, not undone. */
+(function (root) {
+  const KEEP_EL = (n) => n.nodeType === 1 && (n.classList.contains('tb-strip') || n.hasAttribute('data-keep'));
+  const KEEP_ATTR = /^(data-(tb|heat|gap|ord|keep)|aria-sort|aria-expanded|tabindex|role)/;
+  const KEEP_CLASS = /^(tb-|mdl-flash|is-sorted|is-shut)/;
+  const keyOf = (n) => (n.nodeType !== 1 ? null : n.getAttribute('data-open') || n.getAttribute('data-odds-open') || n.getAttribute('data-game-row') || n.getAttribute('data-bk') || n.getAttribute('data-game-id') || (n.id || null));
+  function syncAttrs(a, b) {
+    for (const { name } of [...a.attributes]) {
+      if (b.hasAttribute(name)) continue;
+      if (KEEP_ATTR.test(name) || (name === 'style' && /--fz\d/.test(a.getAttribute('style') || ''))) continue;
+      a.removeAttribute(name);
+    }
+    for (const { name, value } of [...b.attributes]) {
+      const cur = a.getAttribute(name);
+      if (cur === value) continue;
+      if (name === 'class') {
+        const kept = (cur || '').split(/\s+/).filter((c) => KEEP_CLASS.test(c));
+        const next = [...new Set([...value.split(/\s+/).filter(Boolean), ...kept])].join(' ');
+        if (next !== cur) a.setAttribute('class', next);
+        continue;
+      }
+      // a running flash: only its catch-up delay changed, so leave it alone rather than nudge the animation
+      if (name === 'style' && /^animation-delay:-\d+ms;?$/.test(value) && /^animation-delay:-\d+ms;?$/.test(cur || '')) continue;
+      if (name === 'value' && a === a.ownerDocument.activeElement) continue;
+      a.setAttribute(name, value);
+    }
+  }
+  function syncChildren(a, b) {
+    const olds = [...a.childNodes].filter((n) => !KEEP_EL(n)), news = [...b.childNodes];
+    const byKey = new Map();
+    for (const n of olds) { const k = keyOf(n); if (k != null && !byKey.has(`${n.nodeName}|${k}`)) byKey.set(`${n.nodeName}|${k}`, n); }
+    const used = new Set(), out = [];
+    const loose = olds.filter((n) => keyOf(n) == null);   // unkeyed nodes line up in order, by kind
+    let ui = 0;
+    for (const nb of news) {
+      const k = keyOf(nb);
+      let na = null;
+      if (k != null) { na = byKey.get(`${nb.nodeName}|${k}`) || null; if (na && used.has(na)) na = null; }
+      else { const c = loose[ui]; if (c && c.nodeName === nb.nodeName) { na = c; ui++; } }
+      if (na) { used.add(na); patch(na, nb); out.push(na); } else out.push(nb);
+    }
+    for (const n of olds) if (!used.has(n)) n.remove();
+    // place in order, moving only what is out of place (keeps kept elements such as the game strip where they are)
+    let ref = a.firstChild;
+    while (ref && KEEP_EL(ref)) ref = ref.nextSibling;
+    for (const n of out) {
+      if (n === ref) { ref = ref.nextSibling; while (ref && KEEP_EL(ref)) ref = ref.nextSibling; continue; }
+      a.insertBefore(n, ref);
+    }
+  }
+  function patch(a, b) {
+    if (a.nodeType === 3 || a.nodeType === 8) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+    if (a.nodeName !== b.nodeName) { a.replaceWith(b); return; }
+    syncAttrs(a, b);
+    if (a.nodeName === 'TEXTAREA' || (a.nodeName === 'DETAILS' && a.open !== b.hasAttribute('open') && a.hasAttribute('data-user'))) return;
+    syncChildren(a, b);
+  }
+  function morph(el, html) {
+    if (!el) return;
+    const tpl = el.ownerDocument.createElement('template');
+    tpl.innerHTML = html;
+    if (!el.firstChild) { el.append(tpl.content); return; }
+    syncChildren(el, tpl.content);
+  }
+  root.BoardMorph = morph;
+  if (typeof module !== 'undefined' && module.exports) module.exports.BoardMorph = morph;
+})(typeof window !== 'undefined' ? window : globalThis);

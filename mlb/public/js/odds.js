@@ -342,7 +342,8 @@ function oddsSwap(el, html) {
   const fk = f && el.contains(f) ? f.dataset.fk : null;
   const selection = fk && typeof f.selectionStart === 'number' ? [f.selectionStart, f.selectionEnd] : null;
   const scrolls = [...el.querySelectorAll('.odds-btwrap')].map((box) => box.scrollLeft);
-  el.innerHTML = html;
+  // update in place (BoardMorph, design/linesboard.js): unchanged prices and rows are left untouched
+  if (typeof BoardMorph === 'function' && el.firstChild) BoardMorph(el, html); else el.innerHTML = html;
   el.dataset.key = html;
   if (fk) { const next = el.querySelector(`[data-fk="${CSS.escape(fk)}"]`); next?.focus({ preventScroll: true }); if (selection && next?.setSelectionRange) try { next.setSelectionRange(...selection); } catch {} }
   el.querySelectorAll('.odds-btwrap').forEach((box, i) => { box.scrollLeft = scrolls[i] || 0; });
@@ -1485,8 +1486,9 @@ function oddsEdgeRows(all = false) {
     const o = bySide.get(`${r.pk}|${r.mkt}|${num(r)}|${OTHER[r.side]}`);
     r.twoWay = o ? { pick: oddsPick(o.g, o.mkt, o.side, o.line), odds: o.odds, books: o.books } : null;
   }
+  // A pair is the books disagreeing, not an edge on either side: both sides are left out.
   const rank = { solid: 0, thin: 1, weak: 2 };
-  return [...groups.values()].sort((a, b) => Date.parse(a.g.start) - Date.parse(b.g.start) || a.pk - b.pk || rank[a.conf] - rank[b.conf]);
+  return [...groups.values()].filter((r) => !r.twoWay).sort((a, b) => Date.parse(a.g.start) - Date.parse(b.g.start) || a.pk - b.pk || rank[a.conf] - rank[b.conf]);
 }
 const oddsEdgePct = (e) => `+${Math.max(1, Math.round(e.ev * 100))}%`;
 function oddsEdgeCaveats(e) {
