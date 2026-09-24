@@ -261,7 +261,7 @@ function bookTable(g) {
     const L = src[k];
     const age = L?.m ? `typed ${ago(L.at)}` : live && !L && k !== 'cons' && g.books?.[k] ? 'no live feed · last pregame shown' : !L && k !== 'cons' && k !== 'open' ? 'no price posted' : L?.src === 'vsin' ? 'via VSiN' : L?.src === 'pin' ? 'Pinnacle feed' : k === 'open' && g.open?.at ? dayLabel(new Date(g.open.at).toISOString()) : '';
     const op = g.opens?.[k]?.s != null && !live ? `opened ${fmtPts(favSide(g) === 'away' ? -g.opens[k].s : g.opens[k].s)}` : '';
-    return `<tr class="${k === 'cons' ? 'cons' : ''}"><td><div class="bk">${esc(bookName(k))}${b?.sharp ? '<span class="tag sharp">Sharp</span>' : ''}</div><small class="faint" style="font-size:11px">${esc([age, op].filter(Boolean).join(' · ') || (b && !b.feed && !L ? 'counter only' : ''))}</small></td>
+    return `<tr class="${k === 'cons' ? 'cons' : ''}${myBkCls(k)}"><td><div class="bk">${myBkStar(k)}${esc(bookName(k))}${b?.sharp ? '<span class="tag sharp">Sharp</span>' : ''}</div><small class="faint" style="font-size:11px">${esc([age, op].filter(Boolean).join(' · ') || (b && !b.feed && !L ? 'counter only' : ''))}</small></td>
       <td class="c-s">${cell(k, 's', 'away')}</td><td class="c-s">${cell(k, 's', 'home')}</td><td class="c-t">${cell(k, 't', 'over')}</td><td class="c-t">${cell(k, 't', 'under')}</td><td class="c-ml">${cell(k, 'ml', 'away')}</td><td class="c-ml">${cell(k, 'ml', 'home')}</td></tr>`;
   }).join('');
   return `<div class="card" style="overflow-x:auto;padding-top:14px"><table class="btable m-${S.sheet.tableMkt || 's'}"><thead><tr><th>${live ? 'Live' : 'Book'}</th><th class="c-s">${esc(g.away.abbr)}</th><th class="c-s">${esc(g.home.abbr)}</th><th class="c-t">Over</th><th class="c-t">Under</th><th class="c-ml">${esc(g.away.abbr)} ML</th><th class="c-ml">${esc(g.home.abbr)} ML</th></tr></thead><tbody>${rows}</tbody></table>
@@ -579,7 +579,8 @@ function openBooks() {
   };
   $('#dlgBody').innerHTML = `<h2 id="dlgTitle">Where to bet</h2>
     <p class="lede">Pick Six shows the numbers. The bet is placed at the book: these open the book's own site or its Nevada app, where you sign in yourself. This app never asks for a sportsbook login, never stores one, and never places a bet for you.</p>
-    <div class="card bk-note"><b>Two things Nevada asks first</b>Nevada apps make you sign up in person at the casino once, with ID. After that you can bet from your phone, but only while you're inside the state.</div>
+    ${myBooksPicker()}
+    <div class="card bk-note" style="margin-top:16px"><b>Two things Nevada asks first</b>Nevada apps make you sign up in person at the casino once, with ID. After that you can bet from your phone, but only while you're inside the state.</div>
     <div class="sub-h" style="margin-top:20px">Nevada books</div>
     <div class="card list bk-list">${nv.map(row).join('')}</div>
     <div class="sub-h" style="margin-top:20px">On the board for comparison</div>

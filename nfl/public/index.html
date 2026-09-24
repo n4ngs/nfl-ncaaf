@@ -38,6 +38,7 @@
 <link rel="stylesheet" href="vas.css">
 <link rel="stylesheet" href="security.css">
 <link rel="stylesheet" href="/_board/broadcast.css">
+<link rel="stylesheet" href="/_board/mybooks.css">
 <link rel="stylesheet" href="/_board/portfolio.css">
 <link rel="stylesheet" href="/_board/refined.css">
 <link rel="stylesheet" href="/_board/support.css">
@@ -124,7 +125,7 @@
         </details>
         <details class="refine refine-book" id="boardBooks">
           <summary><span class="refine-label">Book</span><span id="bookLabel">Market</span><svg class="refine-chevron" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary>
-          <div class="refine-panel"><div class="pills books" id="phBooks" role="group" aria-label="Which book to show"></div></div>
+          <div class="refine-panel"><div class="pills books" id="phBooks" role="group" aria-label="Which book to show"></div><div id="myBooksPick"></div></div>
         </details>
         <span class="board-count" id="boardCount" role="status" aria-live="polite"></span>
       </div>
@@ -188,6 +189,7 @@ addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('[
 </script>
 <script src="/_board/portfolio.js"></script>
 <script src="/_board/portfolio-view.js"></script>
+<script src="/_board/mybooks.js"></script>
 <script src="js/core.js"></script>
 <script src="js/integrity.js"></script>
 <script src="js/live.js"></script>

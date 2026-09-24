@@ -224,3 +224,6 @@ document.addEventListener('input', (event) => {
   const matches = [...(picker?.options || [])].filter((option) => option.value && !option.hidden);
   if (q && matches.length === 1 && picker.value !== matches[0].value) { picker.value = matches[0].value; picker.dispatchEvent(new Event('change', { bubbles: true })); }
 });
+
+// My books (design/mybooks.js): repaint the board, the sheet and the tools the moment the selection changes.
+if (typeof MyBooks !== 'undefined') MyBooks.subscribe(() => invalidate());

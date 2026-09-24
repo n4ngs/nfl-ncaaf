@@ -844,12 +844,11 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
   .bt tbody tr:hover td{background:color-mix(in srgb,var(--surface) 90%,var(--ink))}
 }
 
-/* BetMGM is the one column you can act on — a tap there puts the bet in your slip at the book.
-   Mark the lane so the eye finds it among a dozen: an accent rule under the header and a whisper of
-   lift down the column. Deliberately not the live-red wash, which means something else here. */
+/* The Model column is the lane to find first; your own books (design/mybooks.css) are the other. No fixed
+   BetMGM lane: highlighting one book for everyone was misleading (owner, 2026-09-23). */
 @media (min-width:1024px){
-  .bt th[data-bk="mgm"]{color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
-  .bt td[data-bk="mgm"]{background:color-mix(in srgb,var(--surface) 94%,var(--ink))}
+  .bt th.mdl-th{color:var(--accent);box-shadow:inset 0 -2px 0 var(--accent)}
+  .bt td.mdl-td{box-shadow:inset 1px 0 0 var(--line),inset -1px 0 0 var(--line)}
 }
 
 /* ═══════════════════════════════════════════════════════════════════ colour + controls
@@ -883,3 +882,11 @@ textarea.inp{height:72px;padding:12px 14px;font-size:15px;font-weight:500;resize
 .model-read table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}.model-read th{text-align:left;color:var(--ink-2);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line)}
 .model-read td{padding:5px 6px;border-bottom:1px solid var(--line)}
 @media (max-width:700px){.model-read .mr-injs{grid-template-columns:1fr}}
+
+/* The model is the lane to find first (owner, 2026-09-23; same as NCAAF): Model column on the board, a "Model" label
+   leading each game's footer line on phones. */
+.bt td.mdl-td{white-space:nowrap;padding-left:10px;padding-right:10px}
+.bt .px.mdl{font-weight:650;color:var(--ink);background:none}
+.br-f .mdl-b{display:inline-flex;align-items:baseline;gap:5px}
+.br-f .mdl-b i{font-style:normal;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.br-f .mdl-b b{color:var(--ink);font-weight:650}

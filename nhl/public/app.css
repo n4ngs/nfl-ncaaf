@@ -42,3 +42,20 @@ dialog h2{font-size:25px;letter-spacing:-.03em;margin:0 0 8px}dialog h3{font-siz
 .vas-badge span{font-weight:500;color:var(--ink-3)}
 .vas-diamond{background:var(--brand-wash);border-color:var(--brand);color:var(--brand-text)}
 @media (max-width:640px){.vm-head,.vm-empty{padding:12px 14px}.vm-table{font-size:12.5px}.vm-table td,.vm-table th{padding:9px 10px}}
+/* The Model column (app.js modelPair / modelFoot): brand side rules and brand numbers, never a wash, so it stays distinct
+   from My books (design/mybooks.css). On phones the rail pair gives way to a "Model" label leading the footer. */
+.book-pair.mdl-pair{padding:0 6px;box-shadow:inset 1px 0 0 color-mix(in srgb,var(--brand) 45%,transparent),inset -1px 0 0 color-mix(in srgb,var(--brand) 45%,transparent)}
+.mdl-pair .book-name{color:var(--brand-text);letter-spacing:.06em;text-transform:uppercase}
+.nh-price.mdl-price{cursor:default;background:none;border-style:dashed;border-color:color-mix(in srgb,var(--brand) 45%,transparent)}
+.nh-price.mdl-price:hover{background:none;border-color:color-mix(in srgb,var(--brand) 45%,transparent)}
+.nh-price.mdl-price b{color:var(--brand-text);font-weight:700}
+.game-foot .mdl-b{display:none;align-items:baseline;gap:5px;font-size:13px;margin-right:auto}
+.game-foot .mdl-b i{font-style:normal;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--brand-text)}
+.game-foot .mdl-b b{color:var(--ink);font-weight:650;font-variant-numeric:tabular-nums}
+.nh-mybooks-d{position:relative;margin-left:auto}
+.nh-mybooks-d>summary{list-style:none;display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);font-size:12px;font-weight:650;color:var(--ink);cursor:pointer}
+.nh-mybooks-d>summary::-webkit-details-marker{display:none}
+.nh-mybooks-d>summary .mybk-star{color:var(--brand-text)}
+.nh-mybooks-n:not(:empty){min-width:18px;padding:0 5px;border-radius:999px;background:var(--brand-wash);color:var(--brand-text);font-size:11px;text-align:center}
+.nh-mybooks{position:absolute;right:0;top:calc(100% + 6px);z-index:5;width:min(420px,calc(100vw - 28px));padding:4px 14px 14px;border:1px solid var(--edge,var(--line));border-radius:12px;background:var(--surface);box-shadow:0 10px 28px #14203022}
+@media(max-width:700px){.book-pair.mdl-pair{display:none}.game-foot .mdl-b{display:inline-flex}.game-foot{flex-wrap:wrap}}

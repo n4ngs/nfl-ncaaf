@@ -1,0 +1,47 @@
+/* My books (design/mybooks.js), shared by NFL, NCAAF, MLB and NHL.
+   Nothing is highlighted until a user stars a book. A starred book's lane gets a brand rule under its header and a
+   faint brand wash down its cells; a price from one of your books on the phone board gets the same wash with a
+   thin underline. The Model column stays distinct: side rules and brand-coloured numbers, never a wash. */
+:root{--mybk-wash:color-mix(in srgb,var(--brand) 8%,transparent);--mybk-rule:color-mix(in srgb,var(--brand) 60%,transparent)}
+
+/* the picker: star chips */
+.mybk{margin:12px 0 0}
+.mybk-h{display:flex;flex-direction:column;gap:2px;margin:0 0 8px}
+.mybk-h b{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink)}
+.mybk-h span{font-size:12px;line-height:1.4;color:var(--ink-2)}
+.mybk-chips{display:flex;flex-wrap:wrap;gap:6px}
+.mybk-chip{display:inline-flex;align-items:center;gap:5px;min-height:36px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);font:inherit;font-size:13px;font-weight:600;line-height:1.1;cursor:pointer;touch-action:manipulation}
+.mybk-chip:hover{border-color:var(--mybk-rule)}
+.mybk-chip .mybk-star{font-size:14px;line-height:1;color:var(--ink-3)}
+.mybk-chip[aria-pressed="true"]{border-color:var(--brand);color:var(--ink);background:var(--mybk-wash)}
+.mybk-chip[aria-pressed="true"] .mybk-star{color:var(--brand-text)}
+.mybk-chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.mybk-open{display:inline-flex;align-items:center;gap:5px}
+.mybk-open .mybk-star{color:var(--brand-text)}
+
+/* wide tables: NFL / NCAAF (.bt) and MLB (.odds-bt) */
+.bt th.my-bk,.odds-bt th.my-bk{color:var(--brand-text);box-shadow:inset 0 -2px 0 var(--brand)}
+.bt td.my-bk,.odds-bt td.my-bk{background:var(--mybk-wash)}
+.bt tbody tr:hover td.my-bk,.odds-bt tbody tr:hover td.my-bk{background:color-mix(in srgb,var(--brand) 13%,transparent)}
+.my-bk-star{color:var(--brand-text);margin-right:3px;font-size:.95em}
+
+/* phone boards: a price from one of my books (the chosen-book column or the best price) */
+.br .px.my-bk:not(.best),.odds-br .odds-px.my-bk:not(.best){background:var(--mybk-wash);box-shadow:inset 0 -2px 0 var(--mybk-rule)}
+.br .px.best.my-bk,.odds-br .odds-px.best.my-bk{box-shadow:inset 0 -3px 0 color-mix(in srgb,var(--brand-ink,#000) 45%,transparent)}
+.pbtn .my-bk-star{margin:0 3px 0 0}
+
+/* NHL cards: the book's pair in the quote rail */
+.book-pair.my-bk{background:var(--mybk-wash);border-radius:10px;box-shadow:inset 0 -2px 0 var(--brand)}
+.book-pair.my-bk .book-name{color:var(--brand-text)}
+
+/* a game's every-book table (NFL / NCAAF game sheet) */
+.btable tr.my-bk td{background:var(--mybk-wash)}
+.btable tr.my-bk td:first-child{box-shadow:inset 3px 0 0 var(--brand)}
+
+/* a starred book's price keeps its mark even when it is reference-only (aging, unverified, last pregame), which
+   broadcast.css otherwise flattens with !important */
+.br .px.my-bk.old,.br .px.my-bk.pre,.br .px.my-bk.na{background:var(--mybk-wash)!important;box-shadow:inset 0 -2px 0 var(--mybk-rule)!important}
+.odds-br .odds-px.my-bk.old{background:var(--mybk-wash);box-shadow:inset 0 -2px 0 var(--mybk-rule)}
+.br-hd .my-bk-star,.odds-brhd .my-bk-star{margin-right:3px}
+/* the picker inside a board's Book menu */
+#myBooksPick .mybk{margin:4px 0 0;padding:14px 16px 16px;border-top:1px solid var(--line)}

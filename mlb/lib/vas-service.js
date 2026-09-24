@@ -56,6 +56,9 @@ function create({ dir, now = Date.now, log = () => {}, ua = 'THE.BOARD/1.0', fet
         if (!g.prob || !g.prob.home || !g.prob.away) { reads.set(g.pk, { ...read, status: 'WAIT', note: 'Waiting for both probable starters.' }); continue; }
         const f = state.featuresFor(g), p = E.predict(f, MODEL);
         read.pHome = p;
+        // The model's own expected total runs (fundamentals stage), carried for the board's Model column. Totals are
+        // not a proven signal, so it is shown there as an estimate only; nothing here tiers or records it.
+        if (MODEL.tot) { const t = E.predictTotal(f, MODEL); read.total = Number.isFinite(t) ? Math.round(t * 100) / 100 : null; }
         if (!espn) { reads.set(g.pk, { ...read, note: 'No sportsbook listing matched yet.' }); continue; }
         let books; try { books = await data.openers(espn); } catch { books = null; }
         const dk = (books || []).find(b => /draft\s*kings/i.test(b.book));

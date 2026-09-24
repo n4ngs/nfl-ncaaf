@@ -434,7 +434,10 @@ function renderBoard(loading = false) {
   // Every book, always — a book with nothing on this slate shows dashes rather than vanishing (owner: "all books everywhere").
   const cols = availableBooks;
   syncBoardChoices('#phBooks', [['mkt', 'Market'], ...cols.map((b) => [b.key, b.short])]
-    .map(([k, l]) => `<button class="pbtn" type="button" data-phbook="${esc(k)}" aria-pressed="${S.phBook === k}">${esc(l)}${k !== 'mkt' && S.books.find((b) => b.key === k)?.sharp ? '<span class="tag sharp">S</span>' : ''}</button>`).join(''), 'phbook');
+    .map(([k, l]) => `<button class="pbtn${myBkCls(k)}" type="button" data-phbook="${esc(k)}" aria-pressed="${S.phBook === k}">${myBkStar(k)}${esc(l)}${k !== 'mkt' && S.books.find((b) => b.key === k)?.sharp ? '<span class="tag sharp">S</span>' : ''}</button>`).join(''), 'phbook');
+
+  const mbp = $('#myBooksPick');
+  if (mbp) { const html = myBooksPicker(); if (mbp.dataset.html !== html) { mbp.innerHTML = html; mbp.dataset.html = html; } }
 
   if (!shown.length) { $('#boardBody').innerHTML = games.length ? `<div class="card empty" style="margin-top:24px" role="status"><b>No games match</b>${S.query ? `Nothing for “${esc(S.query)}”.` : 'Try another filter.'}</div>` : `<div class="card empty" style="margin-top:24px" role="status"><b>No games scheduled</b>No games are listed for ${esc(meta.label || 'this week')}. Choose another week above.</div>`; return; }
 
@@ -449,13 +452,21 @@ function renderBoard(loading = false) {
   }
   const mkt = S.mkt;
   const colName = S.phBook === 'mkt' ? 'Market' : bookName(S.phBook);
-  const head = `<div class="br-hd"><span>${esc(mkt === 't' ? 'Over / under' : mkt === 'ml' ? 'Moneyline' : mkt === 'h1' ? '1st-half spread' : 'Spread')}</span><span>${esc(colName)}</span><span>Best</span></div>`;
+  const head = `<div class="br-hd"><span>${esc(mkt === 't' ? 'Over / under' : mkt === 'ml' ? 'Moneyline' : mkt === 'h1' ? '1st-half spread' : 'Spread')}</span><span>${myBkStar(S.phBook)}${esc(colName)}</span><span>Best</span></div>`;
   const block = (games) => `<div class="card brd m">${head}${games.map((g) => boardRow(g, mkt)).join('')}</div>${boardTable(games, mkt, cols)}`;
   const wasOpen = $('#doneGroup')?.open;
   $('#boardBody').innerHTML = groups.map((grp) => `
     <div class="win-h"><h3>${esc(grp.day)} · ${esc(grp.win)}</h3><span>${plural(grp.games.length, 'game')}</span></div>${block(grp.games)}`).join('')
     + (done.length ? `<details class="done" id="doneGroup"${wasOpen || !groups.length ? ' open' : ''}><summary class="win-h"><h3>Final</h3><span>${plural(done.length, 'game')} · closing lines and results ${ICON.chev}</span></summary>${block(done.sort((a, b) => Date.parse(b.start) - Date.parse(a.start)))}</details>` : '');
 }
+
+// My books (design/mybooks.js): the books this user starred. Nothing is highlighted until they pick some; un-picking
+// takes the formatting away on the next paint (boot.js repaints on every change).
+const myBooks = () => (typeof MyBooks !== 'undefined' ? MyBooks : null);
+const isMyBook = (k) => !!myBooks()?.has(k);
+const myBkCls = (k) => (isMyBook(k) ? ' my-bk' : '');
+const myBkStar = (k) => (isMyBook(k) ? '<span class="my-bk-star" aria-hidden="true">★</span>' : '');
+const myBooksPicker = () => (myBooks() ? myBooks().pickerHTML(S.books) : '');
 
 // What the board shows for one side: live line when a game is on, else the current pregame number.
 function boardPrice(g, mkt, side, book) {
@@ -485,7 +496,7 @@ function pxCell(g, mkt, side, book, best, opts = {}) {
   const who = side === 'over' ? 'Over' : side === 'under' ? 'Under' : teamName(g[side]);
   const old = isOld(L);
   const label = [bookFull(book), `${who} ${m === 'ml' ? fmtOdds(p.odds) : mkt === 't' ? fmtTot(p.line) : fmtPts(p.line)}`, m === 'ml' ? '' : fmtOdds(p.odds), isBest ? 'best price' : '', L?.m ? 'typed in' : '', flash.label, quoteFreshness(L, g, m, side).status].filter(Boolean).join(', ');
-  const cls = `px num${isBest ? ' best' : ''}${L?.m ? ' man' : ''}${flash.cls}${old ? ' old' : ''}`;
+  const cls = `px num${isBest ? ' best' : ''}${L?.m ? ' man' : ''}${flash.cls}${old ? ' old' : ''}${myBkCls(book)}`;
   if (isFinal(g) || !quoteCanAct(L, g, m, side)) return sportsbookPrice(g,L,m,side,book,label,`<span class="${cls}"${flash.style} aria-label="${esc(label)}">${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}${quoteStatusHTML(L, g, m, side)}</span>`);
   const inner = `${esc(main)}${sub ? `<small>${esc(sub)}</small>` : ''}${quoteStatusHTML(L, g, m, side)}${typeof edgeBadge === 'function' && !(typeof limBreak === 'function' && limBreak()) ? edgeBadge(g, m, side, book) : ''}`;
   // BetMGM Nevada: a real link, so one tap goes straight there. A popup blocker can stop
@@ -554,7 +565,7 @@ function boardRow(g, mkt) {
   const mk = S.phBook === 'mkt' ? marketKey(g, mkt) : S.phBook;
   const row = (t, side, pside) => {
     const best = bestFor(g, mkt, pside);
-    return `<div class="br-t${!isPre(g) && lead !== side && g.home.score !== g.away.score ? ' trail' : ''}"><span class="rot">${rotOf(g, side) ?? ''}</span>${logo(t)}<span class="nm">${rankTag(t)}${esc(teamName(t))}<small>${esc(t.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : t.score ?? ''}</span>${mk ? pxCell(g, mkt, pside, mk, null) : '<span class="px na">—</span>'}${best && !isFinal(g) ? pxCell(g, mkt, pside, best.book, best, { sub: bookName(best.book) }) : '<span class="px na"></span>'}</div>`;
+    return `<div class="br-t${!isPre(g) && lead !== side && g.home.score !== g.away.score ? ' trail' : ''}"><span class="rot">${rotOf(g, side) ?? ''}</span>${logo(t)}<span class="nm">${rankTag(t)}${esc(teamName(t))}<small>${esc(t.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : t.score ?? ''}</span>${mk ? pxCell(g, mkt, pside, mk, null) : '<span class="px na">—</span>'}${best && !isFinal(g) ? pxCell(g, mkt, pside, best.book, best, { sub: `${isMyBook(best.book) ? '★ ' : ''}${bookName(best.book)}` }) : '<span class="px na"></span>'}</div>`;
   };
   const r = atsResult(g);
   const moved = mkt === 't' ? (g.open?.t != null && g.mkt?.t != null ? g.mkt.t - g.open.t : null) : (g.open?.s != null && g.mkt?.s != null ? g.mkt.s - g.open.s : null);
@@ -577,7 +588,7 @@ function boardRow(g, mkt) {
 function boardTable(games, mkt, books = visibleBooks()) {
   const [s1, s2] = sideKeys(mkt);
   const withModel = true;
-  const head = `<thead><tr><th class="l stk">Matchup</th>${withModel ? `<th class="mdl-th" title="${esc(MODEL_TIP[mkt] || MODEL_TIP.s)}">Model</th>` : ''}<th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}" title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}">${b.color ? `<i class="bkdot" style="background:${esc(b.color)}"></i>` : ''}${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
+  const head = `<thead><tr><th class="l stk">Matchup</th>${withModel ? `<th class="mdl-th" title="${esc(MODEL_TIP[mkt] || MODEL_TIP.s)}">Model</th>` : ''}<th>Open</th><th>Market</th><th>Move</th>${books.map((b) => `<th data-bk="${esc(b.key)}"${isMyBook(b.key) ? ' class="my-bk"' : ''} title="${esc(b.name)}${b.sharp ? ' (sharp)' : ''}${isMyBook(b.key) ? ' · one of my books' : ''}">${myBkStar(b.key)}${b.color ? `<i class="bkdot" style="background:${esc(b.color)}"></i>` : ''}${esc(b.short)}${b.sharp ? '<span class="tag sharp">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th></tr></thead>`;
   const rows = games.map((g, i) => {
     const lead = (g.home.score ?? 0) > (g.away.score ?? 0) ? 'home' : 'away';
     const trail = !isPre(g) && g.home.score !== g.away.score ? (lead === 'home' ? 'trail0' : 'trail1') : '';
@@ -607,7 +618,7 @@ function boardTable(games, mkt, books = visibleBooks()) {
       <td><div class="st2">${open(s1)}${open(s2)}</div></td>
       <td><div class="st2">${mk ? pxCell(g, mkt, s1, mk, null) : '<span class="px na">—</span>'}${mk ? pxCell(g, mkt, s2, mk, null) : '<span class="px na">—</span>'}</div></td>
       <td><div class="meta mvc">${isPre(g) ? sparkSVG(mkt === 't' ? g.spark?.t : g.spark?.s, 48, 18) : ''}${moved ? `<span>${moved > 0 ? '▲' : '▼'} ${trim(Math.abs(moved))}</span>` : isPre(g) ? '<span class="faint">steady</span>' : ''}</div></td>
-      ${books.map((b) => `<td data-bk="${esc(b.key)}"><div class="st2">${pxCell(g, mkt, s1, b.key, bestA)}${pxCell(g, mkt, s2, b.key, bestH)}</div></td>`).join('')}
+      ${books.map((b) => `<td data-bk="${esc(b.key)}"${isMyBook(b.key) ? ' class="my-bk"' : ''}><div class="st2">${pxCell(g, mkt, s1, b.key, bestA)}${pxCell(g, mkt, s2, b.key, bestH)}</div></td>`).join('')}
       <td><div class="spl">${a != null ? `<div class="bar2" title="Tickets: ${esc(aw)} ${a}% / ${esc(hm)} ${100 - a}%"><i style="width:${Math.max(a, 18)}%">${a}%</i><i>${100 - a}%</i></div>` : ''}${am != null ? `<div class="bar2 m" style="margin-top:4px" title="Money: ${esc(aw)} ${am}% / ${esc(hm)} ${100 - am}%"><i style="width:${Math.max(am, 18)}%">${am}%</i><i>${100 - am}%</i></div>` : ''}${a == null ? '<span class="faint">—</span>' : ''}</div></td>
     </tr>`;
   }).join('');
@@ -765,7 +776,7 @@ function renderTools() {
     <div class="card tool" id="keysTool"><h3>Key numbers</h3><p id="keysLede">How often last season's FBS games ended by exactly each margin.</p><div id="keysBody"></div></div>
     <div class="card tool"><h3>Where to bet</h3><p>Every Nevada book on this board, with a link to its site and its app. You sign in at the book — this app never asks for a sportsbook login and never places a bet.</p>
       <button class="btn ghost" type="button" data-books>Open a sportsbook</button></div>
-    <div class="card tool"><h3>Books on the board</h3><p>Tap to hide a book everywhere on this device. Books without a live feed take numbers you type in from the counter.</p><div class="bk-tog" id="bookTog"></div><div class="srcs" id="srcList" style="margin-top:16px"></div></div>
+    <div class="card tool"><h3>Books on the board</h3><p>Tap to hide a book everywhere on this device. Books without a live feed take numbers you type in from the counter.</p><div class="bk-tog" id="bookTog"></div><div id="myBookTog"></div><div class="srcs" id="srcList" style="margin-top:16px"></div></div>
     ${typeof grpGuestCard === 'function' ? grpGuestCard() : ''}
     <div class="card tool"><h3>Settings</h3><p>Unit size is used to show results in units.</p>
       <div class="fgrid"><label class="fld">Unit size ($)<input class="inp" id="unitIn" inputmode="decimal" value="${S.unit}"></label><label class="fld">Alerts<select class="inp" id="alertSel"><option value="off">Off</option><option value="mine">My bets &amp; teams</option><option value="all">Every line move</option></select></label></div>
@@ -808,6 +819,7 @@ function updateTools() {
       <table class="brk" style="margin-top:12px"><thead><tr><th>Margin</th><th>Games</th><th>Share</th><th>Rank</th></tr></thead><tbody>${top.map(([m, c], i) => `<tr><td>${m}</td><td>${c}</td><td>${(c / k.n * 100).toFixed(1)}%</td><td>${i + 1}</td></tr>`).join('')}</tbody></table>`;
   }
 
+  if ($('#myBookTog')) $('#myBookTog').innerHTML = myBooksPicker();
   $('#bookTog').innerHTML = S.books.map((b) => `<button class="chip" type="button" data-hide="${b.key}" aria-pressed="${!S.hidden.has(b.key)}">${esc(b.short)}${b.sharp ? '<small>sharp</small>' : b.vegas ? '<small>NV</small>' : ''}</button>`).join('');
   const h = toolsState.health;
   const ih = $('#integrityHealth');

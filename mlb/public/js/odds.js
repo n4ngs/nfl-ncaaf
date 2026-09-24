@@ -423,7 +423,7 @@ function oddsMatches(g) {
 function oddsFilterBar(games) {
   const opts = ODDS_FILTERS.map(([f, label]) => `<option value="${f}"${ODDS.filter === f ? ' selected' : ''}>${esc(label)}</option>`).join('');
   const keys = [...new Set([...ODDS.books, ...ODDS_BOOKS].map((b) => b.key))].filter((k) => !ODDS_NOT_BETTABLE.has(k));
-  return `<div class="odds-ctrl"><label class="odds-select-label"><span class="odds-control-label">Show</span><select id="oddsGameFilter" data-fk="filter">${opts}</select></label><label class="odds-select-label odds-book-select"><span class="odds-control-label">Book</span><select id="oddsBookPick" data-fk="book"><option value="cons"${ODDS.phoneBook === 'cons' ? ' selected' : ''}>Market</option>${keys.map((k) => `<option value="${esc(k)}"${ODDS.phoneBook === k ? ' selected' : ''}>${esc(oddsBookName(k))}</option>`).join('')}</select></label><input class="odds-find" id="oddsFind" data-fk="find" type="search" placeholder="Find a team" autocomplete="off" aria-label="Find a team" value="${esc(ODDS.query)}"></div>`;
+  return `<div class="odds-ctrl"><label class="odds-select-label"><span class="odds-control-label">Show</span><select id="oddsGameFilter" data-fk="filter">${opts}</select></label><label class="odds-select-label odds-book-select"><span class="odds-control-label">Book</span><select id="oddsBookPick" data-fk="book"><option value="cons"${ODDS.phoneBook === 'cons' ? ' selected' : ''}>Market</option>${keys.map((k) => `<option value="${esc(k)}"${ODDS.phoneBook === k ? ' selected' : ''}>${oddsMy(k) ? '★ ' : ''}${esc(oddsBookName(k))}</option>`).join('')}</select></label><button type="button" class="odds-link mybk-open" data-bets-books data-fk="mybooks"><span class="mybk-star" aria-hidden="true">★</span>My books</button><input class="odds-find" id="oddsFind" data-fk="find" type="search" placeholder="Find a team" autocomplete="off" aria-label="Find a team" value="${esc(ODDS.query)}"></div>`;
 }
 function oddsCoverage(games, mkt) {
   const counts = { FRESH: 0, AGING: 0, STALE: 0, UNVERIFIED: 0, SUSPENDED: 0, CONFLICTED: 0 }, books = new Set();
@@ -473,6 +473,57 @@ function oddsMktSeg(mkt) {
   const one = ([k, label]) => `<button type="button" data-odds-mkt="${k}" aria-pressed="${mkt === k}">${esc(label)}</button>`;
   return `<div class="seg odds-mseg" role="group" aria-label="Which market to show">${ODDS_MKT_TABS.map(one).join('')}</div>`;
 }
+
+
+// ------------------------------------------------------------ the Model column and My books
+/* The model's number per side, from the cached model read (server lib/vas-service.js, refreshed every 10 minutes and
+   fetched by js/vas.js; nothing is computed per request). The MLB model predicts the winner (win probability) and its
+   own expected total runs. It has no run-margin stage and is fitted on full games only, so the run line and the
+   first five show a dash. Estimates, not picks. */
+const ODDS_MODEL_TIP = {
+  ml: "The model's fair moneyline: its win chance for each side (team, lineup and starting-pitcher fundamentals) with no vig. An estimate, not a pick.",
+  rl: 'No model number: the MLB model predicts who wins, not by how many runs, so it has no fair run line.',
+  t: "The model's own expected total runs (fundamentals). Its totals have not beaten the closing line in testing. An estimate, not a pick.",
+  f5: 'No model number: the MLB model is fitted on full games, not the first five innings.',
+};
+let oddsModelIdx = { at: -1, map: new Map() };
+function oddsModelRead(g) {
+  if (!g || !oddsIsPre(g) || typeof MLBVAS === 'undefined') return null;
+  if (oddsModelIdx.at !== MLBVAS.at) oddsModelIdx = { at: MLBVAS.at, map: new Map((MLBVAS.reads || []).map((r) => [Number(r.pk), r])) };
+  const r = oddsModelIdx.map.get(Number(g.pk));
+  return r && Number.isFinite(r.pHome) && r.pHome > 0 && r.pHome < 1 ? r : null;
+}
+function oddsFairAm(p) {
+  if (!(p > 0 && p < 1)) return null;
+  if (typeof BoardFair !== 'undefined') return BoardFair.american(p);
+  const v = p >= 0.5 ? -100 * p / (1 - p) : 100 * (1 - p) / p;
+  return Math.abs(v) > 2500 ? null : Math.round(v);
+}
+function oddsModelSide(g, mkt, side) {
+  const r = oddsModelRead(g);
+  if (!r) return '';
+  if (mkt === 'ml') { const v = oddsFairAm(side === 'home' ? r.pHome : 1 - r.pHome); return v == null ? '' : oddsFmt(v); }
+  if (mkt === 't') return Number.isFinite(r.total) ? `${side === 'over' ? 'o' : 'u'}${r.total.toFixed(1)}` : '';
+  return '';
+}
+function oddsModelFair(g, mkt) {
+  const r = oddsModelRead(g);
+  if (!r) return '';
+  if (mkt === 'ml') { const fav = r.pHome >= 0.5 ? 'home' : 'away'; const v = oddsFairAm(fav === 'home' ? r.pHome : 1 - r.pHome); return v == null ? '' : `${oddsTeam(g, fav).abbr} ${oddsFmt(v)}`; }
+  if (mkt === 't') return Number.isFinite(r.total) ? `o/u ${r.total.toFixed(1)}` : '';
+  return '';
+}
+// My books (design/mybooks.js): the books this user starred; nothing is highlighted until they pick some.
+const oddsMy = (k) => typeof MyBooks !== 'undefined' && MyBooks.has(k);
+const oddsMyCls = (k) => (oddsMy(k) ? ' my-bk' : '');
+const oddsMyStar = (k) => (oddsMy(k) ? '<span class="my-bk-star" aria-hidden="true">★</span>' : '');
+function oddsMyBooksPicker() {
+  if (typeof MyBooks === 'undefined') return '';
+  const seen = new Set();
+  const list = [...ODDS.books, ...ODDS_BOOKS].filter((b) => b && !ODDS_NOT_BETTABLE.has(b.key) && !seen.has(b.key) && seen.add(b.key));
+  return MyBooks.pickerHTML(list);
+}
+if (typeof MyBooks !== 'undefined') MyBooks.subscribe(() => { ODDS.sheetPaint = 0; oddsRepaint(); });
 
 // ------------------------------------------------------------ the board
 function oddsTeam(g, side) { return g?.[side] || { abbr: side === 'home' ? 'Home' : 'Away', name: side === 'home' ? 'Home' : 'Away' }; }
@@ -549,10 +600,10 @@ function oddsBestCell(g, O, mkt, side, pre) {
   const best = g?.state === 'Live' ? oddsLiveBest(g, O, mkt, side) : pre ? (oddsIsF5(mkt) ? oddsBestIn(O?.f5, base, side) : oddsBest(O, mkt, side)) : null;
   if (!best) return '<span class="odds-px na">—<small>No fresh price</small></span>';
   const { main } = oddsTwoLine(base, side, best);
-  const sub = base === 'ml' ? oddsBookCode(best.book) : `${oddsFmt(best.odds)} ${oddsBookCode(best.book)}`;
+  const sub = `${base === 'ml' ? '' : `${oddsFmt(best.odds)} `}${oddsMy(best.book) ? '★' : ''}${oddsBookCode(best.book)}`;
   const fl = oddsFlash(g.pk, `b|${mkt}|${side}`);
   const label = `${oddsWho(g, base, side)} ${ODDS_MKT_WORD[mkt]}, best price ${oddsSpokenPrice(base, side, best)} at ${oddsBookFull(best.book)}.${fl.label} Opens a bet slip.`;
-  return oddsHandoff(g,(g.state==='Live'?O.live:oddsBooksFor(O,mkt))?.[best.book],oddsBetMkt(mkt),side,best.book,label,`<button type="button" class="odds-px best${fl.cls}"${fl.style} data-fk="b${g.pk}${mkt}${side}" data-odds-bet="${g.pk}|${oddsBetMkt(mkt)}|${side}|${best.book}" aria-label="${esc(label)}"><span class="num">${esc(main)}</span><small class="num">${esc(sub)}</small></button>`);
+  return oddsHandoff(g,(g.state==='Live'?O.live:oddsBooksFor(O,mkt))?.[best.book],oddsBetMkt(mkt),side,best.book,label,`<button type="button" class="odds-px best${fl.cls}${oddsMyCls(best.book)}"${fl.style} data-fk="b${g.pk}${mkt}${side}" data-odds-bet="${g.pk}|${oddsBetMkt(mkt)}|${side}|${best.book}" aria-label="${esc(label)}"><span class="num">${esc(main)}</span><small class="num">${esc(sub)}</small></button>`);
 }
 // One book's own price, for the wide table.
 function oddsBookCell(g, O, mkt, side, book, best, pre) {
@@ -567,7 +618,7 @@ function oddsBookCell(g, O, mkt, side, book, best, pre) {
   const old = !q?.actionable;
   const fl = oddsFlash(g.pk, `k|${book}|${mkt}|${side}`);
   const label = `${oddsBookFull(book)}, ${oddsWho(g, base, side)} ${oddsSpokenPrice(base, side, p)}${isBest ? ', best price' : ''}${L.m ? `, typed in ${oddsAgo(L.seen)}` : old ? `, last seen ${oddsAgo(L.seen)}` : ''}.${fl.label}${canAct ? ' Opens a bet slip.' : ''} ${pre ? oddsQuoteNote(q) : 'Recorded pregame price.'}`;
-  const cls = `odds-px${isBest ? ' best' : ''}${old ? ' old' : ''}${L.m ? ' mine' : ''}${fl.cls}`;
+  const cls = `odds-px${isBest ? ' best' : ''}${old ? ' old' : ''}${L.m ? ' mine' : ''}${fl.cls}${oddsMyCls(book)}`;
   const inner = `<span class="num">${esc(main)}</span>${sub ? `<small class="num">${esc(sub)}</small>` : ''}<small class="odds-px-state" data-state="${q?.freshness || 'UNVERIFIED'}">${pre ? oddsStateLabel(q) : 'Recorded'}</small>`;
   if (!canAct) return oddsHandoff(g,L,oddsBetMkt(mkt),side,book,label,`<span class="${cls}"${fl.style} title="${esc(label)}" aria-label="${esc(label)}">${inner}</span>`);
   // BetMGM Nevada is the one book this board links into: a real anchor, so one tap goes straight to a
@@ -639,7 +690,7 @@ function oddsWxCell(O, pre) {
 function oddsRowHead(mkt, showBest) {
   const name = { ml: 'Moneyline', rl: 'Run line', t: 'Total', f5: 'First 5 moneyline' }[mkt];
   const mid = showBest ? oddsBookName(ODDS.phoneBook) : 'Recorded';
-  return `<div class="odds-brhd${showBest ? '' : ' nb'}" aria-hidden="true"><span>${esc(name)}</span><span>${mid}</span>${showBest ? '<span>Best fresh</span>' : ''}</div>`;
+  return `<div class="odds-brhd${showBest ? '' : ' nb'}" aria-hidden="true"><span>${esc(name)}</span><span>${showBest ? oddsMyStar(ODDS.phoneBook) : ''}${mid}</span>${showBest ? '<span>Best fresh</span>' : ''}</div>`;
 }
 // One game on a phone: a row per side, then a line of context.
 function oddsRow(g, mkt, showBest = true) {
@@ -656,8 +707,9 @@ function oddsRow(g, mkt, showBest = true) {
   const move = oddsMoveBits(g, O, pre);
   const extra = pre ? oddsRowExtras(g, O) : '';
   const status = pre ? `First pitch ${timeLabel(g.start)}` : gameStatus(g);
+  const mf = oddsModelFair(g, mkt);
   const foot = `<button type="button" class="odds-br-f" data-odds-open="${g.pk}" data-fk="o${g.pk}" aria-label="${esc(`${oddsTeam(g, 'away').name} at ${oddsTeam(g, 'home').name}: every book and line history`)}">
-    <span class="${live ? 'odds-br-live' : ''}">${live ? '<span class="dot"></span>' : ''}${esc(status)}</span>${move ? `<span class="odds-sep"></span>${move}` : ''}${extra}<span class="odds-br-spk">${O && !oddsIsF5(mkt) ? oddsSpark(O, g) : ''}${ICON.chev}</span></button>`;
+    ${mf ? `<span class="mdl-b" title="${esc(ODDS_MODEL_TIP[mkt] || '')}"><i>Model</i><b class="num">${esc(mf)}</b></span><span class="odds-sep"></span>` : ''}<span class="${live ? 'odds-br-live' : ''}">${live ? '<span class="dot"></span>' : ''}${esc(status)}</span>${move ? `<span class="odds-sep"></span>${move}` : ''}${extra}<span class="odds-br-spk">${O && !oddsIsF5(mkt) ? oddsSpark(O, g) : ''}${ICON.chev}</span></button>`;
   return `<div class="odds-br${showBest ? '' : ' nb'}">${side('away', s1)}${side('home', s2)}${foot}</div>`;
 }
 // "Opened −140 ▲12¢" for the row footer: how far this market has come since it opened.
@@ -706,7 +758,7 @@ function oddsBoardTable(games, mkt) {
   // Every book, always (owner: "all books everywhere"); an unpriced book shows dashes instead of vanishing.
   const books = [...ODDS.books, ...ODDS_BOOKS].map((b) => b.key).filter((k, i, a) => a.indexOf(k) === i && k !== 'cons' && k !== 'open');
   const [s1, s2] = oddsSides(mkt);
-  const head = `<tr><th class="l stk">Matchup</th><th>Open</th><th>Market</th><th>Move</th>${books.map((k) => `<th title="${esc(oddsBookFull(k))}"><span class="odds-bt-bk">${esc(oddsBookName(k))}</span>${oddsBook(k).sharp ? '<span class="odds-sharp" aria-hidden="true">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th><th>Wind</th></tr>`;
+  const head = `<tr><th class="l stk">Matchup</th><th class="mdl-th" title="${esc(ODDS_MODEL_TIP[mkt] || ODDS_MODEL_TIP.ml)}">Model</th><th>Open</th><th>Market</th><th>Move</th>${books.map((k) => `<th${oddsMy(k) ? ' class="my-bk"' : ''} title="${esc(oddsBookFull(k))}${oddsMy(k) ? ' · one of my books' : ''}"><span class="odds-bt-bk">${oddsMyStar(k)}${esc(oddsBookName(k))}</span>${oddsBook(k).sharp ? '<span class="odds-sharp" aria-hidden="true">S</span>' : ''}</th>`).join('')}<th>Tickets · money</th><th>Wind</th></tr>`;
   const rows = games.map((g) => {
     const O = oddsGame(g.pk);
     const pre = oddsIsPre(g);
@@ -728,15 +780,16 @@ function oddsBoardTable(games, mkt) {
     const move = oddsMoveBits(g, O, pre);
     return `<tr data-odds-open="${g.pk}">
       <td class="l stk"><button type="button" class="odds-bt-mu" data-odds-open="${g.pk}" data-fk="match${g.pk}" aria-label="${esc(oddsTeam(g, 'away').name + ' at ' + oddsTeam(g, 'home').name + ', line history and every book')}"><div class="odds-bt-st">${live ? '<span class="dot"></span>' : ''}<b>${esc(pre ? timeLabel(g.start) : gameStatus(g))}</b></div><div class="odds-bt-tms">${tm('away', s1)}${tm('home', s2)}</div></button></td>
+      <td class="mdl-td">${oddsModelRead(g) ? `<div class="odds-st2"><span class="odds-px mdl"><span class="num">${esc(oddsModelSide(g, mkt, s1) || '—')}</span></span><span class="odds-px mdl"><span class="num">${esc(oddsModelSide(g, mkt, s2) || '—')}</span></span></div>` : '<span class="odds-px na" aria-hidden="true">—</span>'}</td>
       <td><div class="odds-st2">${open(s1)}${open(s2)}</div></td>
       <td><div class="odds-st2">${oddsMktCell(g, O, mkt, s1, pre)}${oddsMktCell(g, O, mkt, s2, pre)}</div></td>
       <td><div class="odds-bt-mv">${O && !oddsIsF5(mkt) ? oddsSpark(O, g) : ''}${move || (oddsIsF5(mkt) ? '<span class="faint">—</span>' : '<span class="faint">steady</span>')}</div></td>
-      ${books.map((k) => `<td><div class="odds-st2">${oddsBookCell(g, O, mkt, s1, k, best1, pre)}${oddsBookCell(g, O, mkt, s2, k, best2, pre)}</div></td>`).join('')}
+      ${books.map((k) => `<td${oddsMy(k) ? ' class="my-bk"' : ''}><div class="odds-st2">${oddsBookCell(g, O, mkt, s1, k, best1, pre)}${oddsBookCell(g, O, mkt, s2, k, best2, pre)}</div></td>`).join('')}
       <td>${oddsSplitCell(g, O, mkt)}</td>
       <td>${oddsWxCell(O, pre)}</td>
     </tr>`;
   }).join('');
-  return `<div class="odds-btwrap" tabindex="0" role="region" aria-label="Every sportsbook. Scroll horizontally to compare prices."><table class="odds-bt"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="odds-btwrap" tabindex="0" role="region" aria-label="Every sportsbook. Scroll horizontally to compare prices."><table class="odds-bt has-model"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
 }
 
 // ------------------------------------------------------------ line moves, in plain words

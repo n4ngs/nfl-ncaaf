@@ -528,3 +528,15 @@ html[data-theme="dark"] .odds-view,html[data-theme="dark"] .odds-sheet{--odds-go
 .vas-row small{display:block;color:var(--ink-2);font-size:12px;margin-top:2px}
 .vas-tag{flex:none;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--fill);color:var(--accent)}
 .vas-quiet{margin:0;font-size:13px;color:var(--ink-2)}
+
+/* The Model column (js/odds.js) and My books (design/mybooks.css): the model's lane keeps side rules and brand
+   numbers (design/broadcast.css); a starred book's lane gets a brand rule and a faint wash. No fixed book lane. */
+.odds-bt td.mdl-td{white-space:nowrap;padding-left:10px;padding-right:10px}
+.odds-bt .odds-px.mdl{background:none;box-shadow:none;cursor:default}
+.odds-bt .odds-px.mdl > .num{font-weight:700}
+.odds-br-f .mdl-b{display:inline-flex;align-items:baseline;gap:5px}
+.odds-br-f .mdl-b i{font-style:normal;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.odds-br-f .mdl-b b{color:var(--ink);font-weight:650}
+.odds-ctrl .mybk-open{white-space:nowrap}
+.odds-bt.has-model span.odds-px.mdl > .num{color:var(--brand-text)}
+.odds-br-f .mdl-b i{color:var(--brand-text)}

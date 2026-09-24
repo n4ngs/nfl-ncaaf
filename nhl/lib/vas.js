@@ -52,6 +52,7 @@ function create({ dir, getBody, now = Date.now, log = console.log, fetchBuffer }
   });
   let state = null, builtAt = null, building = false, historyInfo = null, lastError = null;
   const confirmed = new Map();                 // gid -> {home: id, away: id} from NHL pregame boxscores
+  const reads = new Map();                     // game -> {f, p}: the stage-1 read, computed once per history build
   const recFile = path.join(dir, 'signals.json');
   // One-time migration: early NHL records stored the HOME probability; the shared record stores the bet side's.
   try {
@@ -72,7 +73,7 @@ function create({ dir, getBody, now = Date.now, log = console.log, fetchBuffer }
       const inHistory = new Set(h.games.map(g => g.gid));
       h.tail = [];
       for (const g of tailGames) if (!inHistory.has(Number(g.id))) { const b = await data.box(Number(g.id)); if (b) h.tail.push(b); }
-      state = E.build(h, MODEL.config); builtAt = new Date(now()).toISOString();
+      state = E.build(h, MODEL.config); builtAt = new Date(now()).toISOString(); reads.clear();
       historyInfo = { season, games: h.games.length, tail: h.tail.length, complete: h.complete };
       lastError = null;
     } catch (e) { lastError = String(e.message || e).slice(0, 160); log('[vas] refresh failed: ' + lastError); }
@@ -102,8 +103,10 @@ function create({ dir, getBody, now = Date.now, log = console.log, fetchBuffer }
     const home = g.home && (g.home.abbr || g.home.abbrev), away = g.away && (g.away.abbr || g.away.abbrev);
     if (!home || !away || !g.start) return { status: 'OFF', reason: 'Teams or start time unavailable.' };
     const day = g.date || String(g.start).slice(0, 10);
-    const f = state.featuresFor({ home, away, season: Math.floor(Number(g.id) / 1e6) || seasonOf(new Date(g.start)), day });
-    const p = E.predict(f, MODEL);
+    const rk = `${g.id}|${home}|${away}|${day}`;
+    let rd = reads.get(rk);
+    if (!rd) { const f0 = state.featuresFor({ home, away, season: Math.floor(Number(g.id) / 1e6) || seasonOf(new Date(g.start)), day }); rd = { f: f0, p: E.predict(f0, MODEL) }; reads.set(rk, rd); }
+    const f = rd.f, p = rd.p;   // pHome also feeds the board's Model column (fair moneyline)
     const out = { status: 'OK', model: MODEL.version, pHome: p, goalies: { home: goalieCard('home', f), away: goalieCard('away', f) },
       goalieEdge: Math.round((f._home.gsax100 - f._away.gsax100) * 100) / 100, lineupEdge: f.d_lineup, confirmed: confirmed.get(String(g.id)) || null };
     const started = g.state === 'in' || g.final || Date.parse(g.start) <= now();

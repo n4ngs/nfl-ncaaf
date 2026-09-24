@@ -320,7 +320,8 @@ function betsBooksSheet() {
   };
   openSheet(`<h2 id="dlgTitle">Where to bet</h2>
     <p class="odds-lede">Bing Bong Live shows the numbers. The bet is placed at the book: these open the book\u2019s own site or its Nevada app, where you sign in yourself. This app never asks for a sportsbook login, never stores one, and never places a bet for you.</p>
-    <div class="card bets-note"><b>Two things Nevada asks first</b>Nevada apps make you sign up in person at the casino once, with ID. After that you can bet from your phone, but only while you\u2019re inside the state.</div>
+    ${typeof oddsMyBooksPicker === 'function' ? oddsMyBooksPicker() : ''}
+    <div class="card bets-note" style="margin-top:16px"><b>Two things Nevada asks first</b>Nevada apps make you sign up in person at the casino once, with ID. After that you can bet from your phone, but only while you\u2019re inside the state.</div>
     <h3 class="sub-h" style="margin-top:20px">Nevada books</h3>
     <div class="card bets-bklist">${nv.map(row).join('')}</div>
     <h3 class="sub-h" style="margin-top:20px">On the board for comparison</h3>

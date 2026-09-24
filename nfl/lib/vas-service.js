@@ -29,6 +29,8 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
   }) });
   const record = Record.create({ file: path.join(dir, 'signals.json'), now });
   let state = null, upcoming = [], builtAt = null, building = false, lastError = null, info = null;
+  // Stage-1 read per game, computed once per history build (the board reads it on every publish, never recomputes).
+  const predCache = new Map();
   // The research scored the FIRST line seen after both teams' previous games were final. That line is this game's
   // anchor: captured once, persisted, and used for the read and the live record (never the week-ahead opener).
   const anchorFile = path.join(dir, 'anchors.json');
@@ -42,6 +44,7 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
       const h = await data.history(season);
       state = E.build(h, MODEL.config);
       upcoming = await data.upcoming(season);
+      predCache.clear();
       builtAt = new Date(now()).toISOString(); info = { season, games: h.games.length, complete: h.complete, ...(h.info || {}) }; lastError = null;
     } catch (e) { lastError = String(e.message || e).slice(0, 160); log('[nfl-vas] refresh failed: ' + lastError); }
     finally { building = false; }
@@ -72,8 +75,13 @@ function create({ dir, fetchBuffer, now = Date.now, log = () => {} }) {
     // Reads wait until neither team has an unplayed game before this one (history must include their last game).
     const pending = upcoming.some(r => r.gid !== row.gid && r.day < row.day && [r.home, r.away].some(t => t === row.home || t === row.away));
     if (pending) return { status: 'WAIT', note: 'Reads start once both teams have played their previous game, the way the model was tested.' };
-    const f = state.featuresFor(row), pred = E.predict(f, MODEL);
-    const out = { status: 'OK', model: MODEL.version, fairTotal: pred.total, fairMargin: pred.margin, spread: { status: MODEL.status_by_market?.spread || 'UNPROVEN' } };
+    let c = predCache.get(row.gid);
+    if (!c) { const f0 = state.featuresFor(row); c = { f: f0, pred: E.predict(f0, MODEL) }; predCache.set(row.gid, c); }
+    const f = c.f, pred = c.pred;
+    // fairMargin (home minus away) and fairTotal feed the board's Model column; sd is the model's own margin SD,
+    // used there for the fair moneyline (normal on the margin).
+    const out = { status: 'OK', model: MODEL.version, fairTotal: pred.total, fairMargin: pred.margin, sd: MODEL.keydist?.margin?.sd ?? null,
+      spread: { status: MODEL.status_by_market?.spread || 'UNPROVEN' } };
     const started = G.state === 'in' || G.state === 'post' || Date.parse(G.start) <= now();
     if (!anchors[G.id] && !started && cur && Number.isFinite(cur.t) && Number.isFinite(cur.to?.[0]) && Number.isFinite(cur.to?.[1])) {
       anchors[G.id] = { at: new Date(now()).toISOString(), s: cur.s, so: cur.so, t: cur.t, to: cur.to }; saveAnchors();
