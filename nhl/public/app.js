@@ -174,7 +174,10 @@ document.addEventListener('keydown',e=>{if(!e.target.matches('[data-room-tab]')|
 function injurySection(g){const R=g.injuryReport;if(!R||!(R.away?.length||R.home?.length))return '';
  const side=s=>'<div><strong>'+esc(g[s].abbr)+'</strong>'+((R[s]||[]).slice(0,10).map(r=>'<p class="inj-r"><b>'+esc(r.status||'')+'</b> '+esc(r.name)+(r.pos?' <small>'+esc(r.pos)+'</small>':'')+(r.comment?'<br><small>'+esc(r.comment)+'</small>':'')+'</p>').join('')||'<p class="muted">No one listed.</p>')+'</div>';
  return '<section class="detail-section"><p class="eyebrow">INJURY REPORT</p><h3>Who is out</h3><div class="rest-grid">'+side('away')+side('home')+'</div></section>';}
-function refSection(g){const F=g.reference;if(!F)return '';const books=[...new Set([...Object.keys(F.open||{}),...Object.keys(F.close||{})])].filter(k=>F.open?.[k]?.ml||F.close?.[k]?.ml);if(!books.length)return '';
- const ml=M=>M?.prices?esc(signed(M.prices[1]))+' / '+esc(signed(M.prices[0])):'—';
- const when=t=>{const x=Date.parse(t);return Number.isFinite(x)?new Date(x).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';};
- return '<section class="detail-section"><p class="eyebrow">OPENERS AND CLOSES</p><h3>Moneyline by book · '+esc(g.away.abbr)+' / '+esc(g.home.abbr)+'</h3><div style="overflow-x:auto"><table class="ref-t"><thead><tr><th>Book</th><th>Opened</th><th>Posted</th><th>Closed</th></tr></thead><tbody>'+books.map(k=>'<tr><td>'+esc(k.toUpperCase())+'</td><td>'+ml(F.open?.[k]?.ml)+'</td><td><small>'+esc(when(F.open?.[k]?.ml?.observed_at?.[0]))+'</small></td><td>'+ml(F.close?.[k]?.ml)+'</td></tr>').join('')+'</tbody></table></div></section>';}
+function refSection(g){const F=g.reference;if(!F||typeof LinesBoard==='undefined')return '';
+ const pre=g.state==='pre'&&!g.final,keys=[...new Set([...Object.keys(F.open||{}),...Object.keys(F.close||{})])];
+ const q=(M,i=0)=>M&&M.prices?{line:M.line??null,price:M.prices[i]??null,pHome:LinesBoard.noVig(M.prices),at:M.observed_at?.[i]||null}:null;
+ const now=(k,m)=>{if(!pre)return null;const I=g.books?.[k]?.integrity?.[m];if(!I)return null;const a=Number(I[m==='t'?'over':'home']?.american_odds),b=Number(I[m==='t'?'under':'away']?.american_odds);if(!Number.isFinite(a))return null;
+  if(m==='ml'){const p=LinesBoard.noVig([a,b]);return p==null?null:{price:a,pHome:p};}const v=Number(I[m==='t'?'over':'home']?.line_value);return Number.isFinite(v)?{line:v,price:a}:null;};
+ const rows=m=>keys.map(k=>({key:k,name:k.toUpperCase(),open:q(F.open?.[k]?.[m]),now:now(k,m),close:q(F.close?.[k]?.[m])})).filter(r=>r.open||r.close);
+ return LinesBoard.html('h'+g.id,{home:g.home.abbr,away:g.away.abbr,markets:{ml:{label:'Moneyline',rows:rows('ml')},s:{label:'Puck line',rows:rows('s')},t:{label:'Total',rows:rows('t')}}});}

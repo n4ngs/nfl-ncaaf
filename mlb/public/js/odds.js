@@ -1111,12 +1111,19 @@ function oddsExtraHTML(pk) {
     parts.push(`<section class="dlg-sec" aria-label="Injury report"><h3 class="sub-h">Injury report<span>Full league list and injured-list moves</span></h3><div class="odds-inj">${side('away', away)}${side('home', home)}</div></section>`);
   }
   const F = X.reference;
-  const books = F ? [...new Set([...Object.keys(F.open || {}), ...Object.keys(F.close || {})])].filter((k) => F.open?.[k]?.ml || F.close?.[k]?.ml) : [];
-  if (books.length) {
-    const ml = (M) => (M?.prices ? `${esc(oddsFmt(M.prices[1]))} / ${esc(oddsFmt(M.prices[0]))}` : '—');
-    const when = (t) => { const x = Date.parse(t); return Number.isFinite(x) ? new Date(x).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; };
-    const rows = books.map((k) => `<tr><td>${esc(oddsBookFull(k))}</td><td class="num">${ml(F.open?.[k]?.ml)}</td><td><small>${esc(when(F.open?.[k]?.ml?.observed_at?.[0]))}</small></td><td class="num">${ml(F.close?.[k]?.ml)}</td></tr>`).join('');
-    parts.push(`<section class="dlg-sec" aria-label="Openers and closes"><h3 class="sub-h">Openers and closes by book<span>Moneyline ${esc(away.abbr || '')} / ${esc(home.abbr || '')}</span></h3><div style="overflow-x:auto"><table class="odds-ref"><thead><tr><th>Book</th><th>Opened</th><th>Posted</th><th>Closed</th></tr></thead><tbody>${rows}</tbody></table></div></section>`);
+  if (F && typeof LinesBoard !== 'undefined') {
+    const O = oddsGame(pk), cur = oddsIsPre(g) ? (O?.books || {}) : {};
+    const keys = [...new Set([...Object.keys(F.open || {}), ...Object.keys(F.close || {})])];
+    const q = (M, i = 0) => (M && M.prices ? { line: M.line ?? null, price: M.prices[i] ?? null, pHome: LinesBoard.noVig(M.prices), at: M.observed_at?.[i] || null } : null);
+    const now = (L, m) => {
+      if (!L) return null;
+      if (m === 's') return L.rl?.line == null ? null : { line: L.rl.line, price: L.rl.odds?.[0] ?? null };
+      if (m === 't') return L.t?.line == null ? null : { line: L.t.line, price: L.t.odds?.[0] ?? null };
+      const p = LinesBoard.noVig(L.ml); return p == null ? null : { price: L.ml[0], pHome: p };
+    };
+    const rows = (m) => keys.map((k) => ({ key: k, name: oddsBookFull(k), open: q(F.open?.[k]?.[m]), now: now(cur[k], m), close: q(F.close?.[k]?.[m]) })).filter((r) => r.open || r.close);
+    parts.push(LinesBoard.html(`m${pk}`, { home: home.abbr || home.name, away: away.abbr || away.name,
+      markets: { ml: { label: 'Moneyline', rows: rows('ml') }, s: { label: 'Run line', rows: rows('s') }, t: { label: 'Total', rows: rows('t') } } }));
   }
   return parts.join('');
 }

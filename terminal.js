@@ -249,7 +249,7 @@ ${admin ? '<div class="f"><a href="/account" style="color:inherit">Sign in with 
 // Read once at boot; an ETag lets phones revalidate cheaply instead of holding a stale copy.
 const fs = require('node:fs');
 const DESIGN = {};
-for (const f of ['broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js', 'support.css', 'support.js', 'activity.js', 'accounts.css', 'accounts.js', 'notifications.css', 'notifications.js', 'opportunities.css', 'opportunities.js', 'foundation.css', 'foundation.js', 'mybooks.css', 'mybooks.js']) {
+for (const f of ['linesboard.css', 'linesboard.js', 'broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js', 'support.css', 'support.js', 'activity.js', 'accounts.css', 'accounts.js', 'notifications.css', 'notifications.js', 'opportunities.css', 'opportunities.js', 'foundation.css', 'foundation.js', 'mybooks.css', 'mybooks.js']) {
   const body = fs.readFileSync(path.join(__dirname, 'design', f));
   DESIGN[f] = { body, etag: `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"` };
 }

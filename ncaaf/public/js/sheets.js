@@ -839,23 +839,24 @@ async function openPhone() {
   document.head.appendChild(sc);
 }
 
-// Openers and closes by book (server: shared/reference-lines.js). The opener is the first price the provider saw that
-// book post, with its time; the close is that book's last pregame price, frozen by the provider at kickoff.
+// Openers and closes by book (server: shared/reference-lines.js), drawn by the shared LinesBoard (design/linesboard.js):
+// each book's opener with the time it posted, its current number before kickoff, and its close.
 function refLinesPanel(g) {
   const R = S.game && S.game.reference;
-  if (!R) return '';
-  const books = [...new Set([...Object.keys(R.open || {}), ...Object.keys(R.close || {})])];
-  if (!books.length) return '';
-  const pts = (v) => (v == null ? '' : v === 0 ? 'PK' : `${v > 0 ? '+' : MINUS}${Math.abs(v)}`);
-  const spread = (M) => (M && M.line != null ? `${esc(g.home.abbr)} ${pts(M.line)} <small>${esc(fmtOdds(M.prices?.[0]))}</small>` : '—');
-  const total = (M) => (M && M.line != null ? `${M.line} <small>o ${esc(fmtOdds(M.prices?.[0]))}</small>` : '—');
-  const when = (t) => { const x = Date.parse(t); return Number.isFinite(x) ? new Date(x).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''; };
-  const rows = books.map((k) => {
-    const o = R.open?.[k] || {}, c = R.close?.[k] || {};
-    const at = o.s?.observed_at?.[0] || o.t?.observed_at?.[0] || o.ml?.observed_at?.[0];
-    return `<tr><td><div class="bk">${esc(bookName(k))}</div></td><td class="num">${spread(o.s)}</td><td class="num">${total(o.t)}</td><td><small>${esc(when(at))}</small></td><td class="num">${spread(c.s)}</td><td class="num">${total(c.t)}</td></tr>`;
-  }).join('');
-  return `<div class="gs-sec"><div class="sub-h">Openers and closes by book <span class="bt-note">opener: when the book posted it · close: its last price before kickoff</span></div><div class="card" style="overflow-x:auto;padding-top:14px"><table class="btable"><thead><tr><th>Book</th><th>Opened</th><th>Open total</th><th>Posted</th><th>Closed</th><th>Close total</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  if (!R || typeof LinesBoard === 'undefined') return '';
+  const cur = isPre(g) ? (g.books || {}) : {};
+  const keys = [...new Set([...Object.keys(R.open || {}), ...Object.keys(R.close || {})])];
+  const q = (M, i = 0) => (M && M.prices ? { line: M.line ?? null, price: M.prices[i] ?? null, pHome: LinesBoard.noVig(M.prices), at: M.observed_at?.[i] || null } : null);
+  const now = (L, m) => {
+    if (!L) return null;
+    if (m === 's') return L.s == null ? null : { line: L.s, price: L.so?.[0] ?? null };
+    if (m === 't') return L.t == null ? null : { line: L.t, price: L.to?.[0] ?? null };
+    const p = LinesBoard.noVig(L.ml); return p == null ? null : { price: L.ml[0], pHome: p };
+  };
+  const rows = (m) => keys.map((k) => ({ key: k, name: bookName(k), open: q(R.open?.[k]?.[m]), now: now(cur[k], m), close: q(R.close?.[k]?.[m]) }))
+    .filter((r) => r.open || r.close);
+  return LinesBoard.html(`g${g.id}`, { home: g.home.abbr, away: g.away.abbr,
+    markets: { s: { label: 'Spread', rows: rows('s') }, t: { label: 'Total', rows: rows('t') }, ml: { label: 'Moneyline', rows: rows('ml') } } });
 }
 
 // The league's full injury report for both teams (server: shared/injuries.js), newest first. Players listed as

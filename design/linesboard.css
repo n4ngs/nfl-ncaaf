@@ -1,0 +1,61 @@
+/* THE.BOARD shared: LinesBoard, the "Openers and closes" panel (design/linesboard.js). Full width of the sheet;
+   "Expand" makes it a full-screen panel. Opened = neutral hollow ring; Now = filled amber dot; Closed = amber
+   diamond. Shape carries identity with the legend, so it never depends on colour alone. The amber is darkened in
+   light mode for 3:1 contrast on the white card (validated), the bright brand amber in dark mode. */
+.lb { --lb-mark: #B06E00; --lb-open: var(--ink-3, #606D83); --lb-grid: var(--line, rgba(24,43,73,.12));
+  margin: 18px 0; padding: 16px; border: 1px solid var(--line, rgba(24,43,73,.12)); border-radius: 14px;
+  background: var(--surface, #fff); color: var(--ink, #101B2F); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .lb { --lb-mark: #FFB020; } }
+:root[data-theme="dark"] .lb { --lb-mark: #FFB020; }
+
+.lb-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-start; justify-content: space-between; }
+.lb-title { margin: 0; font-size: 17px; font-weight: 700; }
+.lb-title span { margin-left: 6px; font-size: 13px; font-weight: 500; color: var(--ink-3, #606D83); }
+.lb-sub { margin: 2px 0 0; font-size: 13px; color: var(--ink-2, #4F5C73); }
+.lb-ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.lb-tabs { display: inline-flex; padding: 2px; border-radius: 10px; background: var(--fill, rgba(24,43,73,.05)); }
+.lb-tab, .lb-wide { min-height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--ink-2, #4F5C73); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.lb-tab[aria-pressed="true"] { background: var(--surface, #fff); color: var(--ink, #101B2F); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.lb-wide { border: 1px solid var(--line, rgba(24,43,73,.12)); }
+.lb-tab:focus-visible, .lb-wide:focus-visible { outline: 2px solid var(--lb-mark); outline-offset: 2px; }
+
+.lb-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 14px 0 10px; }
+.lb-tile { padding: 10px 12px; border-radius: 10px; background: var(--fill, rgba(24,43,73,.05)); }
+.lb-k { font-size: 12px; color: var(--ink-3, #606D83); }
+.lb-v small { font-size: 13px; font-weight: 600; color: var(--ink-2, #4F5C73); }
+.lb-v { margin-top: 2px; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.lb-s { font-size: 11px; color: var(--ink-3, #606D83); }
+
+.lb-legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 4px 0 6px; font-size: 12px; color: var(--ink-2, #4F5C73); }
+.lb-legend span { display: inline-flex; gap: 6px; align-items: center; }
+.lb-chart { overflow-x: auto; }
+.lb-svg { display: block; width: 100%; height: auto; font-size: 12px; }
+.lb-svg-n, .lb-svg-w { display: none; }
+.lb.is-wide .lb-svg { display: none; }
+.lb.is-wide .lb-svg.lb-svg-w { display: block; }
+@media (max-width: 560px) { .lb-svg { display: none; } .lb-svg.lb-svg-n { display: block; } .lb.is-wide .lb-svg, .lb.is-wide .lb-svg.lb-svg-w { display: none; } .lb.is-wide .lb-svg.lb-svg-n { display: block; } }
+.lb-grid { stroke: var(--lb-grid); stroke-width: 1; }
+.lb-tick { fill: var(--ink-3, #606D83); font-size: 11px; font-variant-numeric: tabular-nums; }
+.lb-book { fill: var(--ink, #101B2F); font-size: 12.5px; font-weight: 600; }
+.lb-seg { stroke: var(--lb-mark); stroke-width: 2; stroke-linecap: round; opacity: .55; }
+.lb-open { fill: var(--surface, #fff); stroke: var(--lb-open); stroke-width: 2; }
+.lb-now { fill: var(--lb-mark); stroke: var(--surface, #fff); stroke-width: 2; }
+.lb-now2 { fill: var(--ink-2, #4F5C73); stroke: var(--surface, #fff); stroke-width: 1.5; }
+.lb-close { fill: var(--lb-mark); stroke: var(--surface, #fff); stroke-width: 2; }
+.lb-same { fill: none; stroke: var(--lb-open); stroke-width: 2; }
+.lb-hit { fill: transparent; }
+.lb-row:hover .lb-hit { fill: var(--fill, rgba(24,43,73,.05)); }
+
+.lb-tablewrap { margin-top: 12px; overflow-x: auto; }
+.lb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.lb-table th, .lb-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line, rgba(24,43,73,.12)); white-space: nowrap; }
+.lb-table thead th { font-size: 12px; font-weight: 600; color: var(--ink-3, #606D83); }
+.lb-table tbody th { font-weight: 600; }
+.lb-table .num { font-variant-numeric: tabular-nums; }
+.lb-table small, .lb-when { color: var(--ink-3, #606D83); font-size: 12px; }
+
+/* Expand: the whole panel, full screen, scrolling. */
+.lb.is-wide { position: fixed; inset: 12px; z-index: 9999; margin: 0; overflow: auto; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+body.lb-lock { overflow: hidden; }
+@media (max-width: 640px) { .lb { padding: 12px; } .lb.is-wide { inset: 0; border-radius: 0; } .lb-v { font-size: 17px; } }
