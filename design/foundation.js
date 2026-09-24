@@ -20,7 +20,7 @@
     try { apply(localStorage.getItem('board.focus') === '1'); } catch { apply(false); }
     button.addEventListener('click', () => { focusTouched = true; const enabled = button.getAttribute('aria-pressed') !== 'true'; apply(enabled); persist({ focusMode:enabled }); });
     // My books (design/mybooks.js): a change on any board is saved to the account's preferences.books.
-    document.addEventListener('board:my-books', event => { const books = event.detail?.books; if (Array.isArray(books)) persist({ books }); });
+    document.addEventListener('board:my-books', event => { const books = event.detail?.books; if (Array.isArray(books)) persist({ books, booksSet: true }); });
     document.addEventListener('board:betting-state', event => { if (applyingAccount) return; const state = event.detail?.state; if (!/^[a-z]{2}$/.test(state || '')) return; regionTouched = true; persist({ region:state.toUpperCase() }); });
     fetch('/api/account/me', { cache:'no-store', credentials:'same-origin' }).then(r => r.ok ? r.json() : null).then(value => {
       account = value; if (!account?.account) return;
@@ -30,7 +30,8 @@
       if (!regionTouched && window.BoardHandoff?.setState) { applyingAccount = true; try { window.BoardHandoff.setState(account.account.preferences?.region?.toLowerCase()); } finally { applyingAccount = false; } }
       else if (regionTouched && window.BoardHandoff?.getState) local.region = window.BoardHandoff.getState().toUpperCase();
       if (Object.keys(local).length) persist(local);
-      document.dispatchEvent(new CustomEvent('board:account-books', { detail: { books: account.account.preferences?.books || [] } }));
+      const prefs = account.account.preferences || {};
+      document.dispatchEvent(new CustomEvent('board:account-books', { detail: { books: prefs.books || [], set: prefs.booksSet === true || (prefs.books || []).length > 0 } }));
     }).catch(() => {});
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once:true }); else mount();

@@ -33,7 +33,9 @@ function preferences(input) {
   return { region: /^[A-Z]{2}$/.test(src.region) ? src.region : 'NV',
     books: [...new Set((Array.isArray(src.books) ? src.books : []).filter(x => typeof x === 'string' && /^[a-z0-9_-]{1,48}$/.test(x)))].slice(0, 80),
     sports: [...new Set((Array.isArray(src.sports) ? src.sports : SPORTS).filter(x => SPORTS.includes(x)))],
-    focusMode: src.focusMode === true };
+    focusMode: src.focusMode === true,
+    // The book list was chosen on purpose, even if it is now empty (My books "Clear"), so an empty list is not "never set".
+    booksSet: src.booksSet === true || (Array.isArray(src.books) && src.books.some(x => typeof x === 'string' && /^[a-z0-9_-]{1,48}$/.test(x))) };
 }
 module.exports = function createAccounts(options = {}) {
   const now = options.now || Date.now;

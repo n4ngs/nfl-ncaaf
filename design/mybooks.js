@@ -62,10 +62,12 @@
       },
       subscribe(fn) { if (typeof fn === 'function') subs.push(fn); return () => { const i = subs.indexOf(fn); if (i >= 0) subs.splice(i, 1); }; },
       // Signed in (design/foundation.js): the account's saved list wins unless you changed books on this page
-      // first; an empty account list picks up this device's books instead of wiping them.
-      adoptAccount(list) {
+      // first (that change, a Clear included, is pushed up instead). An account that never chose books (empty and
+      // not `set`) picks up this device's books instead of wiping them; one that was cleared on purpose clears here too.
+      adoptAccount(list, { set: chosen = false } = {}) {
         const acct = clean(list);
-        if (touched || !acct.length) { if (set.size) push(); return; }
+        if (touched) { push(); return; }
+        if (!acct.length && !chosen) { if (set.size) push(); return; }
         const same = acct.length === set.size && acct.every((k) => set.has(k));
         set = new Set(acct); write(api.list());
         if (!same) notify();
@@ -117,7 +119,7 @@
     ev.preventDefault(); ev.stopPropagation();
     MyBooks.toggle(b.dataset.mybook);
   }, true);
-  doc.addEventListener('board:account-books', (ev) => MyBooks.adoptAccount(ev.detail && ev.detail.books));
+  doc.addEventListener('board:account-books', (ev) => MyBooks.adoptAccount(ev.detail && ev.detail.books, { set: !!(ev.detail && ev.detail.set) }));
   root.addEventListener('storage', (ev) => { if (ev.key === KEY) MyBooks.reload(); });
   root.MyBooks = MyBooks;
   root.BoardFair = BoardFair;

@@ -87,6 +87,12 @@ test('Pro checkout stays disabled without configured billing and body cannot sel
   assert.equal((await a.call('checkout', { tier: 'pro', amount: 0 })).status, 503);
   await a.call('preferences', { owner: true, tier: 'pro', region: 'NV', engineIds: { nfl: 'a'.repeat(32) }, books: ['pinnacle', '<script>'], sports: ['nhl', 'bad'], focusMode: true });
   const me = (await a.call()).body; assert.equal(me.account.entitlement.active, false); assert.equal(me.account.owner, false); assert.deepEqual(me.account.preferences.books, ['pinnacle']); assert.deepEqual(me.account.preferences.sports, ['nhl']);
+  assert.equal(me.account.preferences.booksSet, true);
+  // My books "Clear": an empty list chosen on purpose stays marked as chosen
+  await a.call('preferences', { books: [], booksSet: true });
+  const cleared = (await a.call()).body.account.preferences; assert.deepEqual(cleared.books, []); assert.equal(cleared.booksSet, true);
+  await a.call('preferences', { books: [] });
+  assert.equal((await a.call()).body.account.preferences.booksSet, false);
 });
 test('trusted entitlement expires and cannot be granted via arbitrary status/source', async t => {
   const f = await fixture(t), a = f.browser(); await a.signup(); const id = f.accounts.identity(a.req()).accountId;

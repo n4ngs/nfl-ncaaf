@@ -95,6 +95,20 @@ test('my books: Clear un-stars every book, saves, repaints and syncs; disabled w
   assert.equal(create({ storage }).size(), 0, 'stays cleared on the next page load');
 });
 
+test('my books: a Clear sticks across account sync (before the account loads, and on another device)', () => {
+  // cleared before the account answered: the empty list is pushed up, not overwritten by the account's old list
+  let s = memStorage({ [KEY]: '["mgm","dk"]' }), ev = [];
+  let mb = create({ storage: s, emit: (n, d) => ev.push([n, d]) });
+  mb.clear(); mb.adoptAccount(['mgm', 'dk'], { set: true });
+  assert.deepEqual(mb.list(), []);
+  assert.deepEqual(ev.at(-1), ['board:my-books', { books: [] }]);
+  // another device with stars loads an account that was cleared on purpose: it clears too, and pushes nothing back
+  s = memStorage({ [KEY]: '["mgm"]' }); ev = [];
+  mb = create({ storage: s, emit: (n, d) => ev.push([n, d]) });
+  mb.adoptAccount([], { set: true });
+  assert.deepEqual(mb.list(), []); assert.deepEqual(JSON.parse(s.getItem(KEY)), []); assert.equal(ev.length, 0);
+});
+
 test('my books: account sync adopts the account list, never wipes device picks, and keeps a fresh change', () => {
   // signed in with a saved list, nothing changed on this page yet: the account's list wins
   let s = memStorage({ [KEY]: '["dk"]' }), ev = [];
