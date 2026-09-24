@@ -12,9 +12,11 @@
       if (!account?.account) return;
       account.account.preferences = { ...account.account.preferences, ...patch }; const current = ++revision;
       queue = queue.catch(() => {}).then(async () => {
-        const response = await fetch('/api/account/preferences', { method:'POST', credentials:'same-origin', headers:{'content-type':'application/json','x-account-csrf':account.csrf}, body:JSON.stringify(account.account.preferences) });
+        // keepalive: a save started just before the app is closed still reaches the server
+        const response = await fetch('/api/account/preferences', { method:'POST', credentials:'same-origin', keepalive:true, headers:{'content-type':'application/json','x-account-csrf':account.csrf}, body:JSON.stringify(account.account.preferences) });
         if (!response.ok) throw new Error('Preferences unavailable.');
         const value = await response.json(); if (revision === current && value?.preferences) account.account.preferences = value.preferences;
+        if (Array.isArray(patch.books)) document.dispatchEvent(new CustomEvent('board:my-books-saved', { detail: { books: value?.preferences?.books || patch.books } }));
       }).catch(() => { button.title = 'Saved on this device. Account preference sync is unavailable.'; });
     }
     try { apply(localStorage.getItem('board.focus') === '1'); } catch { apply(false); }

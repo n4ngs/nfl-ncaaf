@@ -377,3 +377,19 @@ test('board columns: the view saves on this device, repaints boards, and the bar
   const none = create({ storage: memStorage() });
   assert.match(none.viewBarHTML(books), /data-bkview="mine" aria-pressed="false" disabled/);
 });
+
+test('my books: a change the account never confirmed (app closed mid-save) wins over the account on the next launch', () => {
+  const storage = memStorage({ [KEY]: '["dk"]' }), ev = [];
+  let mb = create({ storage, emit: (n, d) => ev.push([n, d]) });
+  mb.toggle('mgm');                       // the save is sent, then the app is force-quit before it lands
+  // next launch: a fresh page, the account still holds the old list
+  mb = create({ storage, emit: (n, d) => ev.push([n, d]) });
+  mb.adoptAccount(['dk'], { set: true });
+  assert.deepEqual(mb.list(), ['dk', 'mgm'], 'device keeps the newer list');
+  assert.deepEqual(ev.at(-1), ['board:my-books', { books: ['dk', 'mgm'] }], 'and re-sends it');
+  // once the account confirms, the account is trusted again on later launches
+  mb.saved(['dk', 'mgm']);
+  mb = create({ storage });
+  mb.adoptAccount(['circa'], { set: true });
+  assert.deepEqual(mb.list(), ['circa'], 'a change made on another device still arrives');
+});

@@ -68,10 +68,15 @@
   function create({ storage = null, emit = null } = {}) {
     const readView = () => { try { const v = storage && JSON.parse(storage.getItem(VIEW_KEY) || '{}'); return { mineOnly: !!(v && v.mineOnly), order: clean(v && v.order) }; } catch { return { mineOnly: false, order: [] }; } };
     const writeView = () => { try { if (storage) storage.setItem(VIEW_KEY, JSON.stringify(view)); } catch { /* private mode */ } };
-    let view = readView();
+    let view = readView(), pickOpen = false;
     const read = () => { try { const v = storage && storage.getItem(KEY); return v == null ? [] : clean(JSON.parse(v)); } catch { return []; } };
     const write = (list) => { try { if (storage) storage.setItem(KEY, JSON.stringify(list)); } catch { /* private mode */ } };
     let set = new Set(read()), touched = false;
+    // A change the account has not confirmed yet. Kept on the device so a change made just before the app is closed
+    // (force-quit kills the account save in flight) still wins over the account's older list on the next launch.
+    const PENDING = KEY + '_pending';
+    const pending = () => { try { return !!(storage && storage.getItem(PENDING)); } catch { return false; } };
+    const setPending = (on) => { try { if (!storage) return; if (on) storage.setItem(PENDING, '1'); else if (typeof storage.removeItem === 'function') storage.removeItem(PENDING); else storage.setItem(PENDING, ''); } catch { /* private mode */ } };
     const subs = [];
     const notify = () => { for (const fn of subs) { try { fn(api.list()); } catch { /* one board's repaint never blocks another */ } } };
     const push = () => { if (emit) emit('board:my-books', { books: api.list() }); };
@@ -83,9 +88,10 @@
       toggle(k) {
         if (!valid(k)) return false;
         if (set.has(k)) set.delete(k); else set.add(k);
-        touched = true; write(api.list()); notify(); push();
+        touched = true; write(api.list()); setPending(true); notify(); push();
         return set.has(k);
       },
+      setPickOpen(on) { pickOpen = !!on; },
       // ---- the board's book columns (this device)
       mineOnly: () => view.mineOnly && set.size > 0,
       setMineOnly(on) { view = { ...view, mineOnly: !!on }; writeView(); notify(); },
@@ -101,14 +107,17 @@
       viewBarHTML(books, e = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))) {
         const n = (books || []).filter((b) => b && set.has(b.key)).length, only = view.mineOnly && n > 0;
         const seg = `<div class="bkv-seg" role="group" aria-label="Book columns"><button type="button" data-bkview="all" aria-pressed="${!only}">All books</button><button type="button" data-bkview="mine" aria-pressed="${only}"${n ? '' : ' disabled title="Star books in the Book menu or Tools first"'}>My books${n ? ` (${n})` : ''}</button></div>`;
-        const hint = `<span class="bkv-hint">${n ? '' : 'Star your books to filter. '}Drag a book's column to move it${view.order.length ? '' : '; your books come first'}.</span>`;
+        const hint = `<span class="bkv-hint">${n ? '' : 'Choose your books to filter. '}Drag a book's column to move it${view.order.length ? '' : '; your books come first'}.</span>`;
         const reset = view.order.length ? '<button type="button" class="bkv-reset" data-bkorder-reset>Reset order</button>' : '';
-        return `<div class="bkv">${seg}${hint}${reset}</div>`;
+        // Choose books right here (desktop has no Book menu): the same star chips as Tools, folded until asked for.
+        const list = (books || []).filter((b) => b && valid(b.key) && b.key !== 'cons' && b.key !== 'open');
+        const pick = list.length ? `<details class="bkv-pick" data-bkv-pick${pickOpen ? ' open' : ''}><summary><span aria-hidden="true">★</span> ${n ? 'Edit my books' : 'Choose my books'}</summary>${api.pickerHTML(list, { label: 'My books', note: 'Star the books you bet at. "My books" then shows only their columns, on every board.' })}</details>` : '';
+        return `<div class="bkv"><span class="bkv-l">Books</span>${seg}${pick}${hint}${reset}</div>`;
       },
       // Un-star every book at once (the picker's Clear button). Saves, repaints and syncs like toggle.
       clear() {
         if (!set.size) return false;
-        set = new Set(); touched = true; write([]); notify(); push();
+        set = new Set(); touched = true; write([]); setPending(true); notify(); push();
         return true;
       },
       subscribe(fn) { if (typeof fn === 'function') subs.push(fn); return () => { const i = subs.indexOf(fn); if (i >= 0) subs.splice(i, 1); }; },
@@ -117,12 +126,14 @@
       // not `set`) picks up this device's books instead of wiping them; one that was cleared on purpose clears here too.
       adoptAccount(list, { set: chosen = false } = {}) {
         const acct = clean(list);
-        if (touched) { push(); return; }
+        if (touched || pending()) { push(); return; }
         if (!acct.length && !chosen) { if (set.size) push(); return; }
         const same = acct.length === set.size && acct.every((k) => set.has(k));
         set = new Set(acct); write(api.list());
         if (!same) notify();
       },
+      // The account confirmed it saved this device's list (design/foundation.js).
+      saved(list) { const l = clean(list); if (l.length === set.size && l.every((k) => set.has(k))) setPending(false); },
       // Another tab changed the list.
       reloadView() { view = readView(); notify(); },
       reload() { const next = read(); const same = next.length === set.size && next.every((k) => set.has(k)); set = new Set(next); if (!same) notify(); },
@@ -218,6 +229,9 @@
     MyBooks.move(keys, key, keys[j], ev.key === 'ArrowRight');
     requestAnimationFrame(() => { const again = doc.querySelector(`th[data-bk="${key}"][data-bk-move]`); if (again) again.focus(); });
   });
+  // keep the inline "Choose my books" panel open across board repaints
+  doc.addEventListener('toggle', (ev) => { const d = ev.target; if (d && d.matches && d.matches('[data-bkv-pick]')) MyBooks.setPickOpen(d.open); }, true);
+  doc.addEventListener('board:my-books-saved', (ev) => MyBooks.saved(ev.detail && ev.detail.books));
   doc.addEventListener('board:account-books', (ev) => MyBooks.adoptAccount(ev.detail && ev.detail.books, { set: !!(ev.detail && ev.detail.set) }));
   root.addEventListener('storage', (ev) => { if (ev.key === KEY) MyBooks.reload(); if (ev.key === VIEW_KEY) MyBooks.reloadView(); });
   root.MyBooks = MyBooks;
