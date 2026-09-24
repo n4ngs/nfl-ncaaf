@@ -67,11 +67,33 @@ th.bk-drop-r{box-shadow:inset -3px 0 0 var(--brand)!important}
 @media (min-width:1024px){.odds-bkv{display:block}}
 .bkv{padding:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
 .bkv-l{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
-.bkv-pick{order:9;flex-basis:100%}
-.bkv-pick:not([open]){order:0;flex-basis:auto}
-.bkv-pick>summary{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:5px 14px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:12px;font-weight:650;cursor:pointer;list-style:none;touch-action:manipulation}
-.bkv-pick>summary::-webkit-details-marker{display:none}
-.bkv-pick>summary span{color:var(--brand-text,var(--brand))}
-.bkv-pick[open]>summary{background:var(--fill)}
-.bkv-pick .mybk{margin-top:10px}
-.bkv-pick>summary:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.bkv-open{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:6px 14px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--ink);font:inherit;font-size:12px;font-weight:650;cursor:pointer;touch-action:manipulation}
+.bkv-open span{color:var(--brand-text,var(--brand))}
+.bkv-open[aria-expanded="true"]{background:var(--fill)}
+.bkv-open:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+@media (max-width:700px){.bkv-hint{display:none}.bkv{gap:8px}}
+
+/* the "Choose my books" panel: a popover on desktop, a bottom sheet on a phone */
+.bkp-scrim{position:fixed;inset:0;z-index:998;background:transparent}
+.bkp{position:fixed;z-index:999;display:flex;flex-direction:column;gap:10px;padding:14px 16px 16px;overflow:hidden;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 50px rgba(0,0,0,.35);animation:bkp-in .14s ease-out}
+.bkp-list{overflow:auto;overscroll-behavior:contain;min-height:0;flex:1;padding-bottom:4px}
+.bkp-grab{display:none}
+.bkp-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.bkp-top b{font-size:15px}
+.bkp-n{margin-left:8px;font-size:12px;color:var(--ink-2)}
+.bkp-done{min-height:36px;padding:6px 16px;border-radius:999px;border:0;background:var(--brand);color:var(--brand-ink);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.bkp-note{margin:0;font-size:12px;line-height:1.4;color:var(--ink-2)}
+.bkp-tools{display:flex;gap:8px;align-items:center}
+.bkp-q{flex:1;min-width:0;min-height:40px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-size:14px}
+.bkp-q:focus-visible,.bkp-done:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.bkp-h{margin:10px 0 6px;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
+.bkp-h:first-child{margin-top:0}
+.bkp-empty{margin:12px 0;font-size:13px;color:var(--ink-2)}
+@keyframes bkp-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.bkp.is-sheet{left:0;right:0;bottom:0;top:auto;width:auto;max-height:78vh;border-radius:18px 18px 0 0;padding-bottom:calc(16px + env(safe-area-inset-bottom));animation-name:bkp-up;animation-duration:.2s}
+.bkp.is-sheet .bkp-grab{display:block;width:40px;height:4px;margin:-4px auto 2px;border-radius:2px;background:var(--line)}
+.bkp.is-sheet .mybk-chip{min-height:40px}
+.bkp-scrim:has(+ .bkp.is-sheet){background:rgba(3,6,12,.55)}
+.bkp-lock,.bkp-lock body{overflow:hidden}
+@keyframes bkp-up{from{transform:translateY(100%)}to{transform:none}}
+@media (prefers-reduced-motion:reduce){.bkp{animation:none}}

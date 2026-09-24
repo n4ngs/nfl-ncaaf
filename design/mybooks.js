@@ -68,7 +68,7 @@
   function create({ storage = null, emit = null } = {}) {
     const readView = () => { try { const v = storage && JSON.parse(storage.getItem(VIEW_KEY) || '{}'); return { mineOnly: !!(v && v.mineOnly), order: clean(v && v.order) }; } catch { return { mineOnly: false, order: [] }; } };
     const writeView = () => { try { if (storage) storage.setItem(VIEW_KEY, JSON.stringify(view)); } catch { /* private mode */ } };
-    let view = readView(), pickOpen = false;
+    let view = readView(), lastBooks = [];
     const read = () => { try { const v = storage && storage.getItem(KEY); return v == null ? [] : clean(JSON.parse(v)); } catch { return []; } };
     const write = (list) => { try { if (storage) storage.setItem(KEY, JSON.stringify(list)); } catch { /* private mode */ } };
     let set = new Set(read()), touched = false;
@@ -91,7 +91,7 @@
         touched = true; write(api.list()); setPending(true); notify(); push();
         return set.has(k);
       },
-      setPickOpen(on) { pickOpen = !!on; },
+      books: () => lastBooks.slice(),
       // ---- the board's book columns (this device)
       mineOnly: () => view.mineOnly && set.size > 0,
       setMineOnly(on) { view = { ...view, mineOnly: !!on }; writeView(); notify(); },
@@ -109,9 +109,10 @@
         const seg = `<div class="bkv-seg" role="group" aria-label="Book columns"><button type="button" data-bkview="all" aria-pressed="${!only}">All books</button><button type="button" data-bkview="mine" aria-pressed="${only}"${n ? '' : ' disabled title="Star books in the Book menu or Tools first"'}>My books${n ? ` (${n})` : ''}</button></div>`;
         const hint = `<span class="bkv-hint">${n ? '' : 'Choose your books to filter. '}Drag a book's column to move it${view.order.length ? '' : '; your books come first'}.</span>`;
         const reset = view.order.length ? '<button type="button" class="bkv-reset" data-bkorder-reset>Reset order</button>' : '';
-        // Choose books right here (desktop has no Book menu): the same star chips as Tools, folded until asked for.
+        // Choose books right here: a popover on desktop, a bottom sheet on a phone (the browser wiring below).
         const list = (books || []).filter((b) => b && valid(b.key) && b.key !== 'cons' && b.key !== 'open');
-        const pick = list.length ? `<details class="bkv-pick" data-bkv-pick${pickOpen ? ' open' : ''}><summary><span aria-hidden="true">★</span> ${n ? 'Edit my books' : 'Choose my books'}</summary>${api.pickerHTML(list, { label: 'My books', note: 'Star the books you bet at. "My books" then shows only their columns, on every board.' })}</details>` : '';
+        if (list.length) lastBooks = list;
+        const pick = list.length ? `<button type="button" class="bkv-open" data-bkv-open aria-haspopup="dialog" aria-expanded="false"><span aria-hidden="true">★</span> ${n ? 'Edit my books' : 'Choose my books'}</button>` : '';
         return `<div class="bkv"><span class="bkv-l">Books</span>${seg}${pick}${hint}${reset}</div>`;
       },
       // Un-star every book at once (the picker's Clear button). Saves, repaints and syncs like toggle.
@@ -229,8 +230,81 @@
     MyBooks.move(keys, key, keys[j], ev.key === 'ArrowRight');
     requestAnimationFrame(() => { const again = doc.querySelector(`th[data-bk="${key}"][data-bk-move]`); if (again) again.focus(); });
   });
-  // keep the inline "Choose my books" panel open across board repaints
-  doc.addEventListener('toggle', (ev) => { const d = ev.target; if (d && d.matches && d.matches('[data-bkv-pick]')) MyBooks.setPickOpen(d.open); }, true);
+  // ---- "Choose my books": one panel for the whole page, outside the board so a board repaint never closes it.
+  // Desktop: a popover under the button. Phone: a bottom sheet over a dimmed page. Search, your books first, a live
+  // count, Clear and Done; Escape, Done or a tap outside closes it and focus goes back to the button.
+  const escH = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let panel = null, scrim = null, opener = null, query = '';
+  const phone = () => !!(root.matchMedia && root.matchMedia('(max-width: 700px)').matches);
+  function listHTML() {
+    const books = MyBooks.books(), q = query.trim().toLowerCase();
+    const hit = (b) => !q || String(b.name || '').toLowerCase().includes(q) || String(b.short || '').toLowerCase().includes(q) || b.key.includes(q);
+    const mine = books.filter((b) => MyBooks.has(b.key) && hit(b)), rest = books.filter((b) => !MyBooks.has(b.key) && hit(b));
+    const chips = (l) => l.map((b) => MyBooks.chipHTML(b.key, b.short || b.name || b.key, b.name || b.short || b.key, escH)).join('');
+    return (mine.length ? `<p class="bkp-h">Your books</p><div class="mybk-chips">${chips(mine)}</div>` : '')
+      + (rest.length ? `<p class="bkp-h">${mine.length ? 'Add more' : 'All books'}</p><div class="mybk-chips">${chips(rest)}</div>` : '')
+      + (!mine.length && !rest.length ? `<p class="bkp-empty">No book matches “${escH(query)}”.</p>` : '');
+  }
+  function paintPanel() {
+    if (!panel) return;
+    const n = MyBooks.size();
+    panel.querySelector('.bkp-n').textContent = n ? `${n} chosen` : 'None chosen';
+    panel.querySelector('.bkp-list').innerHTML = listHTML();
+    panel.querySelector('[data-mybook-clear]').disabled = !n;
+  }
+  function place() {
+    if (!panel || !opener) return;
+    if (phone()) { panel.classList.add('is-sheet'); panel.style.top = panel.style.left = ''; return; }
+    panel.classList.remove('is-sheet');
+    const r = opener.getBoundingClientRect(), w = Math.min(420, root.innerWidth - 24);
+    panel.style.width = w + 'px';
+    panel.style.left = Math.max(12, Math.min(r.left, root.innerWidth - w - 12)) + 'px';
+    const below = root.innerHeight - r.bottom;
+    panel.style.maxHeight = Math.max(240, Math.min(560, below > 300 ? below - 20 : r.top - 20)) + 'px';
+    panel.style.top = (below > 300 ? r.bottom + 8 : Math.max(12, r.top - 8 - panel.offsetHeight)) + 'px';
+  }
+  function closePanel(back = true) {
+    if (!panel) return;
+    panel.remove(); scrim && scrim.remove(); panel = scrim = null;
+    doc.documentElement.classList.remove('bkp-lock');
+    for (const b of doc.querySelectorAll('[data-bkv-open]')) b.setAttribute('aria-expanded', 'false');
+    const o = opener; opener = null; query = '';
+    if (back && o && o.isConnected) o.focus(); else if (back) { const b = doc.querySelector('[data-bkv-open]'); if (b) b.focus(); }
+  }
+  function openPanel(btn) {
+    if (panel) { closePanel(false); }
+    opener = btn; btn.setAttribute('aria-expanded', 'true');
+    scrim = doc.createElement('div'); scrim.className = 'bkp-scrim'; scrim.addEventListener('click', () => closePanel());
+    panel = doc.createElement('div'); panel.className = 'bkp'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', 'Choose my books');
+    panel.innerHTML = `<div class="bkp-grab" aria-hidden="true"></div><div class="bkp-top"><div><b>My books</b><span class="bkp-n"></span></div><button type="button" class="bkp-done" data-bkp-done>Done</button></div>
+      <p class="bkp-note">Star the books you bet at. “My books” then shows only their columns, on every board, and they come first.</p>
+      <div class="bkp-tools"><input type="search" class="bkp-q" placeholder="Find a book" aria-label="Find a book" autocomplete="off" enterkeyhint="done"><button type="button" class="mybk-clear" data-mybook-clear>Clear</button></div>
+      <div class="bkp-list"></div>`;
+    doc.body.append(scrim, panel);
+    if (phone()) doc.documentElement.classList.add('bkp-lock');
+    panel.querySelector('.bkp-q').addEventListener('input', (e) => { query = e.target.value; paintPanel(); });
+    panel.querySelector('[data-bkp-done]').addEventListener('click', () => closePanel());
+    paintPanel(); place();
+    if (!phone()) panel.querySelector('.bkp-q').focus(); else panel.querySelector('[data-bkp-done]').focus();
+  }
+  MyBooks.subscribe(paintPanel);
+  doc.addEventListener('click', (ev) => {
+    const b = ev.target && ev.target.closest && ev.target.closest('[data-bkv-open]');
+    if (!b) return;
+    ev.preventDefault();
+    if (panel && opener === b) closePanel(); else openPanel(b);
+  });
+  doc.addEventListener('keydown', (ev) => {
+    if (!panel) return;
+    if (ev.key === 'Escape') { ev.preventDefault(); closePanel(); return; }
+    if (ev.key === 'Tab') {   // keep Tab inside the panel while it is open
+      const f = [...panel.querySelectorAll('button:not([disabled]),input')], i = f.indexOf(doc.activeElement);
+      if (!f.length) return;
+      if (ev.shiftKey && i <= 0) { ev.preventDefault(); f[f.length - 1].focus(); } else if (!ev.shiftKey && i === f.length - 1) { ev.preventDefault(); f[0].focus(); }
+    }
+  });
+  root.addEventListener('resize', () => place());
+  root.addEventListener('scroll', () => { if (panel && !phone()) place(); }, { passive: true });
   doc.addEventListener('board:my-books-saved', (ev) => MyBooks.saved(ev.detail && ev.detail.books));
   doc.addEventListener('board:account-books', (ev) => MyBooks.adoptAccount(ev.detail && ev.detail.books, { set: !!(ev.detail && ev.detail.set) }));
   root.addEventListener('storage', (ev) => { if (ev.key === KEY) MyBooks.reload(); if (ev.key === VIEW_KEY) MyBooks.reloadView(); });
