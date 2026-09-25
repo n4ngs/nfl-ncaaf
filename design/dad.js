@@ -78,6 +78,13 @@
     if (off() || reduced()) return;
     timer = setTimeout(() => walk(), first ? rand(2, 8) * 60000 : rand(12, 35) * 60000);
   }
+  // five quick taps on the mark in the top bar summon him (phones have no console)
+  let taps = [];
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#xsport .brand')) return;
+    const now = Date.now(); taps = taps.filter((t) => now - t < 2000); taps.push(now);
+    if (taps.length >= 5) { taps = []; walking = false; clearTimeout(timer); walk(); }
+  });
   window.BoardDad = { kinds: KINDS, walk: (kind) => { walking = false; clearTimeout(timer); walk(kind); }, stop: () => { clearTimeout(timer); if (canvas) canvas.style.display = 'none'; } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => schedule(true), { once: true }); else schedule(true);
 })();
