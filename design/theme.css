@@ -266,3 +266,7 @@ aside.creator-card{border:1px dashed var(--edge);background:none;box-shadow:none
 .px.mdl.mdl-pre{opacity:.55;font-weight:650}
 .px.mdl.mdl-pre::after{content:"pre";display:block;font-size:8.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);line-height:1;margin-top:1px}
 .px.na.mdl{font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+
+/* the little dad (design/dad.js): a 24x32 pixel walker along the bottom edge, above the phone tab bar */
+canvas.xdad{position:fixed;left:-100px;bottom:max(2px,env(safe-area-inset-bottom));width:50px;height:32px;display:none;z-index:45;pointer-events:none;image-rendering:pixelated;image-rendering:crisp-edges}
+@media (max-width:899px){canvas.xdad{bottom:calc(64px + max(12px,calc(env(safe-area-inset-bottom) + 2px)))}}
