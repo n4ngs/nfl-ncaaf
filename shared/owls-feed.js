@@ -23,6 +23,12 @@ function createOwlsFeed(options = {}) {
      when the month's remaining quota drops under liveBudgetFloor. */
   const liveMs = options.liveMs || 15000, livePinMs = options.livePinMs || 60000, liveBudgetFloor = options.liveBudgetFloor ?? 30000;
   const liveSports = new Set();
+  /* The closing window: a sport with a game starting within closingMs is read at the live cadence too, so the
+     board's own last-before-kickoff observation (the CLV close, PROVISIONAL in the ledger) lands within seconds of
+     the true close instead of within a minute. */
+  const closingMs = options.closingMs || 600000;
+  const closingSports = new Set();
+  const startsSoon = (e) => { const at = Date.parse(e && e.start); return Number.isFinite(at) && at > now() && at - now() <= closingMs; };
   const stores = Object.fromEntries(SPORTS.map(s => [s, Object.fromEntries(CHANNELS.map(c => [c, new Map()]))]));
   const versions = Object.fromEntries(SPORTS.map(s => [s, Object.fromEntries(CHANNELS.map(c => [c, 0]))]));
   const fullSnapshots = Object.fromEntries(SPORTS.map(s => [s, Object.fromEntries(CHANNELS.map(c => [c, 0]))]));
@@ -35,7 +41,7 @@ function createOwlsFeed(options = {}) {
   const budgetOk = () => liveCadence() != null;
   function intervalFor(channel, sport) {
     if (streamHealthy()) return reconcileMs;
-    const live = liveSports.has(sport) && budgetOk();
+    const live = (liveSports.has(sport) || closingSports.has(sport)) && budgetOk();
     if (channel === 'odds') return live ? liveCadence() : pollMs;
     if (channel === 'pinnacle-realtime') return live ? Math.max(livePinMs, liveCadence() * 4) : 180000;
     return 600000;
@@ -53,7 +59,7 @@ function createOwlsFeed(options = {}) {
   const streamHealthy = () => connected && lastStreamAt !== null && now() - lastStreamAt < 45000;
   const status = () => ({ enabled: !!apiKey, connection, connected, streamHealthy: streamHealthy(), websocketAccess, lastReceivedAt, lastRestAt, lastStreamAt,
     transportLatencyMs, providerFrameAt, frameCounts: { ...frameCounts }, restChannels: jsonClone(restChannels), retryAt, requests: requestCount, remainingMonth, remainingMinute,
-    liveSports: [...liveSports], liveCadenceMs: liveCadence(),
+    liveSports: [...liveSports], closingSports: [...closingSports], liveCadenceMs: liveCadence(),
     books: Object.fromEntries(SPORTS.map(s => [s, [...new Set((views[s]?.raw || []).flatMap(e => (e.bookmakers || []).map(b => e.__owlsChannel === 'ps3838-realtime' ? 'ps3838' : b.key)))].sort()])) });
   const report = () => { if (options.onStatus) options.onStatus(status()); };
   function later(fn, delay) { const id = every(() => { timers.delete(id); fn(); }, delay); id?.unref?.(); timers.add(id); return id; }
@@ -65,6 +71,7 @@ function createOwlsFeed(options = {}) {
     if (!Array.isArray(events)) return;
     views[sport] = { events, raw, receivedAt };
     if (events.some(e => e && e.live && typeof e.live === 'object' && Object.keys(e.live).length)) liveSports.add(sport); else liveSports.delete(sport);
+    if (events.some(startsSoon)) closingSports.add(sport); else closingSports.delete(sport);
     options.onUpdate?.(sport, { events, receivedAt, status: status() });
   }
   function rowsFrom(payload, sport, channel) {

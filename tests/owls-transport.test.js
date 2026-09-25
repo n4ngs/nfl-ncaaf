@@ -185,3 +185,15 @@ test('the live cadence backs off as the month\'s quota runs down',async t=>{
   assert.equal(h.feed.status().liveCadenceMs,null);
   assert.deepEqual(h.feed.status().liveSports,['nhl'],'still known to be live, just not read faster');
 });
+test('a sport with a game starting within ten minutes is read at the live cadence; one starting later is not',async t=>{
+  const soon=[{id:'s1',home:'A',away:'B',start:new Date(now+5*60000).toISOString(),books:{pin:{}},live:{},h1:{}}];
+  const later=[{id:'l1',home:'C',away:'D',start:new Date(now+40*60000).toISOString(),books:{pin:{}},live:{},h1:{}}];
+  const h=harness(async (url)=>response({success:true,data:{events:url.includes('/nhl/odds')?soon:url.includes('/mlb/odds')?later:[]}}));
+  t.after(()=>h.feed.stop());h.feed.start();await settle();
+  assert.deepEqual(h.feed.status().closingSports,['nhl']);
+  assert.deepEqual(h.feed.status().liveSports,[]);
+  const first=h.calls.length;
+  h.tick(15000);[...h.timers.values()].filter(x=>x.ms===15000).forEach(x=>x.fn());await settle();
+  const next=h.calls.slice(first).map(([url])=>url);
+  assert.equal(next.length,1);assert.ok(next[0].endsWith('/nhl/odds'));
+});
