@@ -454,7 +454,7 @@ function renderBoard(loading = false) {
   }
   const mkt = S.mkt;
   const colName = S.phBook === 'mkt' ? 'Market' : bookName(S.phBook);
-  const head = `<div class="br-hd"><span>${esc(mkt === 't' ? 'Over / under' : mkt === 'ml' ? 'Moneyline' : mkt === 'h1' ? '1st-half spread' : 'Spread')}</span><span>${myBkStar(S.phBook)}${esc(colName)}</span><span>Best</span></div>`;
+  const head = `<div class="br-hd"><span>${esc(mkt === 't' ? 'Over / under' : mkt === 'ml' ? 'Moneyline' : mkt === 'h1' ? '1st-half spread' : 'Spread')}</span><span class="mdl-h">Model</span><span>${myBkStar(S.phBook)}${esc(colName)}</span><span>Best</span></div>`;
   const block = (games) => `<div class="card brd m">${head}${games.map((g) => boardRow(g, mkt)).join('')}</div>${boardTable(games, mkt, cols)}`;
   const wasOpen = $('#doneGroup')?.open;
   const bkBar = myBooks()?.viewBarHTML ? myBooks().viewBarHTML(visibleBooks()) : '';
@@ -580,14 +580,12 @@ function boardRow(g, mkt) {
   const mk = S.phBook === 'mkt' ? marketKey(g, mkt) : S.phBook;
   const row = (t, side, pside) => {
     const best = bestFor(g, mkt, pside);
-    return `<div class="br-t${!isPre(g) && lead !== side && g.home.score !== g.away.score ? ' trail' : ''}"><span class="rot">${rotOf(g, side) ?? ''}</span>${logo(t)}<span class="nm">${rankTag(t)}${esc(teamName(t))}<small>${esc(t.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : t.score ?? ''}</span>${mk ? pxCell(g, mkt, pside, mk, null) : '<span class="px na">—</span>'}${best && !isFinal(g) ? pxCell(g, mkt, pside, best.book, best, { sub: `${isMyBook(best.book) ? '★ ' : ''}${bookName(best.book)}` }) : '<span class="px na"></span>'}</div>`;
+    return `<div class="br-t${!isPre(g) && lead !== side && g.home.score !== g.away.score ? ' trail' : ''}"><span class="rot">${rotOf(g, side) ?? ''}</span>${logo(t)}<span class="nm">${rankTag(t)}${esc(teamName(t))}<small>${esc(t.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : t.score ?? ''}</span>${modelMargin(g) != null ? `<span class="px num mdl" title="${esc(MODEL_TIP[mkt] || MODEL_TIP.s)}">${esc(modelSide(g, pside, mkt) || '—')}</span>` : '<span class="px na mdl">—</span>'}${mk ? pxCell(g, mkt, pside, mk, null) : '<span class="px na">—</span>'}${best && !isFinal(g) ? pxCell(g, mkt, pside, best.book, best, { sub: `${isMyBook(best.book) ? '★ ' : ''}${bookName(best.book)}` }) : '<span class="px na"></span>'}</div>`;
   };
   const r = atsResult(g);
   const moved = mkt === 't' ? (g.open?.t != null && g.mkt?.t != null ? g.mkt.t - g.open.t : null) : (g.open?.s != null && g.mkt?.s != null ? g.mkt.s - g.open.s : null);
   const sp = mkt === 't' ? g.splits?.t : g.splits?.s;
   const bits = [];
-  const mf = modelFair(g, mkt);
-  if (mf) bits.push(`<span class="mdl-b"><i>Model</i><b class="num">${esc(mf)}</b></span>`);
   bits.push(isLive(g) ? `<span class="hot">${esc(clockLabel(g))}</span>` : isFinal(g) ? `<b>${esc(clockLabel(g))}</b>` : `<b>${esc(timeLabel(g.start))}</b>`);
   if (g.tv && !isFinal(g)) bits.push(esc(g.tv));
   if (r) bits.push(`<b>${esc(mkt === 't' ? r.t : r.s)}</b>`);

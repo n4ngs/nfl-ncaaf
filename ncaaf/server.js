@@ -31,6 +31,7 @@ const CLIENT_IP_OPTIONS = process.env.BASE_PATH && process.env.TELEMETRY_PEER_SE
 const clientIp = (req) => resolvedClientIp(req, CLIENT_IP_OPTIONS);
 
 const U = require('./lib/util');
+const { slimGame } = require('../shared/wire-diet');
 const ESPN = require('./lib/espn');
 const AN = require('./lib/action');
 const { Week } = require('./lib/lines');
@@ -328,7 +329,10 @@ function openOf(G, W, books) {
   return { s: o.s, t: o.t, ml: o.ml, at };
 }
 
-function pub(G, W) {
+// Public view of one game, trimmed for the wire (shared/wire-diet.js, required at the top). Server-side readers
+// use pubRaw. The typeof guard keeps the test harnesses that evaluate this region in isolation on the raw view.
+function pub(G, W) { return typeof slimGame === 'function' ? slimGame(pubRaw(G, W)) : pubRaw(G, W); }
+function pubRaw(G, W) {
   const an = W.an.get(G.id) || {};
   const P = W.pin.get(G.id) || {};
   const books = mergedBooks(G, W);

@@ -17,7 +17,7 @@ function setTab(tab, push = true) {
     a.classList.toggle('on', active);
     if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   }
-  store.set('lastTab', tab);
+  store.set('tab.v2', tab);
   if (push && location.hash !== `#${tab}`) history.replaceState(null, '', `#${tab}`);
   if (tab === 'board' && !S.boardWeek) S.boardWeek = S.def;
   window.scrollTo({ top: 0 });
@@ -29,7 +29,7 @@ let routed = false;
 function route() {
   const h = location.hash.slice(1);
   if (TABS.includes(h)) { setTab(h, false); routed = true; return; }
-  if (!routed) { const last = store.get('lastTab', 'live'); setTab(TABS.includes(last) ? last : 'live', false); routed = true; }
+  if (!routed) { const last = store.get('tab.v2', 'board'); setTab(TABS.includes(last) ? last : 'board', false); routed = true; }
   const gm = /^game\/(\d+)$/.exec(h);
   if (gm) openGame(gm[1]);
 }

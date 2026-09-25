@@ -43,7 +43,7 @@ for (const sport of ['nfl', 'ncaaf']) {
       window: { scrollTo() {} }, renderAll() { renders++; } };
     vm.createContext(context); vm.runInContext(code + '\nthis.navigate = setTab;', context);
     context.navigate('board');
-    assert.equal(S.boardWeek, 'week-4'); assert.equal(S.tab, 'board'); assert.equal(stored.get('lastTab'), 'board');
+    assert.equal(S.boardWeek, 'week-4'); assert.equal(S.tab, 'board'); assert.equal(stored.get('tab.v2'), 'board');
     assert.equal(views.filter(v => v.hasClass('on')).length, 1);
     assert.equal(links.filter(a => a.attrs.get('aria-current') === 'page').length, 2);
     assert.ok(links.filter(a => a.dataset.tab === 'board').every(a => a.hasClass('on')));

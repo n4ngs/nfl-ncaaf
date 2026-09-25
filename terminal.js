@@ -252,7 +252,7 @@ ${admin ? '<div class="f"><a href="/account" style="color:inherit">Sign in with 
 // Read once at boot; an ETag lets phones revalidate cheaply instead of holding a stale copy.
 const fs = require('node:fs');
 const DESIGN = {};
-for (const f of ['linesboard.css', 'linesboard.js', 'broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js', 'support.css', 'support.js', 'activity.js', 'accounts.css', 'accounts.js', 'notifications.css', 'notifications.js', 'opportunities.css', 'opportunities.js', 'foundation.css', 'foundation.js', 'mybooks.css', 'mybooks.js']) {
+for (const f of ['linesboard.css', 'linesboard.js', 'broadcast.css', 'broadcast.js', 'refined.css', 'portfolio.css', 'portfolio.js', 'portfolio-view.js', 'feeds.css', 'feeds.js', 'handoff.css', 'handoff.js', 'support.css', 'support.js', 'activity.js', 'accounts.css', 'accounts.js', 'notifications.css', 'notifications.js', 'opportunities.css', 'opportunities.js', 'foundation.css', 'foundation.js', 'mybooks.css', 'mybooks.js', 'theme.css', 'theme.js']) {
   const body = fs.readFileSync(path.join(__dirname, 'design', f));
   DESIGN[f] = { body, etag: `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"` };
 }
@@ -289,8 +289,8 @@ function buildBundles() {
         raw: body, br: zlib.brotliCompressSync(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }), gz: zlib.gzipSync(body, { level: 9 }) };
     };
     try {
-      const css = pack([...html.matchAll(CSS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)).concat('/_board/feeds.css','/_board/handoff.css','/_board/notifications.css','/_board/foundation.css'), 'css', '\n');
-      const js = pack(['/_board/handoff.js', ...[...html.matchAll(JS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)).concat('/_board/feeds.js','/_board/notifications.js','/_board/foundation.js')], 'js', '\n;');
+      const css = pack([...html.matchAll(CSS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)).concat('/_board/feeds.css','/_board/handoff.css','/_board/notifications.css','/_board/foundation.css','/_board/theme.css'), 'css', '\n');
+      const js = pack(['/_board/handoff.js', ...[...html.matchAll(JS_TAG)].map((m) => m[1]).filter((u) => !/^https?:/.test(u)).concat('/_board/feeds.js','/_board/notifications.js','/_board/foundation.js','/_board/theme.js')], 'js', '\n;');
       BUNDLE[key] = { css, js };
       console.log(`[terminal] ${key} bundle: ${css.list.size} css -> ${Math.round(css.br.length / 1024)}KB br, ${js.list.size} js -> ${Math.round(js.br.length / 1024)}KB br`);
     } catch (e) { console.log(`[terminal] ${key} bundle skipped: ${e.message}`); }   // falls back to the separate files
