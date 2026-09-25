@@ -6,6 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 const vm = require('node:vm');
 const { IntegrityStore, freshness } = require('../shared/clv-integrity');
+const { slimGame } = require('../shared/wire-diet');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'sharp-football-'));
 process.env.DATA_DIR = scratch;
 test.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
@@ -38,7 +39,8 @@ function harness(sport, games = [game()]) {
     + source.slice(source.indexOf('const VSIN_AT ='), source.indexOf('// ---------------------------------------------------------------- FPI, weather')) + '\n'
     + source.slice(source.indexOf('function feeds()'), source.indexOf('function snapshot(')) + '\n'
     + source.slice(source.indexOf('function flush(W)'), source.indexOf('// ---------------------------------------------------------------- ESPN')), ctx);
-  ctx.pub = G => ({ id: G.id, books: ctx.mergedBooks(G, W), live: ctx.mergedLive(G, W), h1: ctx.mergedHalf(G, W) });
+  // the wire view, as production publishes it (shared/wire-diet.js)
+  ctx.pub = G => slimGame({ id: G.id, books: ctx.mergedBooks(G, W), live: ctx.mergedLive(G, W), h1: ctx.mergedHalf(G, W) });
   return { ctx, W, ledger, timers, emissions, moves, tick: at => { now = at; },
     sharp: rows => ctx.receiveSharp({ events: rows, receivedAt: now }), owls: rows => ctx.receiveOwls({ events: rows, receivedAt: now }),
     fire: () => { const timer = timers.shift(); assert.ok(timer); timer.fn(); } };
@@ -117,6 +119,28 @@ for (const sport of ['nfl', 'ncaaf']) {
     assert.equal(E.ledger.snapshots.size, size);
     assert.equal(E.emissions.filter(row => row.type === 'game').length, firstPushes);
     assert.equal(E.ctx.mergedBooks(game(), E.W).pin.provider_received_at, iso(NOW + 2000));
+  });
+  test(`${sport}: a re-observed price with a newer clock is a touch, not a whole-game patch`, () => {
+    const E = harness(sport); E.owls([event({ pin: line({ observed: NOW, spread: -2 }) })]); E.fire();
+    const games = E.emissions.filter(row => row.type === 'game').length;
+    assert.equal(games, 1); assert.equal(E.emissions.filter(row => row.type === 'touch').length, 0);
+    E.tick(NOW + 20000); E.owls([event({ pin: line({ observed: NOW + 15000, spread: -2 }) })]); E.fire();
+    assert.equal(E.emissions.filter(row => row.type === 'game').length, games, 'same price: no whole-game patch');
+    const touches = E.emissions.filter(row => row.type === 'touch');
+    assert.equal(touches.length, 1);
+    const t = touches[0].data;
+    assert.equal(t.id, 'espn-1');
+    assert.equal(t.books.pin.integrity.s.home.source_observed_at, iso(NOW + 15000));
+    assert.equal(t.books.pin.source_observed_at, iso(NOW + 15000));
+    assert.ok(!('line_value' in t.books.pin.integrity.s.home), 'a touch carries clocks only');
+    assert.ok(!('s' in t.books.pin), 'a touch carries clocks only');
+    assert.ok(!('age_ms' in t.books.pin), 'age is derived on the client');
+    // the same clocks again: nothing to say
+    E.tick(NOW + 21000); E.owls([event({ pin: line({ observed: NOW + 15000, spread: -2 }) })]); if (E.timers.length) E.fire();
+    assert.equal(E.emissions.filter(row => row.type === 'touch').length, 1);
+    // a price change still goes out whole
+    E.tick(NOW + 22000); E.owls([event({ pin: line({ observed: NOW + 21000, spread: -2.5 }) })]); E.fire();
+    assert.equal(E.emissions.filter(row => row.type === 'game').length, games + 1);
   });
   test(`${sport}: Sharp and Owls bursts share one 50ms dirty-game publication`, () => {
     const E = harness(sport, [game(), { ...game('untouched'), home: { name: 'Third Hawks' }, away: { name: 'Fourth Eagles' } }]);

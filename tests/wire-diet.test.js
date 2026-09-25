@@ -16,11 +16,11 @@ const quote = (over = {}) => ({
 test('slimQuote keeps every field the boards read and drops the rest', () => {
   const q = slimQuote(quote({ bet_link: 'https://x', conflict: true }));
   for (const k of ['snapshot_id', 'pair_id', 'american_odds', 'line_value', 'is_live', 'market_status', 'validation_status',
-    'source', 'source_observed_at', 'received_at', 'freshness', 'age_ms', 'canonical_event_id', 'canonical_market_key',
+    'source', 'source_observed_at', 'freshness', 'age_ms', 'canonical_event_id', 'canonical_market_key',
     'market_type', 'selection', 'sportsbook', 'period', 'bet_link', 'conflict']) assert.ok(k in q, k);
   assert.equal(q.is_live, false, 'booleans survive (the client does typeof checks)');
   for (const k of ['provenance_hash', 'optionId', 'optionMarketId', 'fixtureId', 'provider_event_id', 'scheduled_start_at',
-    'sport', 'team', 'observed_repeat_of', 'actual_start_source', 'actual_start_verified']) assert.ok(!(k in q), 'dropped ' + k);
+    'sport', 'team', 'observed_repeat_of', 'actual_start_source', 'actual_start_verified', 'received_at']) assert.ok(!(k in q), 'dropped ' + k);
   assert.ok(!('reason_code' in q), 'null values are not sent');
   assert.equal(slimQuote(null), null);
   assert.ok(JSON.stringify(q).length < JSON.stringify(quote()).length * 0.7, 'a third lighter even with a bet link');

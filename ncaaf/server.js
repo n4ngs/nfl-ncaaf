@@ -456,11 +456,37 @@ function flushGames(W, games) {
        so without this EVERY game went out every 9 s during games and every phone redrew the whole board).
        Bucketed to 5 minutes it still refreshes well inside the client's 15-minute "old number" window, and a
        real change — a price, a score, the clock — goes out immediately as before. */
-    const s = JSON.stringify(p, (k, v) => (k === 'resolved_at' || k === 'age_ms' || k === 'provider_received_at' ? undefined : k === 'seen' && typeof v === 'number' ? Math.floor(v / 300e3) : v));
-    if (W.sent.get(G.id) === s) continue;
-    W.sent.set(G.id, s);
-    if (clients.size) emit('game', p);
+    /* Measured 2026-09-24 on the live NCAAF board: 92 whole-game patches (80 KB each) in 40 s, and in 3,400 of
+       the 3,700 quote changes only the clock had moved (a book re-observed the same price). A price, a score,
+       a new observation still goes out whole and at once. When nothing but clocks moved, the board gets a
+       `touch`: the same shape, only the clock and freshness fields, merged in place by the client. */
+    const core = coreSignature(p);
+    if (W.sent.get(G.id) !== core) {
+      W.sent.set(G.id, core);
+      (W.touchSent ||= new Map()).set(G.id, JSON.stringify(clocksOf(p)));
+      if (clients.size) emit('game', p);
+      continue;
+    }
+    const clocks = clocksOf(p), sig = JSON.stringify(clocks);
+    if (!clocks || (W.touchSent ||= new Map()).get(G.id) === sig) continue;
+    W.touchSent.set(G.id, sig);
+    if (clients.size) emit('touch', { id: p.id, wk: p.wk, ...clocks });
   }
+}
+// Clock and freshness fields: they move on every poll without the price moving, and the client recomputes age itself.
+const CLOCK_KEYS = new Set(['source_observed_at', 'received_at', 'provider_received_at', 'freshness', 'age_ms']);
+function coreSignature(p) {
+  return JSON.stringify(p, (k, v) => (k === 'resolved_at' || CLOCK_KEYS.has(k) || (k === 'at' && typeof v === 'string') ? undefined : k === 'seen' && typeof v === 'number' ? Math.floor(v / 300e3) : v));
+}
+function clocksOf(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return undefined;
+  let out;
+  for (const [k, v] of Object.entries(o)) {
+    if (k === 'age_ms') continue;   // derived from source_observed_at on the client
+    if (CLOCK_KEYS.has(k) || (k === 'at' && typeof v === 'string')) (out ||= {})[k] = v;
+    else { const c = clocksOf(v); if (c !== undefined) (out ||= {})[k] = c; }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- ESPN

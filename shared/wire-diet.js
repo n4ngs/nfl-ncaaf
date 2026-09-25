@@ -13,7 +13,7 @@
 
 const QUOTE_KEYS = [
   'snapshot_id', 'pair_id', 'american_odds', 'line_value', 'is_live', 'market_status', 'validation_status',
-  'reason_code', 'source', 'source_observed_at', 'received_at', 'provider_received_at', 'freshness', 'age_ms',
+  'reason_code', 'source', 'source_observed_at', 'provider_received_at', 'freshness', 'age_ms',
   'conflict', 'source_conflict', 'timestamp_conflict', 'bet_link', 'canonical_event_id', 'canonical_market_key',
   'market_type', 'selection', 'sportsbook', 'period', 'timestamp_kind',
 ];

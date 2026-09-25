@@ -151,6 +151,14 @@ function connect() {
     document.dispatchEvent(new CustomEvent('hl:game', { detail: { prev, g: cur } }));
     invalidate();
   });
+  // Clock-only updates (a book re-observed the same price): merge into the game we already hold.
+  on('touch', (d) => {
+    const w = S.weeks.get(d.wk), g = w?.games.get(d.id);
+    if (!g) return;
+    const merge = (a, b) => { for (const [k, v] of Object.entries(b)) { if (k === 'id' || k === 'wk') continue; if (v && typeof v === 'object' && !Array.isArray(v) && a[k] && typeof a[k] === 'object') merge(a[k], v); else a[k] = v; } };
+    merge(g, d);
+    invalidate();
+  });
   on('move', (m) => {
     S.moves = mergeMoves([m], S.moves);
     const w = S.weeks.get(m.wk);
