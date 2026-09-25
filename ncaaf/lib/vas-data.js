@@ -263,7 +263,10 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, s
     const out = [];
     for (const e of (j && j.events) || []) {
       const c = e.competitions && e.competitions[0]; if (!c) continue;
-      if ((c.status && c.status.type && c.status.type.state) !== 'pre') continue;
+      // Games in play stay in the list: their pregame read comes from previous games only, and the board keeps
+      // showing it through the game. Finished games leave (their own result is in the history by then).
+      const st = c.status && c.status.type && c.status.type.state;
+      if (st !== 'pre' && st !== 'in') continue;
       const side = Object.fromEntries((c.competitors || []).map((x) => [x.homeAway, x]));
       if (!side.home || !side.away) continue;
       const h = Number(side.home.team.id), a = Number(side.away.team.id);
