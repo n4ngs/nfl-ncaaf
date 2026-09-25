@@ -32,6 +32,7 @@ const clientIp = (req) => resolvedClientIp(req, CLIENT_IP_OPTIONS);
 
 const U = require('./lib/util');
 const { slimGame } = require('../shared/wire-diet');
+const { packGame, packWeek } = require('../design/wire');
 const ESPN = require('./lib/espn');
 const AN = require('./lib/action');
 const { Week } = require('./lib/lines');
@@ -406,7 +407,7 @@ function snapshot(uid, role = 'owner') {
     season: cal.season,
     cal: cal.weeks.map((c) => ({ ...c, id: wid({ season: cal.season, type: c.type, week: c.week }) })),
     def: defId, cur: curId, tracked: tracked().map((w) => w.id),
-    week: W ? weekSnapshot(W) : null,
+    week: W ? packWeek(weekSnapshot(W), 'nfl') : null,   // design/wire.js: the stream's compact form
     books: BOOKS.filter(book => !book.catalogOnly || fed.has(book.key)).map(({ key, name, short, vegas, sharp, site, ios, color }) => ({ key, name, short, color: color || null, vegas: !!vegas, sharp: !!sharp, site: site || null, ios: ios || null, feed: fed.has(key) })),
     bets: Bets.list(uid),
     liveMs: LIVE_MS,
@@ -455,7 +456,7 @@ function flushGames(W, games) {
     if (W.sent.get(G.id) !== core) {
       W.sent.set(G.id, core);
       (W.touchSent ||= new Map()).set(G.id, JSON.stringify(clocksOf(p)));
-      if (clients.size) emit('game', p);
+      if (clients.size) emit('game', typeof packGame === 'function' ? packGame(p, 'nfl') : p);
       continue;
     }
     const clocks = clocksOf(p), sig = JSON.stringify(clocks);

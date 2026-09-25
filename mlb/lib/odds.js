@@ -174,7 +174,27 @@ function publicOdds(D, pk, now = Date.now()) {
   const base = D?.pub(pk) || (D?.date === day?.date && knownLivePks.has(Number(pk)) ? { pk: Number(pk), books: {}, open: null, close: null, moves: [], spark: { ml: [], t: [] }, at: 0 } : null);
   if (!base) return null;
   const live = game?.state === 'Live' && cached ? selectLiveBooks(cached.sources || {an:cached}, now) : {};
-  return { ...base, live, live_max_age_ms: LIVE_MAX_AGE_MS };
+  return wireOdds({ ...base, live, live_max_age_ms: LIVE_MAX_AGE_MS });
+}
+// The wire view of a game's odds. Each quote's metadata carried provider option ids and channel bookkeeping the
+// board never reads (audited 2026-09-24: no reader outside the feed adapters); measured at 74% of a 2.1 MB snapshot.
+const QUOTE_META_DROP = new Set(['optionMarketId', 'optionId', 'provider_channel', 'max_bet']);
+function wireQuote(q) {
+  if (!q || typeof q !== 'object') return q;
+  const o = {};
+  for (const [k, v] of Object.entries(q)) if (!QUOTE_META_DROP.has(k)) o[k] = v;
+  return o;
+}
+function wireLine(L) {
+  if (!L || typeof L !== 'object' || !L.quote_meta || typeof L.quote_meta !== 'object') return L;
+  const quote_meta = {};
+  for (const [m, sides] of Object.entries(L.quote_meta)) quote_meta[m] = sides && typeof sides === 'object' ? Object.fromEntries(Object.entries(sides).map(([s, q]) => [s, wireQuote(q)])) : sides;
+  return { ...L, quote_meta };
+}
+function wireOdds(o) {
+  const out = { ...o };
+  for (const grp of ['books', 'live', 'f5']) if (out[grp] && typeof out[grp] === 'object') out[grp] = Object.fromEntries(Object.entries(out[grp]).map(([b, L]) => [b, wireLine(L)]));
+  return out;
 }
 
 function scheduleOwlsFlush() {

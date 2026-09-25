@@ -261,3 +261,8 @@ table.bt .meta.mvc svg{opacity:.9}
 
 /* ── creator asks: present, quiet ───────────────────────────────────────── */
 aside.creator-card{border:1px dashed var(--edge);background:none;box-shadow:none}
+
+/* the model's pregame read while the game is in play: present, but visibly not a live number */
+.px.mdl.mdl-pre{opacity:.55;font-weight:650}
+.px.mdl.mdl-pre::after{content:"pre";display:block;font-size:8.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);line-height:1;margin-top:1px}
+.px.na.mdl{font-size:11px;letter-spacing:.04em;text-transform:uppercase}

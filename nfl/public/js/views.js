@@ -528,6 +528,18 @@ function modelMargin(g) {
   const m = g.model && g.model.status === 'OK' ? g.model.fairMargin : null;
   return (isPre(g) || isFinal(g)) && Number.isFinite(m) ? m : null;
 }
+// The Board column only: the same read while the game is in play (a pregame number, shown dimmed and labelled), and a
+// one-word reason instead of a blank when the model has nothing yet. Edges and sheets keep the pre/final gate above.
+function modelCell(g, side, mkt) {
+  if (modelMargin(g) != null) return `<span class="px num mdl">${esc(modelSide(g, side, mkt) || '—')}</span>`;
+  const st = g.model && g.model.status;
+  if (isLive(g)) {
+    const live = { ...g, state: 'pre' };
+    if (modelMargin(live) != null) return `<span class="px num mdl mdl-pre" title="The model's pregame number. The game is in play.">${esc(modelSide(live, side, mkt) || '—')}</span>`;
+  }
+  const word = st === 'WAIT' ? 'wait' : st === 'OFF' ? 'off' : st === 'LOADING' ? '…' : '—';
+  return `<span class="px na mdl" title="${esc((g.model && g.model.note) || 'No model read for this game.')}">${word}</span>`;
+}
 // The model's number for one side of the board's current market. Spread and 1st half come from the margin
 // (1st half = half of it, a derived estimate), the total from the model's own total-points stage, the
 // moneyline from the margin's win probability (the model's key-number distribution) as a no-vig fair price.
@@ -580,7 +592,7 @@ function boardRow(g, mkt) {
   const mk = S.phBook === 'mkt' ? marketKey(g, mkt) : S.phBook;
   const row = (t, side, pside) => {
     const best = bestFor(g, mkt, pside);
-    return `<div class="br-t${!isPre(g) && lead !== side && g.home.score !== g.away.score ? ' trail' : ''}"><span class="rot">${rotOf(g, side) ?? ''}</span>${logo(t)}<span class="nm">${rankTag(t)}${esc(teamName(t))}<small>${esc(t.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : t.score ?? ''}</span>${modelMargin(g) != null ? `<span class="px num mdl" title="${esc(MODEL_TIP[mkt] || MODEL_TIP.s)}">${esc(modelSide(g, pside, mkt) || '—')}</span>` : '<span class="px na mdl">—</span>'}${mk ? pxCell(g, mkt, pside, mk, null) : '<span class="px na">—</span>'}${best && !isFinal(g) ? pxCell(g, mkt, pside, best.book, best, { sub: `${isMyBook(best.book) ? '★ ' : ''}${bookName(best.book)}` }) : '<span class="px na"></span>'}</div>`;
+    return `<div class="br-t${!isPre(g) && lead !== side && g.home.score !== g.away.score ? ' trail' : ''}"><span class="rot">${rotOf(g, side) ?? ''}</span>${logo(t)}<span class="nm">${rankTag(t)}${esc(teamName(t))}<small>${esc(t.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : t.score ?? ''}</span>${modelCell(g, pside, mkt)}${mk ? pxCell(g, mkt, pside, mk, null) : '<span class="px na">—</span>'}${best && !isFinal(g) ? pxCell(g, mkt, pside, best.book, best, { sub: `${isMyBook(best.book) ? '★ ' : ''}${bookName(best.book)}` }) : '<span class="px na"></span>'}</div>`;
   };
   const r = atsResult(g);
   const moved = mkt === 't' ? (g.open?.t != null && g.mkt?.t != null ? g.mkt.t - g.open.t : null) : (g.open?.s != null && g.mkt?.s != null ? g.mkt.s - g.open.s : null);
@@ -626,7 +638,7 @@ function boardTable(games, mkt, books = visibleBooks()) {
     return `<tr class="${i ? '' : 'g0'}" data-open="${g.id}">
       <td class="l stk"><div class="mu"><div class="meta">${status}${esc(g.tv || '')}${r ? `<br><span class="w">${esc(mkt === 't' ? r.t : r.s)}</span>` : ''}${wind ? `<br>${wind}` : ''}</div>
         <div class="tm2 ${trail}"><div><span class="rt">${rotOf(g, 'away') ?? ''}</span>${logo(g.away)}<span class="nm">${rankTag(g.away)}${esc(teamName(g.away))}<small>${esc(g.away.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : g.away.score ?? ''}</span></div><div><span class="rt">${rotOf(g, 'home') ?? ''}</span>${logo(g.home)}<span class="nm">${rankTag(g.home)}${esc(teamName(g.home))}<small>${esc(g.home.rec || '')}</small></span><span class="sc num">${isPre(g) ? '' : g.home.score ?? ''}</span></div></div></div></td>
-      <td class="mdl-td">${modelMargin(g) != null ? `<div class="st2"><span class="px num mdl">${esc(modelSide(g, s1, mkt) || '—')}</span><span class="px num mdl">${esc(modelSide(g, s2, mkt) || '—')}</span></div>` : '<span class="px na">—</span>'}</td>
+      <td class="mdl-td"><div class="st2">${modelCell(g, s1, mkt)}${modelCell(g, s2, mkt)}</div></td>
       <td><div class="st2">${open(s1)}${open(s2)}</div></td>
       <td><div class="st2">${mk ? pxCell(g, mkt, s1, mk, null) : '<span class="px na">—</span>'}${mk ? pxCell(g, mkt, s2, mk, null) : '<span class="px na">—</span>'}</div></td>
       <td><div class="meta mvc">${isPre(g) ? sparkSVG(mkt === 't' ? g.spark?.t : g.spark?.s, 48, 18) : ''}${moved ? `<span>${moved > 0 ? '▲' : '▼'} ${trim(Math.abs(moved))}</span>` : isPre(g) ? '<span class="faint">steady</span>' : ''}</div></td>

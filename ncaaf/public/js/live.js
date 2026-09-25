@@ -38,9 +38,10 @@ function remergeMine() {
 }
 
 // ------------------------------------------------------------ weeks
+// The stream sends games in the compact form of design/wire.js; plain games pass through unchanged.
 function putWeek(w, meta = {}) {
   const prev = S.weeks.get(w.id);
-  const games = new Map(w.games.map((g) => [g.id, withMine(g)]));
+  const games = new Map(w.games.map((g) => [g.id, withMine(typeof BoardWire !== 'undefined' ? BoardWire.unpackGame(g) : g)]));
   S.weeks.set(w.id, { meta: { id: w.id, season: w.season, type: w.type, week: w.week, label: w.label, detail: w.detail, ...meta }, games, moves: w.moves || [] });
   if (S.weekRequests?.get(w.id)?.status === 'error') S.weekRequests.delete(w.id);
   if (prev) for (const g of w.games) notePrices(prev.games.get(g.id), g);
@@ -139,7 +140,8 @@ function connect() {
   es.onerror = () => { S.connected = false; renderPill(); };
   on('snapshot', loadSnapshot);
   on('tick', (d) => { S.offset = d.now - Date.now(); S.liveCount = d.live; S.at = d.at || S.at; renderPill(); renderFreshness(); });
-  on('game', (g) => {
+  on('game', (packed) => {
+    const g = typeof BoardWire !== 'undefined' ? BoardWire.unpackGame(packed) : packed;   // design/wire.js compact form
     const w = S.weeks.get(g.wk);
     if (!w) return;
     const prev = w.games.get(g.id);

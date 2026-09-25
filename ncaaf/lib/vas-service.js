@@ -78,8 +78,23 @@ function create({ dir, fetchBuffer, fetchJSON, now = Date.now, log = () => {}, n
     if (started) {
       closeOut(G, books);
       const done = G.state === 'post' ? past.get(String(G.id)) : null;
-      return done ? { status: 'OK', past: true, model: MODEL.version, margin: done.margin, total: done.total, sd: SD, reads: [],
-        note: 'Finished game: the Model column shows the model\'s pregame number for it.' } : null;
+      if (done) return { status: 'OK', past: true, model: MODEL.version, margin: done.margin, total: done.total, sd: SD, reads: [],
+        note: 'Finished game: the Model column shows the model\'s pregame number for it.' };
+      // In play (or just finished and not yet in the season file): the pregame read, from the same features the
+      // board showed before kickoff. Before this the column went blank the moment a game started.
+      if (row) {
+        let fc = featCache.get(row.gid);
+        if (!fc) {
+          try {
+            const f = state.featuresFor(row, { late: {} });
+            const x0 = E.withContext(f, row, { seasonType: row.seasonType, week: row.week, homeP5: row.homeP5, awayP5: row.awayP5 }, MODEL);
+            fc = { x: x0, margin: E.predict(x0, MODEL), total: MODEL.totals ? E.predictTotal(x0, MODEL) : null }; featCache.set(row.gid, fc);
+          } catch { fc = null; }
+        }
+        if (fc && Number.isFinite(fc.margin)) return { status: 'OK', live: G.state === 'in', model: MODEL.version, margin: fc.margin,
+          total: Number.isFinite(fc.total) ? fc.total : null, sd: SD, reads: [], note: 'In play: the model\'s pregame number.' };
+      }
+      return null;
     }
     if (!row) return { status: 'OFF', note: 'Game not in the model schedule.' };
     // openers: every book's first recorded spread (all books, as in the research consensus), first-seen time
