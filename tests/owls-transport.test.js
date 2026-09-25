@@ -173,3 +173,15 @@ test('a sport with in-play quotes is polled every 15 s; the others keep the minu
   h.tick(45000);[...h.timers.values()].filter(x=>x.ms>0).forEach(x=>x.fn());await settle();
   assert.ok(h.calls.slice(first).some(([url])=>url.endsWith('/nfl/odds')),'the others follow on the minute');
 });
+test('the live cadence backs off as the month\'s quota runs down',async t=>{
+  const liveRows=[{id:'g1',home:'A',away:'B',start:'2027-01-01T00:00:00Z',books:{},live:{pin:{ml:[-120,100]}},h1:{}}];
+  let remaining=200000;
+  const h=harness(async (url)=>response({success:true,data:{events:url.includes('/nhl/odds')?liveRows:[]}},200,{'x-ratelimit-remaining-month':String(remaining)}));
+  t.after(()=>h.feed.stop());h.feed.start();await settle();
+  assert.equal(h.feed.status().liveCadenceMs,15000);
+  remaining=90000;h.tick(15000);[...h.timers.values()].filter(x=>x.ms===15000).forEach(x=>x.fn());await settle();
+  assert.equal(h.feed.status().liveCadenceMs,30000);
+  remaining=20000;h.tick(30000);[...h.timers.values()].filter(x=>x.ms>0&&x.ms<=30000).forEach(x=>x.fn());await settle();
+  assert.equal(h.feed.status().liveCadenceMs,null);
+  assert.deepEqual(h.feed.status().liveSports,['nhl'],'still known to be live, just not read faster');
+});

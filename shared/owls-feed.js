@@ -29,12 +29,15 @@ function createOwlsFeed(options = {}) {
   const touches = Object.fromEntries(SPORTS.map(s => [s, Object.fromEntries(CHANNELS.map(c => [c, new Map()]))]));
   const views = {};
   const nextAt = Object.fromEntries(CHANNELS.map(channel => [channel, Object.fromEntries(SPORTS.map(sport => [sport, 0]))]));
-  const budgetOk = () => remainingMonth == null || remainingMonth > liveBudgetFloor;
+  // The fast cadence is paid from the month's quota (the minute cadence alone is ~8k reads a day across four
+  // sports and three channels). Plenty left: every liveMs. Under 120k: every 30 s. Under the floor: off.
+  const liveCadence = () => (remainingMonth == null || remainingMonth > 120000 ? liveMs : remainingMonth > liveBudgetFloor ? Math.max(liveMs, 30000) : null);
+  const budgetOk = () => liveCadence() != null;
   function intervalFor(channel, sport) {
     if (streamHealthy()) return reconcileMs;
     const live = liveSports.has(sport) && budgetOk();
-    if (channel === 'odds') return live ? liveMs : pollMs;
-    if (channel === 'pinnacle-realtime') return live ? livePinMs : 180000;
+    if (channel === 'odds') return live ? liveCadence() : pollMs;
+    if (channel === 'pinnacle-realtime') return live ? Math.max(livePinMs, liveCadence() * 4) : 180000;
     return 600000;
   }
   const restChannels = Object.fromEntries(CHANNELS.map(channel => [channel, { lastReceivedAt: null, requests: 0 }]));
@@ -50,7 +53,7 @@ function createOwlsFeed(options = {}) {
   const streamHealthy = () => connected && lastStreamAt !== null && now() - lastStreamAt < 45000;
   const status = () => ({ enabled: !!apiKey, connection, connected, streamHealthy: streamHealthy(), websocketAccess, lastReceivedAt, lastRestAt, lastStreamAt,
     transportLatencyMs, providerFrameAt, frameCounts: { ...frameCounts }, restChannels: jsonClone(restChannels), retryAt, requests: requestCount, remainingMonth, remainingMinute,
-    liveSports: [...liveSports], liveCadenceMs: budgetOk() ? liveMs : null,
+    liveSports: [...liveSports], liveCadenceMs: liveCadence(),
     books: Object.fromEntries(SPORTS.map(s => [s, [...new Set((views[s]?.raw || []).flatMap(e => (e.bookmakers || []).map(b => e.__owlsChannel === 'ps3838-realtime' ? 'ps3838' : b.key)))].sort()])) });
   const report = () => { if (options.onStatus) options.onStatus(status()); };
   function later(fn, delay) { const id = every(() => { timers.delete(id); fn(); }, delay); id?.unref?.(); timers.add(id); return id; }
