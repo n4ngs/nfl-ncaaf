@@ -16,12 +16,27 @@ function createOwlsFeed(options = {}) {
   const cancel = options.clearTimeout || clearTimeout;
   const pollMs = options.pollMs || 60000;
   const reconcileMs = options.reconcileMs || 300000;
+  /* In play, a book's quote is fresh for 30 s (the boards' live budget). Polled once a minute, most in-play prices
+     were already past it on arrival (measured 2026-09-24 on the NHL board: 2–39 s old at the poll, then a minute
+     of nothing). A sport whose last odds payload carried in-play quotes is polled every liveMs instead, and its
+     Pinnacle realtime channel every livePinMs; the others keep the hourly-budget cadence. The fast cadence stops
+     when the month's remaining quota drops under liveBudgetFloor. */
+  const liveMs = options.liveMs || 15000, livePinMs = options.livePinMs || 60000, liveBudgetFloor = options.liveBudgetFloor ?? 30000;
+  const liveSports = new Set();
   const stores = Object.fromEntries(SPORTS.map(s => [s, Object.fromEntries(CHANNELS.map(c => [c, new Map()]))]));
   const versions = Object.fromEntries(SPORTS.map(s => [s, Object.fromEntries(CHANNELS.map(c => [c, 0]))]));
   const fullSnapshots = Object.fromEntries(SPORTS.map(s => [s, Object.fromEntries(CHANNELS.map(c => [c, 0]))]));
   const touches = Object.fromEntries(SPORTS.map(s => [s, Object.fromEntries(CHANNELS.map(c => [c, new Map()]))]));
   const views = {};
-  const nextAt = Object.fromEntries(CHANNELS.map(channel => [channel, 0]));
+  const nextAt = Object.fromEntries(CHANNELS.map(channel => [channel, Object.fromEntries(SPORTS.map(sport => [sport, 0]))]));
+  const budgetOk = () => remainingMonth == null || remainingMonth > liveBudgetFloor;
+  function intervalFor(channel, sport) {
+    if (streamHealthy()) return reconcileMs;
+    const live = liveSports.has(sport) && budgetOk();
+    if (channel === 'odds') return live ? liveMs : pollMs;
+    if (channel === 'pinnacle-realtime') return live ? livePinMs : 180000;
+    return 600000;
+  }
   const restChannels = Object.fromEntries(CHANNELS.map(channel => [channel, { lastReceivedAt: null, requests: 0 }]));
   const timers = new Set();
   const controllers = new Set();
@@ -35,6 +50,7 @@ function createOwlsFeed(options = {}) {
   const streamHealthy = () => connected && lastStreamAt !== null && now() - lastStreamAt < 45000;
   const status = () => ({ enabled: !!apiKey, connection, connected, streamHealthy: streamHealthy(), websocketAccess, lastReceivedAt, lastRestAt, lastStreamAt,
     transportLatencyMs, providerFrameAt, frameCounts: { ...frameCounts }, restChannels: jsonClone(restChannels), retryAt, requests: requestCount, remainingMonth, remainingMinute,
+    liveSports: [...liveSports], liveCadenceMs: budgetOk() ? liveMs : null,
     books: Object.fromEntries(SPORTS.map(s => [s, [...new Set((views[s]?.raw || []).flatMap(e => (e.bookmakers || []).map(b => e.__owlsChannel === 'ps3838-realtime' ? 'ps3838' : b.key)))].sort()])) });
   const report = () => { if (options.onStatus) options.onStatus(status()); };
   function later(fn, delay) { const id = every(() => { timers.delete(id); fn(); }, delay); id?.unref?.(); timers.add(id); return id; }
@@ -45,6 +61,7 @@ function createOwlsFeed(options = {}) {
     try { events = normalize(payload, sport); } catch { return; }
     if (!Array.isArray(events)) return;
     views[sport] = { events, raw, receivedAt };
+    if (events.some(e => e && e.live && typeof e.live === 'object' && Object.keys(e.live).length)) liveSports.add(sport); else liveSports.delete(sport);
     options.onUpdate?.(sport, { events, receivedAt, status: status() });
   }
   function rowsFrom(payload, sport, channel) {
@@ -178,15 +195,16 @@ function createOwlsFeed(options = {}) {
       // Three parallel sport reads per channel minimize first-paint latency without
       // exceeding the plan's concurrency limit. All nine snapshots bootstrap once.
       for (const channel of CHANNELS) {
-        if (requestDisabled.has(channel) || nextAt[channel] > now() || blockedUntil > now()) continue;
-        await Promise.all(SPORTS.map(sport => request(sport, channel)));
-        const interval = streamHealthy() ? reconcileMs : channel === 'odds' ? pollMs : channel === 'pinnacle-realtime' ? 180000 : 600000;
-        nextAt[channel] = now() + interval;
+        if (requestDisabled.has(channel) || blockedUntil > now()) continue;
+        const due = SPORTS.filter(sport => nextAt[channel][sport] <= now());
+        if (!due.length) continue;
+        await Promise.all(due.map(sport => request(sport, channel)));
+        for (const sport of due) nextAt[channel][sport] = now() + intervalFor(channel, sport);
       }
     } finally {
       polling = false;
       if (running) {
-        const due = CHANNELS.filter(channel => !requestDisabled.has(channel)).map(channel => nextAt[channel]);
+        const due = CHANNELS.filter(channel => !requestDisabled.has(channel)).flatMap(channel => SPORTS.map(sport => nextAt[channel][sport]));
         const wait = due.length ? Math.min(...due) - now() : reconcileMs;
         timer = later(poll, Math.max(1000, wait, blockedUntil - now()));
       }
@@ -198,7 +216,7 @@ function createOwlsFeed(options = {}) {
       timeout: 12000, extraHeaders: { 'User-Agent': 'THE.BOARD/1.0', Accept: 'application/json' } });
     socket.on('connect', () => {
       connected = true; connectedAt = now(); connection = 'streaming'; websocketAccess = 'enabled';
-      for (const channel of CHANNELS) nextAt[channel] = 0;
+      for (const channel of CHANNELS) for (const sport of SPORTS) nextAt[channel][sport] = 0;
       socket.emit('subscribe', { sports: SPORTS, alternates: false });
       if (timer) { cancel(timer); timers.delete(timer); }
       void poll(); report();
@@ -236,7 +254,7 @@ function createOwlsFeed(options = {}) {
       // Resume quota-bounded snapshots without creating a second upstream socket.
       connection = 'polling';
       const intervals = { odds: pollMs, 'pinnacle-realtime': 120000, 'ps3838-realtime': 300000 };
-      for (const channel of CHANNELS) nextAt[channel] = Math.min(nextAt[channel], (restChannels[channel].lastReceivedAt || 0) + intervals[channel]);
+      for (const channel of CHANNELS) for (const sport of SPORTS) nextAt[channel][sport] = Math.min(nextAt[channel][sport], (restChannels[channel].lastReceivedAt || 0) + intervals[channel]);
       if (timer) { cancel(timer); timers.delete(timer); }
       void poll(); report();
     }

@@ -327,9 +327,14 @@ test('NHL page: latest-goal hero first, then the odds board (Model + My books), 
   assert.match(js, /class="nb-table has-model"/);
   assert.match(js, /<th class="mdl-th"/);
 });
-test('NHL board: in play, a delayed or paused quote shows no number at all', () => {
+test('NHL board: in play, a quote past the budget is never a ticket or a best price; seen within 90 s it shows dimmed with its age, older only why', () => {
   const src = fs.readFileSync(path.join(__dirname, '../nhl/public/app.js'), 'utf8');
-  assert.match(src, /if\(g\.state==='in'&&!ok\)return '<span class="px na"/);
+  const branch = src.slice(src.indexOf("if(g.state==='in'&&!ok){"), src.indexOf("const isBest="));
+  assert.ok(branch.length > 0, 'the in-play branch exists');
+  assert.ok(!branch.includes('data-ticket'), 'no ticket from a stale in-play quote');
+  assert.match(branch, /ageS<=90/);
+  assert.match(branch, /class="px num old"/);
+  assert.ok(branch.includes("—<small>'+(q.market_status!=='active'?'Paused':'Delayed')"), 'older than 90 s: only why it is missing');
 });
 
 test('NHL Model column: before puck drop and on finished games, never in play', () => {

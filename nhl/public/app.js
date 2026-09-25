@@ -57,7 +57,13 @@ function cell(g,book,m,s,best,sub){const q=quoteOf(g,book,m,s);
  if(!q)return '<span class="px na" title="'+esc(g.state==='in'?bookName(book)+' has no live price for this game.':bookName(book)+' has no price posted.')+'">—'+(g.state==='in'&&!g.final?'<small>No live price</small>':'')+'</span>';
  const ok=fresh(q);
  // in play a quote that is not fresh is not a price: no number at all, just why (a delayed in-play quote can be minutes old)
- if(g.state==='in'&&!ok)return '<span class="px na" title="'+esc(bookName(book)+': its in-play quote is delayed or paused, so no number is shown.')+'">—<small>'+(q.market_status!=='active'?'Paused':'Delayed')+'</small></span>';
+ if(g.state==='in'&&!ok){
+  // In play, a quote past the 30 s budget is not a price you can act on: it is never best and never a ticket. Seen
+  // within the last 90 s it still shows its number, dimmed, with its age; older than that only why it is missing.
+  const ageS=Math.round((Date.now()-Date.parse(q.source_observed_at||q.provider_received_at))/1000);
+  if(q.market_status==='active'&&!q.conflicted&&Number.isFinite(ageS)&&ageS>=0&&ageS<=90){const m0=lineMain(m,s,q),o0=american(Number(q.american_odds));
+   return '<span class="px num old" title="'+esc(bookName(book)+': last seen '+ageS+'s ago, past the 30 s in-play budget. Shown for reference; not a best price and not a ticket.')+'">'+esc(m0)+'<small>'+esc((m!=='ml'?o0+' · ':'')+ageS+'s')+'</small></span>';}
+  return '<span class="px na" title="'+esc(bookName(book)+': its in-play quote is delayed or paused, so no number is shown.')+'">—<small>'+(q.market_status!=='active'?'Paused':'Delayed')+'</small></span>';}
  const isBest=!!(ok&&best&&(best.book===book||(Number(q.american_odds)===Number(best.q.american_odds)&&(m==='ml'||Number(q.line_value)===Number(best.q.line_value))))),main=lineMain(m,s,q),odds=american(Number(q.american_odds));
  const smalls=(m!=='ml'?odds+' ':'')+(sub||'');const label=bookName(book)+' · '+g.away.abbr+' @ '+g.home.abbr+' · '+selection(g,m,s,q)+' '+odds+(isBest?' · best price':'')+(ok?'':' · reference only');
  const cls='px num'+(isBest?' best':'')+(ok?'':' old')+myBkCls(book);

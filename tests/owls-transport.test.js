@@ -159,3 +159,17 @@ test('sparse final-event tombstone survives late REST while untouched events boo
   release(response({success:true,data:[event('a'),event('b')]}));await settle();
   assert.deepEqual(h.feed.snapshot('nfl').events.map(e=>e.id),['b']);
 });
+test('a sport with in-play quotes is polled every 15 s; the others keep the minute cadence',async t=>{
+  const liveRows={nhl:[{id:'g1',home:'A',away:'B',start:'2027-01-01T00:00:00Z',books:{},live:{pin:{ml:[-120,100]}},h1:{}}]};
+  const h=harness(async (url)=>response({success:true,data:{events:url.includes('/nhl/odds')?liveRows.nhl:[]}}));
+  t.after(()=>h.feed.stop());h.feed.start();await settle();
+  const first=h.calls.length;
+  assert.deepEqual(h.feed.status().liveSports,['nhl']);
+  assert.equal(h.feed.status().liveCadenceMs,15000);
+  const fifteen=[...h.timers.values()].filter(x=>x.ms===15000);assert.ok(fifteen.length,'a 15 s poll is scheduled');
+  h.tick(15000);fifteen.forEach(x=>x.fn());await settle();
+  const next=h.calls.slice(first).map(([url])=>url);
+  assert.equal(next.length,1);assert.ok(next[0].endsWith('/nhl/odds'),'only the live sport is re-read');
+  h.tick(45000);[...h.timers.values()].filter(x=>x.ms>0).forEach(x=>x.fn());await settle();
+  assert.ok(h.calls.slice(first).some(([url])=>url.endsWith('/nfl/odds')),'the others follow on the minute');
+});
