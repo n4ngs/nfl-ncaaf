@@ -64,7 +64,7 @@
     const duration = rand(11000, 16000), start = performance.now();
     canvas.style.display = 'block';
     const step = (now) => {
-      const t = now - start, p = Math.min(1, t / duration);
+      const t = Math.max(0, now - start), p = Math.min(1, t / duration);   // rAF can stamp the first frame just before start
       const x = dir > 0 ? -width + p * span : window.innerWidth + width - p * span;
       canvas.style.left = Math.round(x) + 'px';
       paint(Math.floor(t / 160) % 2, dir, t, gear);
