@@ -4,7 +4,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { StringDecoder } = require('node:string_decoder');
 
 const RESOLVER_VERSION = 'clv-integrity-v1';
 const DEFAULT_CONFIG = Object.freeze({ pregame_max_age_ms: 10 * 60e3, live_max_age_ms: 30e3, closing_max_age_ms: 10 * 60e3, aging_ratio: 0.5 });
@@ -44,6 +43,46 @@ function configuration(c = {}) {
   return result;
 }
 function configFromEnv(env = process.env) { return configuration({ pregame_max_age_ms: env.CLV_PREGAME_MAX_AGE_MS, live_max_age_ms: env.CLV_LIVE_MAX_AGE_MS, closing_max_age_ms: env.CLV_CLOSING_MAX_AGE_MS, aging_ratio: env.CLV_AGING_RATIO }); }
+// Memory residency windows (see IntegrityStore). Hours from env; unset = default; 0 = keep forever (the old behaviour).
+const RESIDENT_HOURS = Object.freeze({ pregame: 72, live: 6, resolution: 12 });
+function windowMs(value, hours) {
+  if (value === undefined || value === null || value === '') return hours * 3600e3;
+  const x = Number(value); return Number.isFinite(x) && x >= 0 ? x * 3600e3 : hours * 3600e3;
+}
+function residencyFromEnv(env = process.env) {
+  return { pregameMs: windowMs(env.CLV_RESIDENT_PREGAME_HOURS, RESIDENT_HOURS.pregame), liveMs: windowMs(env.CLV_RESIDENT_LIVE_HOURS, RESIDENT_HOURS.live),
+    resolutionMs: windowMs(env.CLV_RESIDENT_RESOLUTION_HOURS, RESIDENT_HOURS.resolution) };
+}
+// Top-level fields of a journal line read WITHOUT JSON.parse (the load-time cold-row scan). Lines are written by stable():
+// sorted keys, no whitespace, flat rows (a resolution's only nested object, close_freshness, holds none of these keys), and
+// a key needle cannot match inside an escaped string value. So the fields are found in one forward pass, in key order.
+// Returns null when any field is absent, escaped or not a plain literal; the caller then parses the line in full, as before.
+// Works on the raw bytes of one line (buf[from, to)), so cold rows are never decoded into JS strings.
+const SNAPSHOT_SCAN = ['canonical_event_id', 'is_live', 'market_type', 'scheduled_start_at', 'snapshot_id', 'sportsbook'];   // sorted, as written
+const RESOLUTION_SCAN = ['canonical_event_id', 'market_type', 'scheduled_start_at', 'sportsbook'];
+const NEEDLE = Object.fromEntries(SNAPSHOT_SCAN.map((k) => [k, Buffer.from(`"${k}":`)]));
+function rawFields(buf, from, to, keys) {
+  const out = {};
+  let pos = from;
+  for (const key of keys) {
+    const needle = NEEDLE[key], at = buf.indexOf(needle, pos);
+    if (at < 0 || at >= to) return null;
+    const p = at + needle.length, c = buf[p];
+    if (c === 34) {                                                    // "string"
+      const close = buf.indexOf(34, p + 1); if (close < 0 || close >= to) return null;
+      const v = buf.toString('utf8', p + 1, close); if (v.includes('\\')) return null;
+      out[key] = v; pos = close + 1;
+    } else {
+      const w = buf.toString('latin1', p, Math.min(p + 5, to));
+      if (w.startsWith('true')) { out[key] = true; pos = p + 4; }
+      else if (w === 'false') { out[key] = false; pos = p + 5; }
+      else if (w.startsWith('null')) { out[key] = null; pos = p + 4; }
+      else return null;
+    }
+  }
+  return out;
+}
+const REFERENCE_KEYS = ['open_snapshot_id', 'close_snapshot_id', 'current_snapshot_id', 'latest_snapshot_id', 'rejected_snapshot_id'];
 function marketType(value) { return ({ spread: 's', total: 't', moneyline: 'ml', first_half_spread: 'h1s', first_half_total: 'h1t', team_total: 'tt' })[value] || value || ''; }
 function eventInfo(e = {}) {
   if (typeof e === 'string' || typeof e === 'number') e = { id: String(e) };
@@ -172,28 +211,50 @@ class IntegrityStore {
      their meaning. The newest unjournaled sighting is kept in memory and overlaid on the current quote, so live
      freshness is unchanged. Live quotes and any change of value are never compacted. The same rule collapses repeats
      already on disk at load (the file itself is never rewritten), and any snapshot referenced by an entry, signal or
-     resolution is always kept. `repeatHeartbeatMs: 0` disables compaction. */
-  constructor({ dataDir, sport, config = {}, repeatHeartbeatMs = 6 * 60e3, closeWindowMs = 15 * 60e3 }) {
+     resolution is always kept. `repeatHeartbeatMs: 0` disables compaction.
+
+     Residency (2026-10-05). Compaction slowed the growth but every quote ever journaled was still held in memory. From
+     2026-09-28 the NCAAF engine could no longer finish loading inside V8's ~4 GB heap and restarted every ~2 minutes.
+     The journal on disk stays complete and append-only; `residency` bounds what is held in RAM, by EVENT:
+       - a pregame quote stays resident until its event is `pregameMs` past scheduled start, a live quote `liveMs`,
+         a resolution `resolutionMs` (residencyFromEnv: 72 h / 6 h / 12 h, env CLV_RESIDENT_*_HOURS, 0 = forever).
+         Live quotes are never CLV evidence (a live entry is ineligible), so their window only has to outlast the game;
+       - never evicted: the whole event of any bet entry (bets are graded in memory), every snapshot an entry, signal or
+         resident resolution points to, and any row without a parseable start. Model signals are scored offline from
+         the journal files, never in memory, so a signal keeps only its own entry snapshot resident.
+     Cold rows are skipped at load by a field scan (no JSON.parse), dropped from memory by sweep(), and new observations
+     or resolutions for cold events are not journaled, so an evicted row can never return as a conflicting duplicate.
+     Without `residency` (the default) nothing changes: everything stays resident. */
+  constructor({ dataDir, sport, config = {}, repeatHeartbeatMs = 6 * 60e3, closeWindowMs = 15 * 60e3, residency = null, now = Date.now, log = null, sweepMs = 30 * 60e3 }) {
     if (!dataDir) throw new Error('IntegrityStore requires a dataDir');
     this.sport = sport || 'unknown'; this.config = configuration(config); this.dir = path.join(dataDir, 'integrity');
     fs.mkdirSync(this.dir, { recursive: true });
     this.snapshots = new Map(); this.signals = new Map(); this.entries = new Map(); this.resolutions = new Map(); this.errors = []; this.byEvent = new Map(); this.byMarket = new Map();
     this.heartbeatMs = n(repeatHeartbeatMs) || 0; this.closeWindowMs = n(closeWindowMs) || 0;
     this.lastKept = new Map(); this.seen = new Map(); this.compaction = { loaded_repeats_skipped: 0, repeats_not_journaled: 0 };
+    this.now = typeof now === 'function' ? now : Date.now;
+    this.residency = { pregameMs: n(residency?.pregameMs) || 0, liveMs: n(residency?.liveMs) || 0, resolutionMs: n(residency?.resolutionMs) || 0 };
+    this.betEvents = new Set(); this.kickCache = new Map();
+    this.residencyStats = { skipped_cold_snapshots: 0, skipped_cold_resolutions: 0, evicted_snapshots: 0, evicted_resolutions: 0, cold_not_journaled: 0, cold_resolutions_not_journaled: 0, load_ms: 0 };
+    const resident = this.residencyOn(), loadNow = this.now(), loadStarted = Date.now();
     const referenced = new Set(); let loadingSnapshots = false;
     for (const [kind, map, id] of [['entries', this.entries, 'entry_id'], ['signals', this.signals, 'signal_id'], ['resolutions', this.resolutions, 'resolution_id'], ['snapshots', this.snapshots, 'snapshot_id']]) {
+      if (kind === 'resolutions') for (const r of this.entries.values()) this.noteBet(r);
       if (kind === 'snapshots') {
         loadingSnapshots = true;
         for (const r of [...this.entries.values(), ...this.signals.values()]) if (r.entry_snapshot_id) referenced.add(r.entry_snapshot_id);
-        for (const r of this.resolutions.values()) for (const k of ['open_snapshot_id', 'close_snapshot_id', 'current_snapshot_id', 'latest_snapshot_id', 'rejected_snapshot_id']) if (r[k]) referenced.add(r[k]);
+        for (const r of this.resolutions.values()) for (const k of REFERENCE_KEYS) if (r[k]) referenced.add(r[k]);
       }
       const file = path.join(this.dir, `${kind}.jsonl`); if (!fs.existsSync(file)) continue;
-      // Journals can exceed V8's single-string limit. Decode bounded chunks while
-      // preserving every record, UTF-8 boundaries and original line numbers.
-      const fd = fs.openSync(file, 'r'), buffer = Buffer.allocUnsafe(64 * 1024), decoder = new StringDecoder('utf8');
-      let pending = '', line = 0;
-      const accept = (text) => {
-        line++; if (!text.trim()) return;
+      const cold = resident && (kind === 'snapshots' || kind === 'resolutions') ? (text, s, e) => this.coldLine(kind, text, s, e, loadNow, referenced) : null;
+      // Journals can exceed V8's single-string limit. Read bounded chunks and split lines on the raw bytes ('\n' never
+      // occurs inside a UTF-8 sequence), decoding only the lines that are kept: every record, UTF-8 boundary and original
+      // line number is preserved, and cold rows are never turned into strings.
+      const fd = fs.openSync(file, 'r'), chunk = Buffer.allocUnsafe(1 << 20);
+      let carry = null, line = 0;
+      const accept = (buf, s, e) => {
+        line++; if (cold && cold(buf, s, e)) return;
+        const text = buf.toString('utf8', s, e); if (!text.trim()) return;
         try {
           const row = JSON.parse(text);
           if (!row[id] || (map.has(row[id]) && stable(map.get(row[id])) !== stable(row))) throw new Error('duplicate or missing identity');
@@ -203,17 +264,90 @@ class IntegrityStore {
       };
       try {
         let bytes;
-        while ((bytes = fs.readSync(fd, buffer, 0, buffer.length, null)) > 0) {
-          pending += decoder.write(buffer.subarray(0, bytes));
+        while ((bytes = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+          const buf = carry ? Buffer.concat([carry, chunk.subarray(0, bytes)]) : chunk.subarray(0, bytes);
           let start = 0, end;
-          while ((end = pending.indexOf('\n', start)) !== -1) { accept(pending.slice(start, end)); start = end + 1; }
-          pending = pending.slice(start);
+          while ((end = buf.indexOf(10, start)) !== -1) { accept(buf, start, end); start = end + 1; }
+          carry = start < buf.length ? Buffer.from(buf.subarray(start)) : null;   // a copy: `chunk` is reused by the next read
         }
-        pending += decoder.end(); if (pending.length) accept(pending);
+        if (carry && carry.length) accept(carry, 0, carry.length);
       } finally { fs.closeSync(fd); }
     }
     for (const q of this.snapshots.values()) this.index(q);
+    this.residencyStats.load_ms = Date.now() - loadStarted;
+    if (typeof log === 'function') {
+      const st = this.residencyStats;
+      try {
+        log(`[integrity] ${this.sport}: ${this.snapshots.size} snapshots + ${this.resolutions.size} resolutions in memory; ` +
+          `${st.skipped_cold_snapshots} + ${st.skipped_cold_resolutions} cold rows left on disk, ${this.compaction.loaded_repeats_skipped} repeats collapsed; ` +
+          `loaded in ${(st.load_ms / 1000).toFixed(1)}s, heap ${Math.round(process.memoryUsage().heapUsed / 1048576)} MB${resident ? '' : ' (residency off)'}`);
+      } catch { /* logging never blocks a boot */ }
+    }
+    if (resident && n(sweepMs) > 0) { this.sweepTimer = setInterval(() => { try { this.sweep(); } catch { /* memory hygiene never takes the engine down */ } }, n(sweepMs)); this.sweepTimer.unref?.(); }
   }
+  residencyOn() { const r = this.residency; return !!(r.pregameMs || r.liveMs || r.resolutionMs); }
+  // A bet pins its whole event: tickets are graded (and re-graded) from these rows in memory.
+  noteBet(r) { const event = String(r?.canonical_event_id || r?.event_id || ''); if (event) this.betEvents.add(event); }
+  pinned(event) { return this.betEvents.has(String(event)); }
+  // Every row of a game carries the same scheduled start: parse each distinct string once (same rules as ms()).
+  kickMs(start) {
+    if (typeof start !== 'string') return null;
+    let t = this.kickCache.get(start);
+    if (t === undefined) { t = ms(start); if (this.kickCache.size >= 50000) this.kickCache.clear(); this.kickCache.set(start, t); }
+    return t;
+  }
+  coldQuote(event, start, isLive, market, book, now = this.now()) {
+    const win = isLive === true ? this.residency.liveMs : this.residency.pregameMs;
+    if (!win) return false;
+    const t = this.kickMs(start); return t !== null && t < now - win && !this.pinned(event);
+  }
+  coldResolution(event, start, market, book, now = this.now()) {
+    const win = this.residency.resolutionMs;
+    if (!win) return false;
+    const t = this.kickMs(start); return t !== null && t < now - win && !this.pinned(event);
+  }
+  // Load-time scan: true = a cold row, counted and left on disk unparsed. Anything it cannot read exactly is parsed as before.
+  coldLine(kind, text, s, e, now, referenced) {
+    const f = rawFields(text, s, e, kind === 'resolutions' ? RESOLUTION_SCAN : SNAPSHOT_SCAN);
+    if (!f) return false;
+    const event = f.canonical_event_id, start = f.scheduled_start_at, market = f.market_type, book = f.sportsbook;
+    if (typeof event !== 'string' || (start !== null && typeof start !== 'string') || typeof market !== 'string' || typeof book !== 'string') return false;
+    if (kind === 'resolutions') {
+      if (!this.coldResolution(event, start, market, book, now)) return false;
+      this.residencyStats.skipped_cold_resolutions++; return true;
+    }
+    const live = f.is_live, id = f.snapshot_id;
+    if (typeof id !== 'string' || referenced.has(id) || typeof live === 'string') return false;
+    if (!this.coldQuote(event, start, live, market, book, now)) return false;
+    this.residencyStats.skipped_cold_snapshots++; return true;
+  }
+  // Drop cold events from memory (the journal is untouched). Runs on a timer when residency is on; returns what it evicted.
+  sweep(now = this.now()) {
+    if (!this.residencyOn()) return { snapshots: 0, resolutions: 0 };
+    let resolutions = 0, snapshots = 0;
+    for (const [rid, r] of this.resolutions) if (this.coldResolution(r.canonical_event_id, r.scheduled_start_at, r.market_type, r.sportsbook, now)) { this.resolutions.delete(rid); resolutions++; }
+    const referenced = new Set();
+    for (const r of [...this.entries.values(), ...this.signals.values()]) if (r.entry_snapshot_id) referenced.add(r.entry_snapshot_id);
+    for (const r of this.resolutions.values()) for (const k of REFERENCE_KEYS) if (r[k]) referenced.add(r[k]);
+    const touched = new Set();
+    for (const [sid, q] of this.snapshots) {
+      if (referenced.has(sid) || !this.coldQuote(q.canonical_event_id, q.scheduled_start_at, q.is_live, q.market_type, q.sportsbook, now)) continue;
+      this.snapshots.delete(sid); touched.add(q.canonical_event_id); snapshots++;
+    }
+    if (snapshots) {
+      const live = (q) => this.snapshots.has(q.snapshot_id);
+      for (const ev of touched) { const kept = (this.byEvent.get(ev) || []).filter(live); if (kept.length) this.byEvent.set(ev, kept); else this.byEvent.delete(ev); }
+      for (const [key, list] of this.byMarket) {
+        if (!touched.has(key.slice(0, key.indexOf('|')))) continue;
+        const kept = list.filter(live); if (kept.length) this.byMarket.set(key, kept); else this.byMarket.delete(key);
+      }
+      for (const [k, last] of this.lastKept) if (!this.snapshots.has(last.q.snapshot_id)) { this.lastKept.delete(k); this.seen.delete(k); }
+    }
+    if (snapshots || resolutions) this.resolveCache = null;
+    this.residencyStats.evicted_snapshots += snapshots; this.residencyStats.evicted_resolutions += resolutions;
+    return { snapshots, resolutions };
+  }
+  close() { if (this.sweepTimer) clearInterval(this.sweepTimer); this.sweepTimer = null; }
   index(q) { const key = [q.canonical_event_id, q.market_type, q.selection, q.sportsbook, q.team || '-'].join('|'); if (!this.byEvent.has(q.canonical_event_id)) this.byEvent.set(q.canonical_event_id, []); this.byEvent.get(q.canonical_event_id).push(q); if (!this.byMarket.has(key)) this.byMarket.set(key, []); this.byMarket.get(key).push(q); }
   seriesKey(q) { return [q.canonical_market_key || [q.canonical_event_id, q.market_type, q.period].join(':'), q.selection, q.sportsbook, q.source, q.is_live, q.team || '-'].join('|'); }
   valueSig(q) { return stable([q.line_value, q.american_odds, q.market_status, q.validation_status, q.reason_code, !!q.conflict, q.fixtureId ?? null, q.optionId ?? null, q.optionMarketId ?? null, q.provider_event_id ?? null, q.scheduled_start_at ?? null, q.actual_start_at ?? null, q.actual_start_verified ?? null]); }
@@ -275,6 +409,8 @@ class IntegrityStore {
     q.provenance_hash = input.provenance_hash || input.payload_fingerprint || hash(input.payload || identity);
     q.snapshot_id = hash({ ...identity, provenance_hash: q.provenance_hash });
     if (this.snapshots.has(q.snapshot_id)) return this.snapshots.get(q.snapshot_id);
+    // A cold event (long past kickoff, no bet or signal on it) is no longer evidence for anything: not journaled.
+    if (this.residencyOn() && this.coldQuote(q.canonical_event_id, q.scheduled_start_at, q.is_live, q.market_type, q.sportsbook)) { this.residencyStats.cold_not_journaled++; return immutable(q); }
     if (this.redundant(q)) { this.noteRepeat(q); this.compaction.repeats_not_journaled++; const kept = this.lastKept.get(this.seriesKey(q)).q; return immutable(this.overlay(kept)); }
     const saved = this.append('snapshots', q); this.snapshots.set(q.snapshot_id, saved); this.index(saved); this.keep(saved); return saved;
   }
@@ -332,7 +468,10 @@ class IntegrityStore {
     const record = { ...close, close: undefined, canonical_event_id: e.canonical_event_id, market_type: marketType(market), selection, sportsbook: book, source: e.quote_source || null, open_snapshot_id: open?.snapshot_id || null, current_snapshot_id: current?.snapshot_id || null, actual_start_at: e.actual_start_at, scheduled_start_at: e.scheduled_start_at };
     const { resolved_at, ...identity } = record; record.resolution_id = hash(identity);
     let saved = this.resolutions.get(record.resolution_id);
-    if (!saved && rows.length && close.reason_code !== 'EVENT_NOT_STARTED' && !this.errors.length) { saved = this.append('resolutions', record); this.resolutions.set(record.resolution_id, saved); }
+    if (!saved && rows.length && close.reason_code !== 'EVENT_NOT_STARTED' && !this.errors.length) {
+      if (this.residencyOn() && this.coldResolution(e.canonical_event_id, e.scheduled_start_at, marketType(market), book)) this.residencyStats.cold_resolutions_not_journaled++;
+      else { saved = this.append('resolutions', record); this.resolutions.set(record.resolution_id, saved); }
+    }
     return { ...(saved || record), resolved_at: utc(now), open, current, latest_snapshot: latest, close: close.close, current_freshness: currentFreshness };
   }
   findEntry(input, event = {}) {
@@ -351,7 +490,7 @@ class IntegrityStore {
     const record = { ...entry, resolver_version: RESOLVER_VERSION };
     const old = this.entries.get(entry.entry_id); if (old) { if (stable(old) !== stable(record)) throw new Error('Cannot mutate an immutable bet entry'); return old; }
     if (entry.entry_snapshot_id && !this.findEntry(entry)) throw new Error('Entry snapshot is not observable at the captured wager time and price');
-    const saved = this.append('entries', record); this.entries.set(entry.entry_id, saved); return saved;
+    const saved = this.append('entries', record); this.entries.set(entry.entry_id, saved); this.noteBet(saved); return saved;
   }
   recordSignal(input = {}) {
     const entry = entryInfo(input), prediction = utc(input.prediction_created_at), features = utc(input.features_as_of);
@@ -367,7 +506,12 @@ class IntegrityStore {
     const old = this.signals.get(record.signal_id); if (old) { if (stable(old) !== stable(record)) throw new Error('Cannot mutate an immutable signal'); return old; }
     const saved = this.append('signals', record); this.signals.set(record.signal_id, saved); return saved;
   }
-  health() { return { ok: !this.errors.length, resolver_version: RESOLVER_VERSION, sport: this.sport, snapshots: this.snapshots.size, signals: this.signals.size, entries: this.entries.size, resolutions: this.resolutions.size, journal_errors: this.errors, thresholds: { ...this.config } }; }
+  health() {
+    const R = this.residency;
+    return { ok: !this.errors.length, resolver_version: RESOLVER_VERSION, sport: this.sport, snapshots: this.snapshots.size, signals: this.signals.size, entries: this.entries.size, resolutions: this.resolutions.size, journal_errors: this.errors, thresholds: { ...this.config },
+      compaction: { ...this.compaction },
+      residency: { enabled: this.residencyOn(), window_hours: { pregame: R.pregameMs / 3600e3, live: R.liveMs / 3600e3, resolution: R.resolutionMs / 3600e3 }, bet_events: this.betEvents.size, ...this.residencyStats } };
+  }
 }
 
-module.exports = { IntegrityStore, RESOLVER_VERSION, DEFAULT_CONFIG, configuration, configFromEnv, utc, canonicalMarketKey, americanProbability, decimalOdds, devig, lineClv, freshness, resolveClose, evaluateCLV };
+module.exports = { IntegrityStore, RESOLVER_VERSION, DEFAULT_CONFIG, configuration, configFromEnv, residencyFromEnv, RESIDENT_HOURS, utc, canonicalMarketKey, americanProbability, decimalOdds, devig, lineClv, freshness, resolveClose, evaluateCLV };

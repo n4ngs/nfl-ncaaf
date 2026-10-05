@@ -53,9 +53,10 @@ const Group = require('./lib/group');
 const Tel = require('./lib/telemetry');
 const BetMGM = require('./lib/betmgm');
 const { margins } = require('./lib/margins');
-const { IntegrityStore, freshness } = require('../shared/clv-integrity');
+const { IntegrityStore, freshness, residencyFromEnv } = require('../shared/clv-integrity');
 const { KeyedPoller } = require('../shared/poll-scheduler');
-const integrity = new IntegrityStore({ dataDir: U.DATA, sport: 'ncaaf', config: { pregame_max_age_ms: process.env.CLV_PREGAME_MAX_AGE_MS, live_max_age_ms: process.env.CLV_LIVE_MAX_AGE_MS, closing_max_age_ms: process.env.CLV_CLOSING_MAX_AGE_MS, aging_ratio: process.env.CLV_AGING_RATIO } });
+// Residency bounds the ledger held in memory by event (CLV_RESIDENT_*_HOURS); the journal on disk stays complete.
+const integrity = new IntegrityStore({ dataDir: U.DATA, sport: 'ncaaf', config: { pregame_max_age_ms: process.env.CLV_PREGAME_MAX_AGE_MS, live_max_age_ms: process.env.CLV_LIVE_MAX_AGE_MS, closing_max_age_ms: process.env.CLV_CLOSING_MAX_AGE_MS, aging_ratio: process.env.CLV_AGING_RATIO }, residency: residencyFromEnv(), log: U.log });
 Bets.configureIntegrity(integrity, gameById);
 
 const { log } = U;
