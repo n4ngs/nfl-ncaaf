@@ -42,6 +42,7 @@ const ODDS = {
   books: [],            // server book list, merged over ODDS_BOOKS
   moves: new Map(),     // id -> Move
   fetched: new Map(),   // date -> { at, ok }
+  next: null,           // { date, games, priced }: the next day's slate, from today's odds
   flashed: new Map(),   // cell key -> ms it changed
   view: store.get('gamesView', 'odds'),
   sheetPk: null, sheetHist: null, sheetPaint: 0, sheetTimer: 0,
@@ -271,6 +272,7 @@ function oddsPut(O, flash) {
 function oddsLoad(d, flash) {
   if (!d) return;
   if (d.sources || d.coverage || d.refresh) ODDS.status.set(d.date || S.date, { sources: d.sources, coverage: d.coverage, refresh: d.refresh });
+  if ('next' in d) ODDS.next = d.next || null; // only today's odds carry it: the next day's slate and how much of it is priced
   oddsSetBooks(d.books);
   const games = d.games || {};
   for (const O of Array.isArray(games) ? games : Object.values(games)) oddsPut(O, flash);
@@ -370,7 +372,7 @@ function oddsViewHTML() {
   const cooldown = Number.isFinite(refresh?.next_allowed_at) && refresh.next_allowed_at > serverNow();
   const head = `<div class="odds-workspace-head"><div><p class="odds-kicker">MLB · Prices & movement</p><h1>MLB market board</h1></div>${S.me?.role === 'owner' ? `<button type="button" class="odds-refresh" data-odds-refresh data-fk="refresh" ${busy || dayPending ? 'disabled aria-busy="true"' : cooldown ? 'disabled' : ''}>${busy ? 'Refreshing…' : cooldown ? `Refresh in ${Math.ceil((refresh.next_allowed_at - serverNow()) / 1000)}s` : 'Refresh odds'}</button>` : '<span class="odds-auto-note">Updates automatically</span>'}</div>`;
   if (dayPending) return `${head}<div class="card empty" role="status"><b>Loading this day’s games…</b></div>`;
-  if (!games.length) return `${head}<div class="card empty"><b>No games ${S.isToday ? 'today' : 'on this day'}</b>Choose another day above.</div>`;
+  if (!games.length) return `${head}<div class="card empty"><b>No games ${S.isToday ? 'today' : 'on this day'}</b>Choose another day above.</div>${oddsNextHTML([])}`;
   const shown = games.filter((g) => oddsPasses(g) && oddsMatches(g));
   const live = shown.filter((g) => g.state === 'Live' && !isOff(g));
   const soon = shown.filter(oddsIsPre);
@@ -382,12 +384,22 @@ function oddsViewHTML() {
   return `${head}${oddsOverview(games, mkt)}<div class="odds-toolbar">${oddsMktSeg(mkt)}${oddsFilterBar(games)}</div>${typeof mlbVasBlock === 'function' ? mlbVasBlock(games) : ''}
     ${f?.error ? `<p class="odds-health" role="status">${esc(f.error)} <button type="button" class="odds-link" data-odds-refresh>Retry</button></p>` : oddsRefreshFeedback(refresh)}
     <div class="odds-lay"><div class="odds-boards">${typeof MyBooks !== 'undefined' && MyBooks.viewBarHTML ? `<div class="odds-bkv">${MyBooks.viewBarHTML([...ODDS.books, ...ODDS_BOOKS].filter((b, i, a) => a.findIndex((x) => x.key === b.key) === i))}</div>` : ''}
-      ${section('Live', live)}${section(S.isToday ? 'Up next' : 'Scheduled', soon)}
+      ${section('Live', live)}${section(S.isToday ? 'Up next' : 'Scheduled', soon)}${oddsNextHTML(soon)}
       ${done.length ? `<details class="odds-done" id="oddsDone"${wasOpen || (!live.length && !soon.length) ? ' open' : ''}><summary class="odds-grp"><h2>Final & off board</h2><span>${done.length} · recorded prices ${ICON.chev}</span></summary>${block(done)}</details>` : ''}
       ${!shown.length ? `<div class="card empty"><b>No matching games</b>${ODDS.query ? `No team matches “${esc(ODDS.query)}”.` : 'This filter has no games on this day.'}<button type="button" class="lbtn" data-odds-reset>Clear filters</button></div>` : ''}
     </div></div>
     <p class="odds-board-guide">${mkt === 'f5' ? 'First five innings moneyline. ' : ''}Fresh and aging book prices open a ticket (aging ones are labelled). Stale and unverified prices are reference only.<span class="odds-wide-guide"> Scroll across for every book →</span></p>
-    ${oddsSourceStatus()}<details class="odds-context" id="oddsContext"${contextOpen ? ' open' : ''}><summary>Market analysis <span>Recorded moves · price comparisons ${ICON.chev}</span></summary><div>${S.isToday ? oddsEdgeEntry() : ''}${oddsMovesHTML(games)}<button type="button" class="odds-link" data-bets-books>Sportsbook links ↗</button></div></details>`;
+    ${oddsSourceStatus()}<details class="odds-context" id="oddsContext"${contextOpen ? ' open' : ''}><summary>Market analysis <span>Recorded moves · price comparisons ${ICON.chev}</span></summary><div>${S.isToday || (ODDS.next?.date && S.date === ODDS.next.date) ? oddsEdgeEntry() : ''}${oddsMovesHTML(games)}<button type="button" class="odds-link" data-bets-books>Sportsbook links ↗</button></div></details>`;
+}
+/* Once today has nothing left to bet pregame (every game under way or final, or no games at all), point at the next
+   day's board: its lines are priced ahead, as soon as books post them. */
+function oddsNextHTML(soon) {
+  const n = ODDS.next;
+  if (!S.isToday || soon.length || !n?.date || !n.games) return '';
+  const count = `${n.games} game${n.games === 1 ? '' : 's'}`;
+  const sub = n.priced ? `${n.priced === n.games ? count : `${n.priced} of ${count}`} priced` : `${count} · lines not posted yet`;
+  const label = typeof dayLabel === 'function' ? dayLabel(n.date, true) : n.date;
+  return `<div class="card odds-next"><div><b>Next up · ${esc(label)}</b><span>${esc(sub)}</span></div><button type="button" class="lbtn" data-day="${esc(n.date)}" data-to="odds" data-fk="next-day">See the board</button></div>`;
 }
 const ODDS_FILTERS = [['all', 'All games'], ['moving', 'Moving'], ['public', 'Public heavy'], ['mine', 'My bets']];
 
@@ -1670,7 +1682,7 @@ document.addEventListener('change', (ev) => {
   if (t.id === 'oddsHistoryBook') { ODDS.chartBook = t.value; ODDS.chartAt = null; oddsSwap($('#oddsChart'), oddsChartBlock(ODDS.sheetPk)); }
 });
 
-document.addEventListener('bbl:odds_status', (ev) => { const d = ev.detail; if (!d?.date) return; ODDS.status.set(d.date, { sources: d.sources, coverage: d.coverage, refresh: d.refresh }); oddsRepaint(); });
+document.addEventListener('bbl:odds_status', (ev) => { const d = ev.detail; if (!d?.date) return; ODDS.status.set(d.date, { sources: d.sources, coverage: d.coverage, refresh: d.refresh }); if ('next' in d) ODDS.next = d.next || null; oddsRepaint(); });
 
 function oddsHandoff(g,L,mkt,side,book,label,html) {
  if(typeof betHandoffCell!=='function'||!S.isToday||!g||L?.m||!(oddsIsPre(g)||oddsIsLive(g)))return html;

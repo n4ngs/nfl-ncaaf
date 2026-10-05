@@ -159,12 +159,16 @@ function getDay(date) {
   const d = days.get(date);
   d.touched = Date.now();
   if (days.size > 14) {
-    const old = [...days.values()].filter((x) => x !== today && x !== d).sort((a, b) => a.touched - b.touched)[0];
+    const old = [...days.values()].filter((x) => x !== today && x !== d && x !== nextDay).sort((a, b) => a.touched - b.touched)[0];
     if (old) days.delete(old.date);
   }
   return d;
 }
 let today = null;
+// The next baseball day's slate (schedule only, refreshed every few minutes). The odds engine prices it ahead, so
+// tomorrow's lines reach the board as soon as books post them rather than at the 6 AM ET rollover.
+let nextDay = null, nextScheduleAt = 0;
+const NEXT_SCHEDULE_MS = 10 * 60e3;
 
 const teams = new Map(); // id -> { abbr, name }
 const teamAbbr = (id) => teams.get(id)?.abbr || null;
@@ -855,11 +859,27 @@ async function scheduleLoop() {
   } catch (e) {
     log('schedule', e.message);
   }
+  await refreshNextDay(rolled);
   if (rolled) emitSnapshot();
   const soon = [...today.games.values()].some(
     (g) => g.state === 'Live' || (g.state === 'Preview' && Date.parse(g.start) - Date.now() < 20 * 60e3),
   );
   setTimeout(scheduleLoop, soon ? 15000 : 60000);
+}
+
+// Tomorrow's schedule: which games the odds engine should price ahead. A failed read retries in a minute.
+async function refreshNextDay(force = false) {
+  if (!today) return;
+  const date = shiftDate(today.date, 1);
+  if (!nextDay || nextDay.date !== date) { nextDay = getDay(date); force = true; }
+  if (!force && Date.now() - nextScheduleAt < NEXT_SCHEDULE_MS) return;
+  nextScheduleAt = Date.now();
+  try {
+    await refreshSchedule(nextDay);
+  } catch (e) {
+    nextScheduleAt = Date.now() - NEXT_SCHEDULE_MS + 60e3;
+    log('schedule (next day)', e.message);
+  }
 }
 
 function feedLoop() {
@@ -1668,7 +1688,7 @@ process.on('SIGTERM', shutdown);
   feedLoop();
   savantLoop();
   contentLoop();
-  Odds.start({ today: () => today, emit });
+  Odds.start({ today: () => today, next: () => nextDay, emit });
   pollStrays().then(gradeBets);
   // Model: history backfill (quick until complete, then every 6 h) and today's/tomorrow's slate every 10 minutes.
   const vasHistory = async () => { await Vas.refreshHistory(); const st = Vas.status(); setTimeout(vasHistory, st.history && st.history.complete ? 6 * 3600e3 : 120e3).unref(); };

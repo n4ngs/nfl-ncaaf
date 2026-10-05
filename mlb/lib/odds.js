@@ -2,7 +2,10 @@
 const {attachLink}=require('../../shared/bet-links');
 /* The MLB odds engine: polls Action Network, Pinnacle, ESPN (DraftKings) and VSiN on their own polite cadences,
    maps every game onto today's MLB gamePks, keeps the line history (lib/lines.js), freezes the close at first pitch
-   and tells the server what to push. The server passes in the day model and an emitter; nothing here touches HTTP. */
+   and tells the server what to push. The server passes in the day model and an emitter; nothing here touches HTTP.
+   It also prices the next baseball day's slate ahead of time (pregame only, slower): books post tomorrow's lines as
+   soon as tonight's games end, and without it the board had nothing to show from the last first pitch until the
+   6 AM ET rollover (in the postseason, that was most of the day). */
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -39,16 +42,31 @@ const SOURCE_NAMES = ['an', 'an1', 'pin', 'espn', 'vsin'];
 const REFRESH_COOLDOWN_MS = 15000;
 const refresh = { in_progress: false, requested_at: null, completed_at: null, next_allowed_at: 0, cooldown_ms: REFRESH_COOLDOWN_MS, result: null };
 
+// The next baseball day (ctx.next): its own OddsDay, jobs, source status and manual refresh. Pregame only, so its
+// sources run slower than today's; Pinnacle and VSiN list every upcoming game in one response, which both days share.
+const NEXT_EVERY = { an: 60e3, an1: 5 * 60e3, pin: 2 * 60e3, espn: 2 * 60e3, vsin: 5 * 60e3 };
+const SHARED_MAX_AGE_MS = 90e3;
+let nxt = null;             // OddsDay for the next baseball day
+const nextJobs = new Map();
+const nextStatus = { an: {}, an1: {}, pin: {}, espn: {}, vsin: {} };
+const nextRefresh = { in_progress: false, requested_at: null, completed_at: null, next_allowed_at: 0, cooldown_ms: REFRESH_COOLDOWN_MS, result: null };
+const shared = new Map();   // source -> { at, promise } for the one-response-for-every-game feeds
+
 // Explicit in-play observations are ephemeral and never written into pregame history or close.
 const liveQuotes = new Map(); // pk -> { books, receivedAt }
 const knownLivePks = new Set(); // retain an empty public projection when a live-only quote disappears
 
 
 // ---------------------------------------------------------------- day model
-function dayGames() {
-  const d = ctx?.today();
+function gamesOf(d) {
   if (!d) return [];
   return [...d.games.values()].map((G) => ({ pk: G.pk, start: G.start, state: G.state, detail: G.detail, home: G.home, away: G.away, venue: G.venue }));
+}
+function dayGames() { return gamesOf(ctx?.today()); }
+// The next baseball day's games, once the server has its schedule. Never the same date as today.
+function nextGames() {
+  const n = ctx?.next?.(), d = ctx?.today();
+  return n && d && n.date > d.date ? gamesOf(n) : [];
 }
 function current() {
   const d = ctx?.today();
@@ -58,7 +76,9 @@ function current() {
       cur.save(); remember(cur);
       Object.assign(refresh, { in_progress: false, requested_at: null, completed_at: null, next_allowed_at: 0, result: null });
     }
-    cur = past.get(d.date) || new OddsDay(d.date);
+    // Last night's look-ahead becomes today's history: the same prices, moves and opener carry straight on.
+    if (nxt && nxt.date === d.date) { cur = nxt; nxt = null; }
+    else cur = past.get(d.date) || new OddsDay(d.date);
     past.delete(d.date);
     anOnce = false;
     for (const job of jobs.values()) if (!job.promise) job.nextAt = 0;
@@ -70,6 +90,21 @@ function current() {
   }
   return cur;
 }
+// The OddsDay for the next baseball day, or null while there is none (no day model, or the server has no next day).
+function nextCurrent() {
+  const n = ctx?.next?.(), d = ctx?.today();
+  if (!n || !d || !(n.date > d.date)) return null;
+  if (!nxt || nxt.date !== n.date) {
+    if (nxt) { nxt.save(); remember(nxt); }
+    nxt = past.get(n.date) || new OddsDay(n.date);
+    past.delete(n.date);
+    for (const job of nextJobs.values()) if (!job.promise) job.nextAt = 0;
+    for (const name of Object.keys(nextStatus)) nextStatus[name] = {};
+    Object.assign(nextRefresh, { in_progress: false, requested_at: null, completed_at: null, next_allowed_at: 0, result: null });
+    log('odds: next day', n.date, `${Object.keys(nxt.games).length} games from history`);
+  }
+  return nxt;
+}
 function remember(D) {
   past.set(D.date, D);
   while (past.size > 7) past.delete(past.keys().next().value);
@@ -77,6 +112,8 @@ function remember(D) {
 function dayFor(date) {
   const D = current();
   if (D && D.date === date) return D;
+  const N = nextCurrent();
+  if (N && N.date === date) return N;
   if (past.has(date)) return past.get(date);
   if (!fs.existsSync(path.join(DATA, 'odds', `${date}.json`))) return null;
   const P = new OddsDay(date);
@@ -84,8 +121,34 @@ function dayFor(date) {
   return P;
 }
 
+// Which tracked day holds a game's prices: today's, or the next day's slate. A postponed game keeps its gamePk on
+// its new date, so when both days list it, the day it is still actually scheduled on wins.
+function oddsDayFor(pk) {
+  const D = current(), N = nextCurrent();
+  if (!N || !N.has(pk)) return D;
+  if (!D || (!D.has(pk) && !knownLivePks.has(Number(pk)))) return N;
+  const g = ctx?.today()?.games.get(Number(pk));
+  return g && !/postpon|cancel/i.test(g.detail || '') ? D : N;
+}
+
 // Newly fetched prices after play starts cannot alter the pregame bookspace or close.
 function openFor(D, g, src) { return g.state === 'Preview' && !/postpon|cancel|suspend/i.test(g.detail || ''); }
+
+// A tracked day for the pollers: today (live quotes, the close, manual refresh) or the next day (pregame prices only).
+const TODAY = { key: 'today', live: true, odds: () => current(), games: () => dayGames(), date: () => ctx?.today()?.date, status, jobs, refresh, every: (name) => sourceInterval(name) };
+const NEXT = { key: 'next', live: false, odds: () => nextCurrent(), games: () => nextGames(), date: () => ctx?.next?.()?.date, status: nextStatus, jobs: nextJobs, refresh: nextRefresh, every: (name) => NEXT_EVERY[name] };
+
+// Pinnacle and VSiN answer for every listed game at once. Both days read one response (and its own receipt time)
+// instead of asking twice; a failed request is never reused.
+function fetchShared(name, fn) {
+  const hit = shared.get(name);
+  if (hit && Date.now() - hit.at < SHARED_MAX_AGE_MS) return hit.promise;
+  const at = Date.now();
+  const promise = Promise.resolve().then(fn).then((value) => ({ value, at: Date.now() }));
+  shared.set(name, { at, promise });
+  promise.catch(() => { if (shared.get(name)?.promise === promise) shared.delete(name); });
+  return promise;
+}
 
 function apply(D, pk, src, lines, seen) {
   const r = D.ingest(pk, src, lines, seen);
@@ -200,7 +263,21 @@ function wireOdds(o) {
 function scheduleOwlsFlush() {
   if(!owlsFlushTimer) owlsFlushTimer=setTimeout(()=>{owlsFlushTimer=null;flush();if([...pending.values()].some(p=>p.fast))scheduleOwlsFlush();},50);
 }
-function owlsGameKey(D) { return D.date+':'+dayGames().map(g=>[g.pk,g.state,g.start].join('/')).join('|'); }
+// Which games a relay frame was last applied to (both days), so a schedule that lands after the frame gets it too.
+function owlsGameKey(D) { const key=(gs)=>gs.map(g=>[g.pk,g.state,g.start].join('/')).join('|'); return D.date+':'+key(dayGames())+'#'+(nextCurrent()?.date||'')+':'+key(nextGames()); }
+// Tomorrow's slate from the streaming relays: pregame books (and Owls' first five) only, never in-play quotes.
+function applyNextRelay(src, cache) {
+  const N = nextCurrent(); if (!N) return;
+  const games = nextGames(); if (!games.length) return;
+  const parsed = (src === 'sharp' ? SHARP : OWLS).match(cache.events, games);
+  for (const g of games) if (openFor(N, g, src)) {
+    const patch = parsed.get(g.pk);
+    apply(N, g.pk, src, patch?.books || {}, cache.receivedAt);
+    if (src === 'owls' && N.setF5(g.pk, 'owls', patch?.h1 || {}, cache.receivedAt)) pending.set(g.pk, { price: true });
+  }
+  nextStatus[src] = { at: cache.receivedAt, received_at: new Date(cache.receivedAt).toISOString(), date: N.date, games: cache.events.length, matched: parsed.size, state: 'ok',
+    ...(src === 'sharp' ? { source_observed_at: null, timestamp_kind: 'FEED_DELIVERY' } : {}) };
+}
 function applyOwls(cache = owlsCache) {
   if(!cache) return;
   owlsCache=cache;
@@ -213,6 +290,7 @@ function applyOwls(cache = owlsCache) {
     if(D.setF5(g.pk,'owls',patch?.h1 || {},cache.receivedAt)) pending.set(g.pk,{price:true});
     const p=pending.get(g.pk);if(p) p.fast=true;
   }
+  applyNextRelay('owls',cache);
   owlsAppliedKey=owlsGameKey(D);
   const clocks=Object.values(cache.events).flatMap(e=>[e.books,e.live,e.h1]).flatMap(books=>Object.values(books||{})).flatMap(L=>Object.values(L.integrityMeta||{}).flatMap(Object.values)).map(q=>Date.parse(q.source_observed_at)).filter(Number.isFinite);
   status.owls={at:cache.receivedAt,received_at:new Date(cache.receivedAt).toISOString(),source_observed_at:clocks.length?new Date(Math.max(...clocks)).toISOString():null,date:D.date,games:cache.events.length,matched:parsed.size,state:'ok'};
@@ -231,6 +309,7 @@ function applySharp(cache = sharpCache) {
     apply(D,g.pk,'sharp',patch?.books || {},cache.receivedAt);
     const p = pending.get(g.pk); if (p?.price) p.fast = true;
   }
+  applyNextRelay('sharp', cache);
   sharpAppliedKey = owlsGameKey(D);
   status.sharp = {at:cache.receivedAt,received_at:new Date(cache.receivedAt).toISOString(),source_observed_at:null,
     timestamp_kind:'FEED_DELIVERY',date:D.date,games:cache.events.length,matched:parsed.size,state:'ok'};
@@ -239,94 +318,95 @@ function applySharp(cache = sharpCache) {
 }
 
 // ---------------------------------------------------------------- sources
-async function pollAN() {
-  const D = current();
+// Each poller prices one tracked day (`S`, today unless the next day's slate is asked for).
+async function pollAN(S = TODAY) {
+  const D = S.odds();
   if (!D) return;
-  const games = dayGames();
+  const games = S.games();
   if (!games.length) return;
   const j = await AN.fetchAN(D.date);
-  if (ctx?.today()?.date !== D.date) return; // discard a response crossing the baseball-day rollover
+  if (S.date() !== D.date) return; // discard a response crossing the baseball-day rollover
   const now = Date.now();
   const parsed = AN.parseAN(j, games);
-  refreshLive(parsed, dayGames(), now);
-  for (const g of dayGames()) {
+  if (S.live) refreshLive(parsed, dayGames(), now);
+  for (const g of S.games()) {
     const pk = g.pk, p = parsed.get(pk) || {};
     if (openFor(D, g, 'an')) apply(D, pk, 'an', p.books || {}, now);
     if (p.splits && D.setSplits(pk, p.splits)) pending.set(pk, pending.get(pk) || { price: false });
     if (p.tt && D.setTT(pk, p.tt)) pending.set(pk, pending.get(pk) || { price: false });
   }
-  status.an = { at: now, date: D.date, games: (j.games || []).length, matched: parsed.size };
+  S.status.an = { at: now, date: D.date, games: (j.games || []).length, matched: parsed.size };
   return true;
 }
 
 // First five innings, from Action Network's public-betting feed.
-async function pollAN1() {
-  const D = current();
+async function pollAN1(S = TODAY) {
+  const D = S.odds();
   if (!D) return;
-  const games = dayGames().filter((g) => g.state === 'Preview');
+  const games = S.games().filter((g) => g.state === 'Preview');
   if (!games.length) return;
   const j = await AN.fetchAN1(D.date);
-  if (ctx?.today()?.date !== D.date) return false;
+  if (S.date() !== D.date) return false;
   const now = Date.now();
   const m = AN.parseAN1(j, games);
   const full = AN.parseAN1Full(j, games);
-  for (const g of dayGames().filter((g) => openFor(D, g, 'an1'))) {
+  for (const g of S.games().filter((g) => openFor(D, g, 'an1'))) {
     if (D.setF5(g.pk, 'an1', m.get(g.pk) || {}, now)) pending.set(g.pk, { price: true });
     apply(D, g.pk, 'an1', full.get(g.pk) || {}, now);
   }
-  status.an1 = { at: now, date: D.date, games: (j.games || []).length, matched: m.size, full_matched: full.size };
+  S.status.an1 = { at: now, date: D.date, games: (j.games || []).length, matched: m.size, full_matched: full.size };
   return true;
 }
 
-async function pollPin() {
-  const D = current();
+async function pollPin(S = TODAY) {
+  const D = S.odds();
   if (!D) return;
-  const games = dayGames().filter((g) => g.state === 'Preview');
+  const games = S.games().filter((g) => g.state === 'Preview');
   if (!games.length) return;
-  const pg = await PIN.fetchPinnacle();
-  if (ctx?.today()?.date !== D.date) return false;
-  const now = Date.now();
+  const got = await fetchShared('pin', () => PIN.fetchPinnacle());
+  if (S.date() !== D.date) return false;
+  const pg = got.value, now = got.at;
   const m = PIN.matchPinnacle(pg, games);
   // `seen` = when Pinnacle last listed the game. A game it drops keeps its old stamp and goes stale.
-  for (const g of dayGames().filter((g) => openFor(D, g, 'pin'))) {
+  for (const g of S.games().filter((g) => openFor(D, g, 'pin'))) {
     const r = m.get(g.pk);
     apply(D, g.pk, 'pin', r?.L ? { pin: r.L } : {}, now);
     if (D.setF5(g.pk, 'pin', r?.f5 ? { pin: r.f5 } : {}, now)) pending.set(g.pk, { price: true });
   }
-  status.pin = { at: now, date: D.date, games: pg.length, matched: m.size };
+  S.status.pin = { at: now, date: D.date, games: pg.length, matched: m.size };
   return true;
 }
 
-async function pollEspn() {
-  const D = current();
+async function pollEspn(S = TODAY) {
+  const D = S.odds();
   if (!D) return;
-  const games = dayGames().filter((g) => g.state === 'Preview');
+  const games = S.games().filter((g) => g.state === 'Preview');
   if (!games.length) return;
   const j = await ESPN.fetchEspn(D.date);
-  if (ctx?.today()?.date !== D.date) return false;
+  if (S.date() !== D.date) return false;
   const now = Date.now();
   const m = ESPN.parseEspn(j, games);
-  for (const g of dayGames().filter((g) => openFor(D, g, 'espn'))) apply(D, g.pk, 'espn', m.has(g.pk) ? { dk: m.get(g.pk) } : {}, now);
-  status.espn = { at: now, date: D.date, games: (j.events || []).length, matched: m.size };
+  for (const g of S.games().filter((g) => openFor(D, g, 'espn'))) apply(D, g.pk, 'espn', m.has(g.pk) ? { dk: m.get(g.pk) } : {}, now);
+  S.status.espn = { at: now, date: D.date, games: (j.events || []).length, matched: m.size };
   return true;
 }
 
-async function pollVsin() {
-  const D = current();
+async function pollVsin(S = TODAY) {
+  const D = S.odds();
   if (!D) return;
-  const games = dayGames().filter((g) => g.state === 'Preview');
+  const games = S.games().filter((g) => g.state === 'Preview');
   if (!games.length) return;
-  const v = await VSIN.fetchVsin();
-  if (ctx?.today()?.date !== D.date) return false;
-  const now = Date.now();
+  const got = await fetchShared('vsin', () => VSIN.fetchVsin());
+  if (S.date() !== D.date) return false;
+  const v = got.value, now = got.at;
   // Reuse the parsed table when its stamp holds, but never replace that source clock with this receipt.
   const m = VSIN.matchVsin(v.games, games, D.date);
-  for (const g of dayGames().filter((g) => openFor(D, g, 'vsin'))) {
+  for (const g of S.games().filter((g) => openFor(D, g, 'vsin'))) {
     const r = m.get(g.pk);
     apply(D, g.pk, 'vsin', r?.books || {}, now);
     if (D.setF5(g.pk, 'vsin', r?.f5 || {}, now)) pending.set(g.pk, { price: true });
   }
-  status.vsin = { at: now, checked: now, stamp: v.stamp, date: D.date, games: v.games.length, matched: m.size };
+  S.status.vsin = { at: now, checked: now, stamp: v.stamp, date: D.date, games: v.games.length, matched: m.size };
   return true;
 }
 
@@ -368,58 +448,63 @@ function loop(name, fn, every) {
 
 const sourceTasks = { an: pollAN, an1: pollAN1, pin: pollPin, espn: pollEspn, vsin: pollVsin };
 function sourceInterval(name) { return name === 'an' ? anInterval(dayGames()) : EVERY[name]; }
-function runSource(name) {
-  const D = current();
+function runSource(name, S = TODAY) {
+  const D = S.odds();
   if (!D) return null;
-  let job = jobs.get(name);
-  if (!job) { job = { promise: null, nextAt: 0, failures: 0 }; jobs.set(name, job); }
+  let job = S.jobs.get(name);
+  if (!job) { job = { promise: null, nextAt: 0, failures: 0 }; S.jobs.set(name, job); }
   if (job.promise) return job.promise;
   if (Date.now() < job.nextAt) return null;
-  const eligible = dayGames().some((g) => name === 'an' ? (openFor(D, g, name) || g.state === 'Live') : openFor(D, g, name));
-  if (!eligible) { status[name] = { ...status[name], state: 'idle' }; job.nextAt = Date.now() + sourceInterval(name); return null; }
+  const eligible = S.games().some((g) => name === 'an' && S.live ? (openFor(D, g, name) || g.state === 'Live') : openFor(D, g, name));
+  if (!eligible) { S.status[name] = { ...S.status[name], state: 'idle' }; job.nextAt = Date.now() + S.every(name); return null; }
   const date = D.date, startedAt = Date.now();
-  status[name] = { ...status[name], state: 'loading', requested_at: startedAt };
-  job.promise = Promise.resolve().then(sourceTasks[name]).then((ok) => {
-    if (!ok) { status[name] = { ...status[name], state: 'waiting' }; return { ok: false, skipped: true }; }
+  S.status[name] = { ...S.status[name], state: 'loading', requested_at: startedAt };
+  job.promise = Promise.resolve().then(() => sourceTasks[name](S)).then((ok) => {
+    if (!ok) { S.status[name] = { ...S.status[name], state: 'waiting' }; return { ok: false, skipped: true }; }
     job.failures = 0;
-    status[name] = { ...status[name], state: 'ok', requested_at: startedAt, last_success_at: Date.now(), err: null, errAt: null };
-    if (name === 'an') { anOnce = true; freezeStarted(); }
+    S.status[name] = { ...S.status[name], state: 'ok', requested_at: startedAt, last_success_at: Date.now(), err: null, errAt: null };
+    if (name === 'an' && S.live) { anOnce = true; freezeStarted(); }
     return { ok: true };
   }, (error) => {
     job.failures++;
     job.retryAfterMs = Math.max(0, Number(error?.retryAfterMs) || 0);
-    status[name] = { ...status[name], state: 'error', err: String(error.message || error).slice(0, 300), errAt: Date.now() };
-    log(`odds ${name}:`, error.message);
+    S.status[name] = { ...S.status[name], state: 'error', err: String(error.message || error).slice(0, 300), errAt: Date.now() };
+    log(`odds ${name}${S.live ? '' : ' (next day)'}:`, error.message);
     return { ok: false, error: true };
   }).finally(() => {
     const backoff = job.failures ? Math.min(300000, 5000 * 2 ** Math.min(10, job.failures - 1)) : 0;
-    job.nextAt = ctx?.today()?.date === date ? Date.now() + Math.max(sourceInterval(name), backoff, job.retryAfterMs || 0) : 0;
+    job.nextAt = S.date() === date ? Date.now() + Math.max(S.every(name), backoff, job.retryAfterMs || 0) : 0;
     job.retryAfterMs = 0; job.promise = null;
-    emitStatus();
+    emitStatus(S);
   });
   return job.promise;
 }
-function tickSources() { for (const name of SOURCE_NAMES) runSource(name); const D=current(); if(owlsCache && D && owlsGameKey(D)!==owlsAppliedKey) applyOwls(); if(sharpCache && D && owlsGameKey(D)!==sharpAppliedKey) applySharp(); }
+function tickSources() {
+  for (const name of SOURCE_NAMES) runSource(name);
+  if (nextCurrent()) for (const name of SOURCE_NAMES) runSource(name, NEXT);
+  const D=current(); if(owlsCache && D && owlsGameKey(D)!==owlsAppliedKey) applyOwls(); if(sharpCache && D && owlsGameKey(D)!==sharpAppliedKey) applySharp();
+}
 function requestRefresh(date = ctx?.today()?.date) {
   current();
-  if (date !== ctx?.today()?.date) return { in_progress: false, requested_at: null, completed_at: null, next_allowed_at: 0, cooldown_ms: REFRESH_COOLDOWN_MS, result: 'historical' };
-  const now = Date.now();
-  if (refresh.in_progress) return { ...refresh };
-  if (now < refresh.next_allowed_at) return { ...refresh, result: 'cooldown' };
-  Object.assign(refresh, { in_progress: true, requested_at: now, completed_at: null, next_allowed_at: now + REFRESH_COOLDOWN_MS, result: 'running' });
-  const work = SOURCE_NAMES.map(runSource).filter(Boolean);
+  const S = date === ctx?.today()?.date ? TODAY : nextCurrent() && date === nxt.date ? NEXT : null;
+  if (!S) return { in_progress: false, requested_at: null, completed_at: null, next_allowed_at: 0, cooldown_ms: REFRESH_COOLDOWN_MS, result: 'historical' };
+  const R = S.refresh, now = Date.now();
+  if (R.in_progress) return { ...R };
+  if (now < R.next_allowed_at) return { ...R, result: 'cooldown' };
+  Object.assign(R, { in_progress: true, requested_at: now, completed_at: null, next_allowed_at: now + REFRESH_COOLDOWN_MS, result: 'running' });
+  const work = SOURCE_NAMES.map((name) => runSource(name, S)).filter(Boolean);
   if (!work.length) {
-    const next = Math.min(...[...jobs.values()].map((job) => job.nextAt).filter((at) => at > now));
-    if (Number.isFinite(next)) refresh.next_allowed_at = Math.max(refresh.next_allowed_at, next);
-    Object.assign(refresh, { in_progress: false, completed_at: now, result: 'scheduled' });
+    const next = Math.min(...[...S.jobs.values()].map((job) => job.nextAt).filter((at) => at > now));
+    if (Number.isFinite(next)) R.next_allowed_at = Math.max(R.next_allowed_at, next);
+    Object.assign(R, { in_progress: false, completed_at: now, result: 'scheduled' });
   } else Promise.all(work).then((outcomes) => {
-    if (ctx?.today()?.date !== date || refresh.requested_at !== now) return;
+    if (S.date() !== date || R.requested_at !== now) return;
     const failures = outcomes.filter((x) => x.error).length;
-    Object.assign(refresh, { in_progress: false, completed_at: Date.now(), result: failures === outcomes.length ? 'error' : failures ? 'partial' : 'complete' });
-    flush(); emitStatus();
+    Object.assign(R, { in_progress: false, completed_at: Date.now(), result: failures === outcomes.length ? 'error' : failures ? 'partial' : 'complete' });
+    flush(); emitStatus(S);
   });
-  emitStatus();
-  return { ...refresh };
+  emitStatus(S);
+  return { ...R };
 }
 
 // Push changed games, at most once per PUSH_MIN each.
@@ -433,18 +518,34 @@ function flush() {
     if (!p.fast && !p.price && !p.live && now - last < SEEN_PUSH) continue;
     pending.delete(pk);
     sentAt.set(pk, now);
-    const O = publicOdds(D, pk);
+    const O = publicOdds(oddsDayFor(pk), pk);
     if (O) ctx.emit('odds', O);
   }
 }
 
 function anInterval(games) { return games.some((g) => g.state === 'Preview' || g.state === 'Live') ? EVERY.an : EVERY.anIdle; }
 
+// One line every half hour in the deploy log: which feeds are answering, how many games each matched, which live
+// feeds cover games in play, and how much of the next day is priced. Counts only, never prices.
+function logSummary() {
+  const D = current();
+  if (!D) return;
+  const feeds = (S) => SOURCE_NAMES.map((name) => { const s = S.status[name] || {}; return `${name}:${s.state || (s.at ? 'ok' : '-')}${s.matched != null ? '/' + s.matched : ''}`; }).join(' ');
+  const playing = dayGames().filter((g) => g.state === 'Live').length;
+  const live = [...liveQuotes.values()].map((row) => Object.keys(row.sources || {}).sort().join('+') || 'none');
+  const N = nextCurrent(), n = nextSummary();
+  log('odds summary', D.date, feeds(TODAY), `| in play ${playing}, live quotes ${live.length}${live.length ? ' (' + live.join(', ') + ')' : ''}`,
+    N ? `| next ${N.date}: ${n.priced}/${n.games} priced, ${feeds(NEXT)}` : '| no next day');
+}
+
 function start(c) {
   ctx = c;
   current();
+  nextCurrent();
   const now = Date.now();
   for (const [name, delay] of Object.entries({ an: 0, espn: 3000, pin: 5000, an1: 6000, vsin: 8000 })) jobs.set(name, { nextAt: now + delay, promise: null, failures: 0 });
+  // The next day's slate starts after today's first round (Pinnacle and VSiN then reuse today's response).
+  for (const [name, delay] of Object.entries({ an: 12000, espn: 15000, pin: 18000, an1: 21000, vsin: 24000 })) nextJobs.set(name, { nextAt: now + delay, promise: null, failures: 0 });
   owlsFeed = OWLS.subscribe?.('mlb',applyOwls) || null;
   sharpFeed = SHARP.subscribe?.('mlb',applySharp) || null;
   tickSources();
@@ -453,10 +554,11 @@ function start(c) {
   keys(new Date().getFullYear() - 1); // warm the key-number table in the background
   setInterval(freezeStarted, 5000);
   setInterval(flush, 1000);
-  setInterval(() => cur?.save(), 30e3);
+  setInterval(() => { cur?.save(); nxt?.save(); }, 30e3);
+  setTimeout(logSummary, 90e3); setInterval(logSummary, 30 * 60e3);
 }
 
-function saveNow() { try { cur?.save(true); } catch (e) { log('odds save', e.message); } }
+function saveNow() { try { cur?.save(true); nxt?.save(true); } catch (e) { log('odds save', e.message); } }
 
 // ---------------------------------------------------------------- views
 function bookList(D) {
@@ -468,14 +570,14 @@ function bookList(D) {
   return BOOKS.filter(b=>fed.has(b.key) || !b.catalogOnly).map(({ key, name, short, nv, sharp, link, ios }) => ({ key, name, short, nv: !!nv, sharp: !!sharp, feed: fed.has(key), site: link || null, ios: ios || null }));
 }
 
-function sourceInfo() {
-  const D = current();
+function sourceInfo(S = TODAY) {
+  const D = S.odds();
   return Object.fromEntries([...SOURCE_NAMES, 'owls', 'sharp'].map((name) => {
-    if(name==='sharp') return [name,{...(status.sharp || {}),...(sharpFeed?.status() || {state:'disabled'})}];
-    if(name==='owls') return [name,{...(status.owls || {}),...(owlsFeed?.status() || {state:'disabled'})}];
-    const s = status[name], job = jobs.get(name), rows = [];
+    if(name==='sharp') return [name,{...(S.status.sharp || {}),...(sharpFeed?.status() || {state:'disabled'})}];
+    if(name==='owls') return [name,{...(S.status.owls || {}),...(owlsFeed?.status() || {state:'disabled'})}];
+    const s = S.status[name] || {}, job = S.jobs.get(name), rows = [];
     for (const G of Object.values(D?.games || {})) for (const group of [G.srcs?.[name], G.f5src?.[name]]) for (const L of Object.values(group || {})) rows.push(...Object.values(L.quote_meta || {}).flatMap(Object.values));
-    if (name === 'an') for (const live of liveQuotes.values()) for (const L of Object.values(live.books)) rows.push(...Object.values(L.quote_meta || {}).flatMap(Object.values));
+    if (name === 'an' && S.live) for (const live of liveQuotes.values()) for (const L of Object.values(live.books)) rows.push(...Object.values(L.quote_meta || {}).flatMap(Object.values));
     const clocks = rows.map((q) => Date.parse(q.source_observed_at)).filter(Number.isFinite);
     return [name, { state: job?.promise ? 'loading' : s.date && s.date !== D?.date ? 'waiting' : s.state || (s.at ? 'ok' : 'waiting'), date: s.date || null, requested_date: D?.date || null,
       checked_at: s.at || null, received_at: s.at ? new Date(s.at).toISOString() : null, last_success_at: s.last_success_at || s.at || null,
@@ -486,7 +588,8 @@ function sourceInfo() {
   }));
 }
 function coverageFor(D, projected) {
-  const active = D?.date === ctx?.today()?.date ? dayGames().filter((g) => openFor(D, g, 'an') || g.state === 'Live') : [];
+  const today = D?.date === ctx?.today()?.date, next = !today && !!D && D === nxt && D.date === ctx?.next?.()?.date;
+  const active = today ? dayGames().filter((g) => openFor(D, g, 'an') || g.state === 'Live') : next ? nextGames().filter((g) => openFor(D, g, 'an')) : [];
   const out = { active_games: active.length, games_with_prices: 0, books_with_prices: 0, markets: {}, missing: [],
     fresh_selections: 0, aging_selections: 0, stale_selections: 0, unverified_selections: 0, suspended_selections: 0, conflicted_selections: 0, by_book: {} };
   const gamesWithPrices = new Set(), booksWithPrices = new Set();
@@ -512,21 +615,39 @@ function coverageFor(D, projected) {
   out.games_with_prices = gamesWithPrices.size; out.books_with_prices = booksWithPrices.size;
   return out;
 }
-function emitStatus() {
+// Status for one tracked day. Both carry the next-day summary, so "how much of tomorrow is priced" stays current.
+function emitStatus(S = TODAY) {
   if (!ctx?.emit) return;
+  if (S === NEXT) {
+    const N = nextCurrent();
+    if (!N) return;
+    const data = snapshot(N.date);
+    ctx.emit('odds_status', { date: N.date, now: Date.now(), sources: data.sources, coverage: data.coverage, refresh: data.refresh, next: nextSummary() });
+    return;
+  }
   const data = snapshot();
-  ctx.emit('odds_status', { date: ctx?.today()?.date || null, now: Date.now(), sources: data.sources, coverage: data.coverage, refresh: data.refresh });
+  ctx.emit('odds_status', { date: ctx?.today()?.date || null, now: Date.now(), sources: data.sources, coverage: data.coverage, refresh: data.refresh, next: data.next });
 }
 
-// { games, books, moves } for the snapshot (today, or a past day from history).
+// How much of the next day's slate has prices yet: today's board uses it to point there once today's games are under way.
+function nextSummary() {
+  const N = nextCurrent();
+  if (!N) return null;
+  const games = nextGames();
+  const priced = games.filter((g) => Object.entries(N.games[g.pk]?.books || {}).some(([k, L]) => k !== 'open' && (L?.ml?.[0] != null || L?.t?.line != null))).length;
+  return { date: N.date, games: games.length, priced };
+}
+
+// { games, books, moves } for the snapshot (today, the next day's slate, or a past day from history).
 function snapshot(date) {
   const D = date ? dayFor(date) : current();
+  const S = !date || date === ctx?.today()?.date ? TODAY : D && D === nxt && date === ctx?.next?.()?.date ? NEXT : null;
   const pks = new Set(Object.keys(D?.games || {}));
   if (D?.date === ctx?.today()?.date) for (const pk of knownLivePks) pks.add(String(pk));
   const games = Object.fromEntries([...pks].map((pk) => [pk, publicOdds(D, pk)]));
-  const historical = !!date && date !== ctx?.today()?.date;
-  return { games, books: bookList(D), moves: D ? D.moves() : [], sources: historical ? {} : sourceInfo(), coverage: coverageFor(D, games),
-    refresh: historical ? { in_progress: false, requested_at: null, completed_at: null, next_allowed_at: 0, cooldown_ms: REFRESH_COOLDOWN_MS, result: 'historical' } : { ...refresh } };
+  return { games, books: bookList(D), moves: D ? D.moves() : [], sources: S ? sourceInfo(S) : {}, coverage: coverageFor(D, games),
+    refresh: S ? { ...S.refresh } : { in_progress: false, requested_at: null, completed_at: null, next_allowed_at: 0, cooldown_ms: REFRESH_COOLDOWN_MS, result: 'historical' },
+    ...(S === TODAY ? { next: nextSummary() } : {}) };
 }
 
 function forDate(date) {
@@ -534,7 +655,8 @@ function forDate(date) {
 }
 
 function game(pk) {
-  const D = current();
+  const D = current(), H = oddsDayFor(pk);
+  if (H && H !== D && H.has(pk)) return { odds: publicOdds(H, pk), hist: H.full(pk) };
   if (D && (D.has(pk) || knownLivePks.has(Number(pk)))) return { odds: publicOdds(D, pk), hist: D.full(pk) };
   for (const P of past.values()) if (P.has(pk)) return { odds: publicOdds(P, pk), hist: P.full(pk) };
   return null;
@@ -559,7 +681,9 @@ function closeOf(pk, start) {
 }
 
 function healthInfo() {
-  return { status, sources: sourceInfo(), coverage: snapshot().coverage, refresh: { ...refresh }, hosts: health(), liveGames: liveQuotes.size, liveMaxAgeMs: LIVE_MAX_AGE_MS, games: cur ? Object.keys(cur.games).length : 0, date: cur?.date || null };
+  const N = nextCurrent();
+  return { status, sources: sourceInfo(), coverage: snapshot().coverage, refresh: { ...refresh }, hosts: health(), liveGames: liveQuotes.size, liveMaxAgeMs: LIVE_MAX_AGE_MS, games: cur ? Object.keys(cur.games).length : 0, date: cur?.date || null,
+    next: N ? { date: N.date, scheduled: nextGames().length, games: Object.keys(N.games).length, summary: nextSummary(), status: nextStatus, sources: sourceInfo(NEXT), coverage: snapshot(N.date).coverage, refresh: { ...nextRefresh } } : null };
 }
 
 module.exports = { start, snapshot, forDate, game, closeOf, healthInfo, saveNow, keys, requestRefresh };

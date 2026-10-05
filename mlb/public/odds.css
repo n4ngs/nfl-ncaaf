@@ -196,6 +196,10 @@ button.odds-tp:hover{background:var(--fill)}
 .odds-grp{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:var(--s4) 0 12px}
 .odds-grp h3{margin:0;font-size:17px;font-weight:600;letter-spacing:-.02em}
 .odds-grp span{font-size:13px;color:var(--ink-2)}
+.odds-next{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0;padding:14px 16px}
+.odds-next b{display:block;font-size:15px;font-weight:650;letter-spacing:-.01em}
+.odds-next span{display:block;margin-top:2px;font-size:13px;color:var(--ink-2)}
+.odds-next .lbtn{flex:none;min-height:44px;background:var(--fill);color:var(--ink)}
 .odds-done summary{list-style:none;cursor:pointer}
 .odds-done summary::-webkit-details-marker{display:none}
 .odds-done summary span{display:inline-flex;align-items:center;gap:6px}
