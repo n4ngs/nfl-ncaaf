@@ -44,7 +44,7 @@ function configuration(c = {}) {
 }
 function configFromEnv(env = process.env) { return configuration({ pregame_max_age_ms: env.CLV_PREGAME_MAX_AGE_MS, live_max_age_ms: env.CLV_LIVE_MAX_AGE_MS, closing_max_age_ms: env.CLV_CLOSING_MAX_AGE_MS, aging_ratio: env.CLV_AGING_RATIO }); }
 // Memory residency windows (see IntegrityStore). Hours from env; unset = default; 0 = keep forever (the old behaviour).
-const RESIDENT_HOURS = Object.freeze({ pregame: 72, live: 12, resolution: 12 });
+const RESIDENT_HOURS = Object.freeze({ pregame: 72, live: 6, resolution: 12 });
 function windowMs(value, hours) {
   if (value === undefined || value === null || value === '') return hours * 3600e3;
   const x = Number(value); return Number.isFinite(x) && x >= 0 ? x * 3600e3 : hours * 3600e3;
@@ -217,9 +217,11 @@ class IntegrityStore {
      2026-09-28 the NCAAF engine could no longer finish loading inside V8's ~4 GB heap and restarted every ~2 minutes.
      The journal on disk stays complete and append-only; `residency` bounds what is held in RAM, by EVENT:
        - a pregame quote stays resident until its event is `pregameMs` past scheduled start, a live quote `liveMs`,
-         a resolution `resolutionMs` (residencyFromEnv: 72 h / 12 h / 12 h, env CLV_RESIDENT_*_HOURS, 0 = forever);
-       - never evicted: the whole event of any bet entry, every (event, market, book) series a model signal was recorded
-         on, every snapshot an entry, signal or resident resolution points to, and any row without a parseable start.
+         a resolution `resolutionMs` (residencyFromEnv: 72 h / 6 h / 12 h, env CLV_RESIDENT_*_HOURS, 0 = forever).
+         Live quotes are never CLV evidence (a live entry is ineligible), so their window only has to outlast the game;
+       - never evicted: the whole event of any bet entry (bets are graded in memory), every snapshot an entry, signal or
+         resident resolution points to, and any row without a parseable start. Model signals are scored offline from
+         the journal files, never in memory, so a signal keeps only its own entry snapshot resident.
      Cold rows are skipped at load by a field scan (no JSON.parse), dropped from memory by sweep(), and new observations
      or resolutions for cold events are not journaled, so an evicted row can never return as a conflicting duplicate.
      Without `residency` (the default) nothing changes: everything stays resident. */
@@ -232,12 +234,12 @@ class IntegrityStore {
     this.lastKept = new Map(); this.seen = new Map(); this.compaction = { loaded_repeats_skipped: 0, repeats_not_journaled: 0 };
     this.now = typeof now === 'function' ? now : Date.now;
     this.residency = { pregameMs: n(residency?.pregameMs) || 0, liveMs: n(residency?.liveMs) || 0, resolutionMs: n(residency?.resolutionMs) || 0 };
-    this.betEvents = new Set(); this.signalSeries = new Set(); this.kickCache = new Map();
+    this.betEvents = new Set(); this.kickCache = new Map();
     this.residencyStats = { skipped_cold_snapshots: 0, skipped_cold_resolutions: 0, evicted_snapshots: 0, evicted_resolutions: 0, cold_not_journaled: 0, cold_resolutions_not_journaled: 0, load_ms: 0 };
     const resident = this.residencyOn(), loadNow = this.now(), loadStarted = Date.now();
     const referenced = new Set(); let loadingSnapshots = false;
     for (const [kind, map, id] of [['entries', this.entries, 'entry_id'], ['signals', this.signals, 'signal_id'], ['resolutions', this.resolutions, 'resolution_id'], ['snapshots', this.snapshots, 'snapshot_id']]) {
-      if (kind === 'resolutions') { for (const r of this.entries.values()) this.noteEvidence(r, 'entry'); for (const r of this.signals.values()) this.noteEvidence(r, 'signal'); }
+      if (kind === 'resolutions') for (const r of this.entries.values()) this.noteBet(r);
       if (kind === 'snapshots') {
         loadingSnapshots = true;
         for (const r of [...this.entries.values(), ...this.signals.values()]) if (r.entry_snapshot_id) referenced.add(r.entry_snapshot_id);
@@ -284,13 +286,9 @@ class IntegrityStore {
     if (resident && n(sweepMs) > 0) { this.sweepTimer = setInterval(() => { try { this.sweep(); } catch { /* memory hygiene never takes the engine down */ } }, n(sweepMs)); this.sweepTimer.unref?.(); }
   }
   residencyOn() { const r = this.residency; return !!(r.pregameMs || r.liveMs || r.resolutionMs); }
-  // Bets pin their whole event; a model signal pins its (event, market, book) series: the rows its CLV is graded from.
-  noteEvidence(r, kind) {
-    const event = String(r?.canonical_event_id || r?.event_id || ''); if (!event) return;
-    if (kind === 'entry') this.betEvents.add(event);
-    else if (r.market_type && r.sportsbook) this.signalSeries.add(`${event}|${marketType(r.market_type)}|${r.sportsbook}`);
-  }
-  pinned(event, market, book) { event = String(event); return this.betEvents.has(event) || this.signalSeries.has(`${event}|${marketType(market)}|${book}`); }
+  // A bet pins its whole event: tickets are graded (and re-graded) from these rows in memory.
+  noteBet(r) { const event = String(r?.canonical_event_id || r?.event_id || ''); if (event) this.betEvents.add(event); }
+  pinned(event) { return this.betEvents.has(String(event)); }
   // Every row of a game carries the same scheduled start: parse each distinct string once (same rules as ms()).
   kickMs(start) {
     if (typeof start !== 'string') return null;
@@ -301,12 +299,12 @@ class IntegrityStore {
   coldQuote(event, start, isLive, market, book, now = this.now()) {
     const win = isLive === true ? this.residency.liveMs : this.residency.pregameMs;
     if (!win) return false;
-    const t = this.kickMs(start); return t !== null && t < now - win && !this.pinned(event, market, book);
+    const t = this.kickMs(start); return t !== null && t < now - win && !this.pinned(event);
   }
   coldResolution(event, start, market, book, now = this.now()) {
     const win = this.residency.resolutionMs;
     if (!win) return false;
-    const t = this.kickMs(start); return t !== null && t < now - win && !this.pinned(event, market, book);
+    const t = this.kickMs(start); return t !== null && t < now - win && !this.pinned(event);
   }
   // Load-time scan: true = a cold row, counted and left on disk unparsed. Anything it cannot read exactly is parsed as before.
   coldLine(kind, text, s, e, now, referenced) {
@@ -492,7 +490,7 @@ class IntegrityStore {
     const record = { ...entry, resolver_version: RESOLVER_VERSION };
     const old = this.entries.get(entry.entry_id); if (old) { if (stable(old) !== stable(record)) throw new Error('Cannot mutate an immutable bet entry'); return old; }
     if (entry.entry_snapshot_id && !this.findEntry(entry)) throw new Error('Entry snapshot is not observable at the captured wager time and price');
-    const saved = this.append('entries', record); this.entries.set(entry.entry_id, saved); this.noteEvidence(saved, 'entry'); return saved;
+    const saved = this.append('entries', record); this.entries.set(entry.entry_id, saved); this.noteBet(saved); return saved;
   }
   recordSignal(input = {}) {
     const entry = entryInfo(input), prediction = utc(input.prediction_created_at), features = utc(input.features_as_of);
@@ -506,13 +504,13 @@ class IntegrityStore {
     const record = { ...entry, event_id: entry.canonical_event_id, model_version: String(input.model_version), feature_version: String(input.feature_version), prediction_created_at: prediction, features_as_of: features, predicted_probability: probability, predicted_line: line, signal_direction: input.signal_direction, signal_strength: input.signal_strength, resolver_version: RESOLVER_VERSION };
     record.signal_id = input.signal_id || hash(record);
     const old = this.signals.get(record.signal_id); if (old) { if (stable(old) !== stable(record)) throw new Error('Cannot mutate an immutable signal'); return old; }
-    const saved = this.append('signals', record); this.signals.set(record.signal_id, saved); this.noteEvidence(saved, 'signal'); return saved;
+    const saved = this.append('signals', record); this.signals.set(record.signal_id, saved); return saved;
   }
   health() {
     const R = this.residency;
     return { ok: !this.errors.length, resolver_version: RESOLVER_VERSION, sport: this.sport, snapshots: this.snapshots.size, signals: this.signals.size, entries: this.entries.size, resolutions: this.resolutions.size, journal_errors: this.errors, thresholds: { ...this.config },
       compaction: { ...this.compaction },
-      residency: { enabled: this.residencyOn(), window_hours: { pregame: R.pregameMs / 3600e3, live: R.liveMs / 3600e3, resolution: R.resolutionMs / 3600e3 }, bet_events: this.betEvents.size, signal_series: this.signalSeries.size, ...this.residencyStats } };
+      residency: { enabled: this.residencyOn(), window_hours: { pregame: R.pregameMs / 3600e3, live: R.liveMs / 3600e3, resolution: R.resolutionMs / 3600e3 }, bet_events: this.betEvents.size, ...this.residencyStats } };
   }
 }
 

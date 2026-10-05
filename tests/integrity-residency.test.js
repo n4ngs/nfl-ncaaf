@@ -28,7 +28,8 @@ test('load keeps warm, bet and signal evidence in memory and leaves cold rows on
   const writer = new IntegrityStore({ dataDir: dir, sport: 'ncaaf', now: () => clock });   // residency off: every row resident
   const old = ev('old'), placed = ev('bet'), next = ev('new', KICK + 5 * 24 * H);
   const a = quote(writer, old, { at: KICK - 60 * 60e3 });                          // pregame, circa: cold by the reload
-  const b = quote(writer, old, { book: 'dk', at: KICK - 50 * 60e3, odds: -115 });   // pregame, dk: a model signal pins this series
+  const b = quote(writer, old, { book: 'dk', at: KICK - 50 * 60e3, odds: -115 });   // pregame, dk: a model signal's entry quote
+  const b2 = quote(writer, old, { book: 'dk', at: KICK - 45 * 60e3, odds: -118 });  // the same dk series, not referenced
   const c = quote(writer, old, { at: KICK + 30 * 60e3, live: true, odds: -150 });   // live: cold by the reload
   const d = quote(writer, placed, { at: KICK - 40 * 60e3 });                       // a bet is placed on this event
   const e = quote(writer, next, { at: KICK + 4 * 24 * H });                        // next week's game: warm
@@ -43,16 +44,17 @@ test('load keeps warm, bet and signal evidence in memory and leaves cold rows on
   const s = new IntegrityStore({ dataDir: dir, sport: 'ncaaf', residency: WIN, now: () => clock, log: (m) => logged.push(m), sweepMs: 0 });
   assert.equal(s.health().ok, true);
   assert.ok(!s.snapshots.has(a.snapshot_id), 'cold pregame quote stays on disk only');
-  assert.ok(s.snapshots.has(b.snapshot_id), 'a model signal pins its (event, market, book) series');
+  assert.ok(s.snapshots.has(b.snapshot_id), "a model signal keeps its own entry quote resident");
+  assert.ok(!s.snapshots.has(b2.snapshot_id), 'signals are scored offline: the rest of their series leaves memory');
   assert.ok(!s.snapshots.has(c.snapshot_id), 'cold live quote stays on disk only');
   assert.ok(s.snapshots.has(d.snapshot_id), 'a bet pins its whole event');
   assert.ok(s.snapshots.has(e.snapshot_id), 'upcoming games stay resident');
-  assert.deepEqual([s.residencyStats.skipped_cold_snapshots, s.residencyStats.skipped_cold_resolutions], [2, 1]);
+  assert.deepEqual([s.residencyStats.skipped_cold_snapshots, s.residencyStats.skipped_cold_resolutions], [3, 1]);
   assert.equal(s.rows(old, 's', 'home', 'circa').length, 0);
   assert.equal(fs.readFileSync(path.join(dir, 'integrity', 'snapshots.jsonl'), 'utf8'), before, 'the journal file is never rewritten');
-  assert.match(logged[0], /^\[integrity\] ncaaf: 3 snapshots \+ 0 resolutions in memory; 2 \+ 1 cold rows left on disk/);
+  assert.match(logged[0], /^\[integrity\] ncaaf: 3 snapshots \+ 0 resolutions in memory; 3 \+ 1 cold rows left on disk/);
   const all = new IntegrityStore({ dataDir: dir, sport: 'ncaaf' });                // a full load still sees every row
-  assert.equal(all.snapshots.size, 5); assert.equal(all.resolutions.size, 1); assert.equal(all.health().ok, true);
+  assert.equal(all.snapshots.size, 6); assert.equal(all.resolutions.size, 1); assert.equal(all.health().ok, true);
 });
 
 test('a cold event leaves memory and is never re-journaled, so a later full load finds no conflicting duplicates', () => {
@@ -84,7 +86,7 @@ test('a cold event leaves memory and is never re-journaled, so a later full load
   assert.equal(reload.snapshots.size, 2); assert.equal(reload.resolutions.size, 1);
 });
 
-test('bets and signals recorded at runtime are pinned against the sweep', () => {
+test('a bet recorded at runtime pins its event; a signal keeps only its entry quote', () => {
   const dir = tmp(); let clock = KICK - H;
   const s = new IntegrityStore({ dataDir: dir, sport: 'ncaaf', residency: WIN, now: () => clock, sweepMs: 0 });
   const g = ev('g2'), h = ev('g3');
@@ -92,13 +94,15 @@ test('bets and signals recorded at runtime are pinned against the sweep', () => 
   const sameEvent = quote(s, g, { book: 'dk', at: KICK - 30 * 60e3, odds: -120 });
   bet(s, 'e9', 'g2', q, KICK - 29 * 60e3);
   const pinned = quote(s, h, { book: 'fd', at: KICK - 30 * 60e3, odds: -105 });
+  const later = quote(s, h, { book: 'fd', at: KICK - 20 * 60e3, odds: -112 });
   const loose = quote(s, h, { book: 'mgm', at: KICK - 30 * 60e3, odds: -108 });
   signal(s, 's9', 'g3', 'fd', pinned, KICK - 29 * 60e3);
   clock = KICK + 30 * 24 * H;
   s.sweep();
   assert.ok(s.snapshots.has(q.snapshot_id) && s.snapshots.has(sameEvent.snapshot_id), 'the whole bet event stays');
-  assert.ok(s.snapshots.has(pinned.snapshot_id), 'the signal series stays');
-  assert.ok(!s.snapshots.has(loose.snapshot_id), 'other books on a signal-only event leave memory');
+  assert.ok(s.snapshots.has(pinned.snapshot_id), "the signal's entry quote stays");
+  assert.ok(!s.snapshots.has(later.snapshot_id) && !s.snapshots.has(loose.snapshot_id), 'everything else on a signal-only event leaves memory');
+  assert.equal(s.health().residency.bet_events, 1);
   assert.equal(s.evaluateEntry(s.entries.get('e9'), g).entry.snapshot_id, q.snapshot_id, 'the bet still grades from its own evidence');
 });
 
@@ -109,7 +113,7 @@ test('residency is off unless asked for, and the env windows parse safely', () =
   clock = KICK + 365 * 24 * H;
   assert.deepEqual(s.sweep(), { snapshots: 0, resolutions: 0 });
   assert.ok(s.snapshots.has(q.snapshot_id)); assert.equal(s.health().residency.enabled, false);
-  assert.deepEqual(residencyFromEnv({}), WIN);
+  assert.deepEqual(residencyFromEnv({}), { ...WIN, liveMs: 6 * H });
   assert.deepEqual(residencyFromEnv({ CLV_RESIDENT_PREGAME_HOURS: '0', CLV_RESIDENT_LIVE_HOURS: 'junk', CLV_RESIDENT_RESOLUTION_HOURS: '24' }),
-    { pregameMs: 0, liveMs: 12 * H, resolutionMs: 24 * H });
+    { pregameMs: 0, liveMs: 6 * H, resolutionMs: 24 * H });
 });
