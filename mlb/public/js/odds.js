@@ -184,7 +184,7 @@ function oddsPairFresh(L, mkt) {
   return !!(a?.actionable && b?.actionable && a.source && a.source === b.source && a.source_observed_at === b.source_observed_at && (mkt === 'ml' || (mkt === 't' ? a.line === b.line : a.line === -b.line)));
 }
 const oddsStale = (L) => !['ml', 'rl', 't'].some((m) => (m === 't' ? ['over', 'under'] : ['home', 'away']).some((sd) => oddsQuote(L, m, sd)?.actionable));
-const oddsStateLabel = (p) => p?.feedOnly ? 'Feed quote' : ({ FRESH: 'Fresh', AGING: 'Aging', STALE: 'Stale', UNVERIFIED: 'Unverified', SUSPENDED: 'Suspended', CONFLICTED: 'Conflict' }[p?.freshness] || 'Unavailable');
+const oddsStateLabel = (p) => p?.feedOnly ? 'Feed quote' : ({ FRESH: 'Fresh', AGING: 'Aging', STALE: 'Stale', UNVERIFIED: 'Unavailable', SUSPENDED: 'Suspended', CONFLICTED: 'Conflict' }[p?.freshness] || 'Unavailable');
 function oddsQuoteNote(p) {
   if(p?.feedOnly) return `WebSocket feed quote · delivered ${oddsAgo(oddsStamp(p.provider_received_at))} · sportsbook observation time unavailable`;
   return p ? `${oddsStateLabel(p)} · ${p.source || 'Source unavailable'} · ${p.seen ? 'source ' + oddsAgo(p.seen) : 'source time unavailable'}` : 'No quote supplied';
@@ -388,7 +388,7 @@ function oddsViewHTML() {
       ${done.length ? `<details class="odds-done" id="oddsDone"${wasOpen || (!live.length && !soon.length) ? ' open' : ''}><summary class="odds-grp"><h2>Final & off board</h2><span>${done.length} · recorded prices ${ICON.chev}</span></summary>${block(done)}</details>` : ''}
       ${!shown.length ? `<div class="card empty"><b>No matching games</b>${ODDS.query ? `No team matches “${esc(ODDS.query)}”.` : 'This filter has no games on this day.'}<button type="button" class="lbtn" data-odds-reset>Clear filters</button></div>` : ''}
     </div></div>
-    <p class="odds-board-guide">${mkt === 'f5' ? 'First five innings moneyline. ' : ''}Fresh and aging book prices open a ticket (aging ones are labelled). Stale and unverified prices are reference only.<span class="odds-wide-guide"> Scroll across for every book →</span></p>
+    <p class="odds-board-guide">${mkt === 'f5' ? 'First five innings moneyline. ' : ''}Fresh and aging book prices open a ticket (aging ones are labelled). Stale and unavailable prices are reference only.<span class="odds-wide-guide"> Scroll across for every book →</span></p>
     ${oddsSourceStatus()}<details class="odds-context" id="oddsContext"${contextOpen ? ' open' : ''}><summary>Market analysis <span>Recorded moves · price comparisons ${ICON.chev}</span></summary><div>${S.isToday || (ODDS.next?.date && S.date === ODDS.next.date) ? oddsEdgeEntry() : ''}${oddsMovesHTML(games)}<button type="button" class="odds-link" data-bets-books>Sportsbook links ↗</button></div></details>`;
 }
 /* Once today has nothing left to bet pregame (every game under way or final, or no games at all), point at the next
@@ -448,7 +448,7 @@ function oddsCoverage(games, mkt) {
 }
 function oddsOverview(games, mkt) {
   const c = oddsCoverage(games, mkt), unknown = c.UNVERIFIED + c.SUSPENDED + c.CONFLICTED;
-  return `<div class="odds-overview" aria-label="Selected market quote coverage"><span class="odds-health" data-state="FRESH"><b>${c.FRESH}</b> current prices</span><span class="odds-health" data-state="AGING"><b>${c.AGING}</b> aging</span><span class="odds-health" data-state="STALE"><b>${c.STALE}</b> stale</span><span class="odds-health"><b>${unknown}</b> unverified / unavailable</span><span class="odds-coverage-books">${c.books} books · ${games.length} games</span></div>`;
+  return `<div class="odds-overview" aria-label="Selected market quote coverage"><span class="odds-health" data-state="FRESH"><b>${c.FRESH}</b> current prices</span><span class="odds-health" data-state="AGING"><b>${c.AGING}</b> aging</span><span class="odds-health" data-state="STALE"><b>${c.STALE}</b> stale</span><span class="odds-health"><b>${unknown}</b> unavailable</span><span class="odds-coverage-books">${c.books} books · ${games.length} games</span></div>`;
 }
 function oddsRefreshFeedback(refresh) {
   if (!refresh || refresh.in_progress) return '';

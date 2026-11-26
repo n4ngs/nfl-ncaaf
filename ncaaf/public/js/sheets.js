@@ -517,7 +517,7 @@ function paintSlip() {
       <label class="fld">Book on your ticket<select class="inp" id="slBook">${bookOpts}</select></label>
     </div>
     <details class="portfolio-entry-more"><summary>Wager time &amp; note <span>Recorded ${esc(timeLabel(sl.placed))}</span></summary><div class="fgrid">
-      <label class="fld full">Actual wager time (your timezone)<input class="inp" id="slPlaced" type="datetime-local" step="1" value="${esc(integrityLocalInput(sl.placed))}"><span class="hint">Use the time shown on your ticket. Earlier bets without captured quote evidence remain unverified.</span></label>
+      <label class="fld full">Actual wager time (your timezone)<input class="inp" id="slPlaced" type="datetime-local" step="1" value="${esc(integrityLocalInput(sl.placed))}"><span class="hint">Use the time shown on your ticket. Earlier bets without captured quote evidence remain unavailable.</span></label>
       <label class="fld full">Note<input class="inp" id="slNote" style="font-weight:500;font-size:15px" placeholder="Optional: why you like it" value="${esc(sl.note || '')}"></label>
     </div></details>
     <div class="err" id="slErr" role="alert"></div>

@@ -139,7 +139,7 @@ test('comparison tiles label stale and missing evidence but only fresh rows rece
   const html = f.run("betsSlipBooksHTML({pk:1,mkt:'ml',side:'home'},'mgm')");
   const stale = tile(html, 'BetMGM'), unknown = tile(html, 'Pinnacle'), fresh = tile(html, 'DraftKings');
   assert.match(stale, /disabled/); assert.match(stale, /Stale/); assert.doesNotMatch(stale, /Best|data-bets-book=/);
-  assert.match(unknown, /Unverified/); assert.match(unknown, /disabled/);
+  assert.match(unknown, /Unavailable/); assert.match(unknown, /disabled/);
   assert.match(fresh, /data-bets-book="dk"/); assert.match(fresh, /Fresh · Best/);
   f.O.books.dk.quote_meta.ml.home.actionable = false;
   assert.doesNotMatch(f.run("betsSlipBooksHTML({pk:1,mkt:'ml',side:'home'},'')"), /Best/);

@@ -64,7 +64,7 @@ function quoteStatusHTML(L, g, mkt, side) {
   const feedOnly = f.status === 'UNVERIFIED' && quoteIsDeliveryOnly(L, g, mkt, side);
   const title = feedOnly ? 'Provider delivery time is known; sportsbook observation time is unavailable. Not eligible for verified CLV.' : 'Age is measured from source observation time';
   if(f.status==='FRESH')return '<small class="quote-status-dot" aria-label="Recent source quote" title="Recently observed by the source. Open source details for the exact time."></small>';
-  return `<small class="integrity-fresh" data-state="${esc(f.status)}" title="${esc(title)}">${esc(feedOnly ? 'Feed quote' : ({AGING:'Aging',STALE:'Stale',SUSPENDED:'Suspended',CONFLICTED:'Conflict',UNVERIFIED:'Unverified'}[f.status] || f.status))}</small>`;
+  return `<small class="integrity-fresh" data-state="${esc(f.status)}" title="${esc(title)}">${esc(feedOnly ? 'Feed quote' : ({AGING:'Aging',STALE:'Stale',SUSPENDED:'Suspended',CONFLICTED:'Conflict',UNVERIFIED:'Unavailable'}[f.status] || f.status))}</small>`;
 }
 function canonicalResolution(g, mkt, side) {
   return g?.integrity?.markets?.[`${mkt}:${side}`] || g?.integrity?.markets?.[mkt]?.[side] || null;
@@ -104,10 +104,10 @@ function integrityShort(l) {
 }
 function provenanceLabel(value, fallback = 'Unavailable') {
   const labels = {
-    FRESH: 'Fresh', AGING: 'Aging', STALE: 'Stale', SUSPENDED: 'Suspended', UNVERIFIED: 'Unverified',
+    FRESH: 'Fresh', AGING: 'Aging', STALE: 'Stale', SUSPENDED: 'Suspended', UNVERIFIED: 'Unavailable',
     CONFLICTED: 'Conflicting evidence', VERIFIED: 'Verified close', PROVISIONAL: 'Provisional close', UNAVAILABLE: 'Unavailable',
     EVENT_NOT_STARTED: 'Awaiting kickoff', VERIFIED_ACTUAL_START: 'Verified kickoff', SCHEDULED_START: 'Scheduled kickoff',
-    ACTUAL_KICKOFF_UNAVAILABLE: 'Actual kickoff unverified', VERIFIED_ACTUAL_KICKOFF: 'Verified actual kickoff',
+    ACTUAL_KICKOFF_UNAVAILABLE: 'Actual kickoff unavailable', VERIFIED_ACTUAL_KICKOFF: 'Verified actual kickoff',
     SOURCE_CONFLICT: 'Conflicting evidence', STALE_CLOSE: 'Closing quote too old', MISSING_CLOSE: 'Closing quote unavailable',
     POST_KICK_CONTAMINATION: 'Only post-kickoff quotes available', MISSING_KICKOFF_TIMESTAMP: 'Kickoff time unavailable',
     SUSPENDED_MARKET: 'Market suspended', REMOVED_MARKET: 'Market removed', MISSING_SOURCE_TIMESTAMP: 'Source time unavailable',
@@ -151,12 +151,12 @@ function integrityGamePanel(g) {
     const closeStatus = r.close_status || 'UNAVAILABLE';
     const pending = !r.close && r.reason_code === 'EVENT_NOT_STARTED';
     const reason = provenanceLabel(r.reason_code, 'Closing evidence unavailable');
-    const basis = provenanceLabel(r.kickoff_basis, 'Kickoff unverified');
+    const basis = provenanceLabel(r.kickoff_basis, 'Kickoff unavailable');
     const currentSource = r.current ? `<div class="provenance-current-meta"><span>Current quote via ${esc(provenanceSource(r.current.source))}</span>${provenanceTime(r.current.source_observed_at)}</div>` : '';
     audit.push(`<div class="provenance-audit-market"><h4>${esc(label)}</h4><dl>${[['Opening',r.open],['Current',r.current],['Close',r.close]].map(([phase,q]) => `<div><dt>${phase}</dt><dd>${q ? `${esc(integrityUTC(q.source_observed_at))}<br>${esc(provenanceBook(q.sportsbook))} · ${esc(provenanceSource(q.source))}<br><span class="provenance-id">Snapshot: ${esc(q.snapshot_id || 'unavailable')}</span>` : 'No eligible quote'}</dd></div>`).join('')}<div><dt>Closing check</dt><dd>${esc(basis)} · ${esc(reason)}<br><code>${esc(closeStatus)} · ${esc(r.kickoff_basis || 'UNAVAILABLE')} · ${esc(r.reason_code || 'MISSING_CLOSE')}</code></dd></div></dl></div>`);
     return `<article class="provenance-market"><h4>${esc(label)}</h4><div class="provenance-quotes">${provenanceQuote(r.open,m,'Opening',null)}${provenanceQuote(r.current,m,'Current',fresh)}${provenanceQuote(r.close,m,'Close',pending ? null : closeStatus,pending ? 'Awaiting kickoff' : provenanceLabel(closeStatus))}</div>${currentSource}${pending ? '' : `<p class="provenance-close-note">${esc(r.close ? closeStatus === 'VERIFIED' ? basis : basis + ' · ' + reason : reason)}</p>`}</article>`;
   }).filter(Boolean);
-  return `<section class="card integrity-panel provenance-panel" aria-label="Market provenance"><header class="provenance-head"><div><p class="provenance-eyebrow">Quote history</p><h3>Market provenance</h3></div><span class="provenance-kind">Market history</span></header><p class="provenance-intro">Earliest recorded prices, current quotes and closing evidence. Earned CLV requires a timestamped entry snapshot.</p>${rows.length ? `<div class="provenance-markets">${rows.join('')}</div><details class="provenance-details"><summary>Source details<span aria-hidden="true">+</span></summary><div class="provenance-audit"><p>RETROSPECTIVE MARKET MOVE · Opening-to-current or opening-to-close movement describes market history. It is not earned CLV.</p>${audit.join('')}</div></details>` : '<div class="provenance-empty"><b>Quote history unavailable</b><p>These historical lines have no canonical quote evidence. Source, timing and closing status remain unverified.</p></div>'}</section>`;
+  return `<section class="card integrity-panel provenance-panel" aria-label="Market provenance"><header class="provenance-head"><div><p class="provenance-eyebrow">Quote history</p><h3>Market provenance</h3></div><span class="provenance-kind">Market history</span></header><p class="provenance-intro">Earliest recorded prices, current quotes and closing evidence. Earned CLV requires a timestamped entry snapshot.</p>${rows.length ? `<div class="provenance-markets">${rows.join('')}</div><details class="provenance-details"><summary>Source details<span aria-hidden="true">+</span></summary><div class="provenance-audit"><p>RETROSPECTIVE MARKET MOVE · Opening-to-current or opening-to-close movement describes market history. It is not earned CLV.</p>${audit.join('')}</div></details>` : '<div class="provenance-empty"><b>Quote history unavailable</b><p>These historical lines have no canonical quote evidence. Source, timing and closing status remain unavailable.</p></div>'}</section>`;
 }
 const integritySignals = new Map();
 function recordDisplayedSignal(g, e, model = 'edge-existing-v1') {
